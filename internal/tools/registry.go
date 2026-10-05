@@ -1,0 +1,161 @@
+// Package tools is the single mutation surface of Simon CAD. The agent, the CLI and
+// (from Phase 2) the UI all invoke tools; a mutating tool never touches the model — it
+// returns a Plan of commands that become a ChangeSet.
+package tools
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/accelone/simoncad/internal/cadir"
+	"github.com/accelone/simoncad/internal/commands"
+	"github.com/accelone/simoncad/internal/geometry/rebuild"
+	"github.com/accelone/simoncad/internal/history"
+)
+
+// Env is what tools may read. It is implemented by the app composition root.
+type Env interface {
+	Graph() *cadir.Graph
+	Model() (*rebuild.Model, error)
+	Now() time.Time
+	// Provenance for nodes created by the current call (creator, capability, tool call id, model).
+	Provenance() cadir.Provenance
+	NextChangeSetID() string
+	SelectionRefs() []string
+	Checkpoints() *history.Log
+	// Export writes the current model ("step" or "stl") and returns a summary.
+	Export(format, path string, deflection float64) (map[string]any, error)
+}
+
+// Args are decoded, schema-validated tool arguments.
+type Args map[string]any
+
+func (a Args) Has(k string) bool { _, ok := a[k]; return ok }
+func (a Args) Str(k string) string {
+	s, _ := a[k].(string)
+	return s
+}
+func (a Args) Num(k string) float64 { f, _ := a[k].(float64); return f }
+func (a Args) NumOr(k string, d float64) float64 {
+	if f, ok := a[k].(float64); ok {
+		return f
+	}
+	return d
+}
+func (a Args) Bool(k string) bool { b, _ := a[k].(bool); return b }
+
+// Plan is the result of preparing a mutating tool.
+type Plan struct {
+	Commands    []commands.Command
+	Intent      string
+	Explanation string
+}
+
+// Tool is one registered capability-tagged operation.
+type Tool struct {
+	Name        string
+	Description string
+	Capability  string
+	Schema      map[string]any
+	// Plan is set for tools that edit the model.
+	Plan func(env Env, a Args) (*Plan, error)
+	// Query is set for read-only (or file-exporting) tools.
+	Query func(env Env, a Args) (any, error)
+}
+
+func (t *Tool) Mutating() bool { return t.Plan != nil }
+
+type Registry struct {
+	tools map[string]*Tool
+	order []string
+}
+
+func NewRegistry() *Registry { return &Registry{tools: map[string]*Tool{}} }
+
+func (r *Registry) Register(t *Tool) {
+	if _, dup := r.tools[t.Name]; dup {
+		panic("duplicate tool " + t.Name)
+	}
+	if (t.Plan == nil) == (t.Query == nil) {
+		panic("tool " + t.Name + " must define exactly one of Plan or Query")
+	}
+	r.tools[t.Name] = t
+	r.order = append(r.order, t.Name)
+}
+
+func (r *Registry) Get(name string) (*Tool, bool) { t, ok := r.tools[name]; return t, ok }
+
+// Subset returns the tools of a capability in registration order.
+func (r *Registry) Subset(capability string) []*Tool {
+	var out []*Tool
+	for _, n := range r.order {
+		if t := r.tools[n]; t.Capability == capability {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func (r *Registry) Names() []string {
+	n := append([]string(nil), r.order...)
+	sort.Strings(n)
+	return n
+}
+
+// Result of invoking a tool.
+type Result struct {
+	Tool string
+	Plan *Plan // mutating tools
+	Data any   // query tools
+}
+
+// Decode strictly parses raw JSON arguments (numbers as float64, no trailing data).
+func Decode(raw []byte) (Args, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return Args{}, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil {
+		return nil, fmt.Errorf("arguments are not a valid JSON object: %w", err)
+	}
+	if dec.More() {
+		return nil, fmt.Errorf("unexpected data after arguments")
+	}
+	if m == nil {
+		m = map[string]any{}
+	}
+	return Args(m), nil
+}
+
+// Invoke runs the pipeline: tool lookup → JSON-schema validation → semantic validation
+// (inside Plan/Query) → plan or result. Only registered tools can be called.
+func (r *Registry) Invoke(env Env, name string, raw []byte) (*Result, error) {
+	t, ok := r.tools[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown tool %q (available: %s)", name, strings.Join(r.Names(), ", "))
+	}
+	args, err := Decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateSchema(t.Schema, map[string]any(args)); err != nil {
+		return nil, fmt.Errorf("invalid arguments for %s: %w", name, err)
+	}
+	if t.Plan != nil {
+		p, err := t.Plan(env, args)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		return &Result{Tool: name, Plan: p}, nil
+	}
+	data, err := t.Query(env, args)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	return &Result{Tool: name, Data: data}, nil
+}
