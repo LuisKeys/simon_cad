@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,24 +154,26 @@ func TestClaudeProviderWireFormat(t *testing.T) {
 	}
 }
 
-func TestOpenAIWireFormatAndToolRoundTrip(t *testing.T) {
+func TestOpenAIResponsesWireFormatAndToolRoundTrip(t *testing.T) {
 	var got map[string]any
 	var auth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("authorization")
-		if r.URL.Path != "/v1/chat/completions" {
+		if r.URL.Path != "/v1/responses" {
 			t.Errorf("path %s", r.URL.Path)
 		}
 		json.NewDecoder(r.Body).Decode(&got)
-		w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_7","type":"function","function":{"name":"create_box","arguments":"{\"dx\":1,\"dy\":2,\"dz\":3}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":3}}`))
+		w.Write([]byte(`{"status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"abc","summary":[]},{"type":"function_call","call_id":"call_7","name":"create_box","arguments":"{\"dx\":1,\"dy\":2,\"dz\":3}"}],"usage":{"input_tokens":5,"output_tokens":3}}`))
 	}))
 	defer srv.Close()
-	o := &runtime.OpenAI{Flavor: "openai", APIKey: "k", BaseURL: srv.URL, Model: "m", HTTP: srv.Client()}
+	o := &runtime.OpenAI{Flavor: "openai", APIKey: "k", BaseURL: srv.URL, Model: "m", HTTP: srv.Client(), ReasoningEffort: "medium"}
 	resp, err := o.Complete(context.Background(), runtime.Request{
 		System: "sys",
 		Messages: []runtime.Message{
 			{Role: "user", Content: []runtime.Block{{Type: "text", Text: "hi"}}},
-			{Role: "assistant", Content: []runtime.Block{{Type: "tool_use", ID: "c1", Name: "get_model_summary", Input: json.RawMessage(`{}`)}}},
+			{Role: "assistant", Content: []runtime.Block{
+				{Type: "reasoning", Input: json.RawMessage(`{"type":"reasoning","id":"rs_0","encrypted_content":"x"}`)},
+				{Type: "tool_use", ID: "c1", Name: "get_model_summary", Input: json.RawMessage(`{}`)}}},
 			{Role: "user", Content: []runtime.Block{{Type: "tool_result", ToolUseID: "c1", Content: `{"ok":true}`}}},
 		},
 		Tools: []runtime.ToolDef{{Name: "create_box", Description: "d", InputSchema: map[string]any{"type": "object"}}},
@@ -178,19 +181,42 @@ func TestOpenAIWireFormatAndToolRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if auth != "Bearer k" || got["max_completion_tokens"] == nil || got["tools"] == nil {
+	if auth != "Bearer k" || got["max_output_tokens"] == nil || got["tools"] == nil || got["instructions"] != "sys" ||
+		got["reasoning"].(map[string]any)["effort"] != "medium" {
 		t.Fatalf("request: auth=%q body=%v", auth, got)
 	}
-	msgs := got["messages"].([]any)
-	roles := []string{}
-	for _, m := range msgs {
-		roles = append(roles, m.(map[string]any)["role"].(string))
+	kinds := []string{}
+	for _, it := range got["input"].([]any) {
+		m := it.(map[string]any)
+		if k, ok := m["type"].(string); ok {
+			kinds = append(kinds, k)
+		} else {
+			kinds = append(kinds, m["role"].(string))
+		}
 	}
-	if len(roles) != 4 || roles[0] != "system" || roles[2] != "assistant" || roles[3] != "tool" {
-		t.Fatalf("message roles %v", roles)
+	if want := "user,reasoning,function_call,function_call_output"; strings.Join(kinds, ",") != want {
+		t.Fatalf("input items %v", kinds)
 	}
 	if uses := resp.ToolUses(); len(uses) != 1 || uses[0].ID != "call_7" || string(uses[0].Input) != `{"dx":1,"dy":2,"dz":3}` || resp.Usage.InputTokens != 5 {
 		t.Fatalf("response %+v", resp)
+	}
+	if len(resp.Content) != 2 || resp.Content[0].Type != "reasoning" {
+		t.Fatalf("reasoning block not preserved: %+v", resp.Content)
+	}
+}
+
+func TestOllamaUsesChatCompletions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{}}`))
+	}))
+	defer srv.Close()
+	o := &runtime.OpenAI{Flavor: "ollama", BaseURL: srv.URL, Model: "m", HTTP: srv.Client()}
+	resp, err := o.Complete(context.Background(), runtime.Request{Messages: []runtime.Message{{Role: "user", Content: []runtime.Block{{Type: "text", Text: "hi"}}}}})
+	if err != nil || resp.Text() != "ok" {
+		t.Fatalf("resp=%+v err=%v", resp, err)
 	}
 }
 

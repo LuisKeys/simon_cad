@@ -11,14 +11,17 @@ import (
 	"time"
 )
 
-// OpenAI speaks the Chat Completions wire format. It serves both OpenAI and Ollama
-// (which exposes the same API under /v1), selected by BaseURL and Flavor.
+// OpenAI serves OpenAI (Responses API, so reasoning models can use function tools) and
+// Ollama (Chat Completions under /v1), selected by BaseURL and Flavor.
 type OpenAI struct {
 	Flavor  string // "openai" or "ollama"
 	APIKey  string // optional for ollama
 	BaseURL string
 	Model   string
 	HTTP    *http.Client
+	// ReasoningEffort (none|low|medium|high...) is sent on the OpenAI Responses API;
+	// empty leaves the model default.
+	ReasoningEffort string
 }
 
 func (o *OpenAI) Name() string { return o.Flavor + ":" + o.Model }
@@ -92,12 +95,10 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	if max == 0 {
 		max = 4096
 	}
-	body := map[string]any{"model": model, "messages": toOpenAIMessages(req.System, req.Messages)}
 	if o.Flavor == "openai" {
-		body["max_completion_tokens"] = max
-	} else {
-		body["max_tokens"] = max
+		return o.completeResponses(ctx, model, max, req)
 	}
+	body := map[string]any{"model": model, "messages": toOpenAIMessages(req.System, req.Messages), "max_tokens": max}
 	if len(req.Tools) > 0 {
 		var tools []map[string]any
 		for _, t := range req.Tools {
@@ -110,6 +111,47 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	data, err := o.post(ctx, "/v1/chat/completions", payload)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content   *string      `json:"content"`
+				ToolCalls []oaToolCall `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			Prompt     int `json:"prompt_tokens"`
+			Completion int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || len(out.Choices) == 0 {
+		return nil, fmt.Errorf("decode %s response: %v", o.Flavor, err)
+	}
+	ch := out.Choices[0]
+	r := &Response{StopReason: ch.FinishReason, Usage: Usage{InputTokens: out.Usage.Prompt, OutputTokens: out.Usage.Completion}}
+	if ch.Message.Content != nil && *ch.Message.Content != "" {
+		r.Content = append(r.Content, Block{Type: "text", Text: *ch.Message.Content})
+	}
+	for i, c := range ch.Message.ToolCalls {
+		id := c.ID
+		if id == "" {
+			id = fmt.Sprintf("call_%d", i+1)
+		}
+		args := strings.TrimSpace(c.Function.Arguments)
+		if args == "" {
+			args = "{}"
+		}
+		r.Content = append(r.Content, Block{Type: "tool_use", ID: id, Name: c.Function.Name, Input: json.RawMessage(args)})
+	}
+	return r, nil
+}
+
+// post sends payload with retry on 429/5xx and returns the 200 body.
+func (o *OpenAI) post(ctx context.Context, path string, payload []byte) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt < 4; attempt++ {
 		if attempt > 0 {
@@ -119,7 +161,7 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 				return nil, ctx.Err()
 			}
 		}
-		hr, err := http.NewRequestWithContext(ctx, http.MethodPost, o.BaseURL+"/v1/chat/completions", bytes.NewReader(payload))
+		hr, err := http.NewRequestWithContext(ctx, http.MethodPost, o.BaseURL+path, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
@@ -150,39 +192,115 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 			}
 			return nil, fmt.Errorf("%s API %d: %s", o.Flavor, resp.StatusCode, e.Error.Message)
 		}
-		var out struct {
-			Choices []struct {
-				Message struct {
-					Content   *string      `json:"content"`
-					ToolCalls []oaToolCall `json:"tool_calls"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason"`
-			} `json:"choices"`
-			Usage struct {
-				Prompt     int `json:"prompt_tokens"`
-				Completion int `json:"completion_tokens"`
-			} `json:"usage"`
+		return data, nil
+	}
+	return nil, fmt.Errorf("%s API unavailable after retries: %w", o.Flavor, lastErr)
+}
+
+// completeResponses speaks the OpenAI Responses API statelessly. Reasoning items come back
+// as "reasoning" blocks holding the raw item (with encrypted content) and are replayed on
+// the next turn so tool loops keep their chain of thought.
+func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, req Request) (*Response, error) {
+	var input []any
+	for _, m := range req.Messages {
+		var texts []string
+		var items []any
+		for _, b := range m.Content {
+			switch b.Type {
+			case "text":
+				texts = append(texts, b.Text)
+			case "reasoning":
+				items = append(items, json.RawMessage(b.Input))
+			case "tool_use":
+				args := string(b.Input)
+				if args == "" {
+					args = "{}"
+				}
+				items = append(items, map[string]any{"type": "function_call", "call_id": b.ID, "name": b.Name, "arguments": args})
+			case "tool_result":
+				items = append(items, map[string]any{"type": "function_call_output", "call_id": b.ToolUseID, "output": b.Content})
+			}
 		}
-		if err := json.Unmarshal(data, &out); err != nil || len(out.Choices) == 0 {
-			return nil, fmt.Errorf("decode %s response: %v", o.Flavor, err)
+		input = append(input, items...)
+		if len(texts) > 0 {
+			input = append(input, map[string]any{"role": m.Role, "content": strings.Join(texts, "\n")})
 		}
-		ch := out.Choices[0]
-		r := &Response{StopReason: ch.FinishReason, Usage: Usage{InputTokens: out.Usage.Prompt, OutputTokens: out.Usage.Completion}}
-		if ch.Message.Content != nil && *ch.Message.Content != "" {
-			r.Content = append(r.Content, Block{Type: "text", Text: *ch.Message.Content})
+	}
+	body := map[string]any{"model": model, "input": input, "max_output_tokens": max, "store": false,
+		"include": []string{"reasoning.encrypted_content"}}
+	if req.System != "" {
+		body["instructions"] = req.System
+	}
+	if o.ReasoningEffort != "" {
+		body["reasoning"] = map[string]any{"effort": o.ReasoningEffort}
+	}
+	if len(req.Tools) > 0 {
+		var tools []map[string]any
+		for _, t := range req.Tools {
+			tools = append(tools, map[string]any{"type": "function", "name": t.Name, "description": t.Description, "parameters": t.InputSchema})
 		}
-		for i, c := range ch.Message.ToolCalls {
-			id := c.ID
+		body["tools"] = tools
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	data, err := o.post(ctx, "/v1/responses", payload)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Status            string `json:"status"`
+		IncompleteDetails struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
+		Output []json.RawMessage `json:"output"`
+		Usage  struct {
+			In  int `json:"input_tokens"`
+			Out int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("decode openai response: %v", err)
+	}
+	r := &Response{StopReason: out.Status, Usage: Usage{InputTokens: out.Usage.In, OutputTokens: out.Usage.Out}}
+	if out.IncompleteDetails.Reason != "" {
+		r.StopReason = out.IncompleteDetails.Reason
+	}
+	for i, raw := range out.Output {
+		var it struct {
+			Type    string `json:"type"`
+			CallID  string `json:"call_id"`
+			Name    string `json:"name"`
+			Args    string `json:"arguments"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(raw, &it) != nil {
+			continue
+		}
+		switch it.Type {
+		case "reasoning":
+			r.Content = append(r.Content, Block{Type: "reasoning", Input: raw})
+		case "message":
+			for _, c := range it.Content {
+				if c.Type == "output_text" && c.Text != "" {
+					r.Content = append(r.Content, Block{Type: "text", Text: c.Text})
+				}
+			}
+		case "function_call":
+			id := it.CallID
 			if id == "" {
 				id = fmt.Sprintf("call_%d", i+1)
 			}
-			args := strings.TrimSpace(c.Function.Arguments)
+			args := strings.TrimSpace(it.Args)
 			if args == "" {
 				args = "{}"
 			}
-			r.Content = append(r.Content, Block{Type: "tool_use", ID: id, Name: c.Function.Name, Input: json.RawMessage(args)})
+			r.Content = append(r.Content, Block{Type: "tool_use", ID: id, Name: it.Name, Input: json.RawMessage(args)})
 		}
-		return r, nil
 	}
-	return nil, fmt.Errorf("%s API unavailable after retries: %w", o.Flavor, lastErr)
+	return r, nil
 }

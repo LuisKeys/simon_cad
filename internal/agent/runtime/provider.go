@@ -57,7 +57,7 @@ func NewProviderFromEnv() (Provider, error) {
 		if model == "" {
 			return nil, fmt.Errorf("SIMONCAD_PROVIDER=openai but OPENAI_MODEL is not set")
 		}
-		return &OpenAI{Flavor: "openai", APIKey: key, Model: model, HTTP: client,
+		return &OpenAI{Flavor: "openai", APIKey: key, Model: model, HTTP: client, ReasoningEffort: os.Getenv("OPENAI_REASONING_EFFORT"),
 			BaseURL: strings.TrimRight(envOr("OPENAI_BASE_URL", "https://api.openai.com"), "/")}, nil
 	case ProviderOllama:
 		model := os.Getenv("OLLAMA_MODEL")
