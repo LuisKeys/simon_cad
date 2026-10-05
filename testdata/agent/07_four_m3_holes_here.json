@@ -1,0 +1,101 @@
+{
+  "name": "07_four_m3_holes_here",
+  "notes": "Scripted recording (hand-written to mirror a well-behaved model). The M2 demo prompt: selection + natural language. Re-capture with: simoncad-cli eval --live --record testdata/agent",
+  "prompt": "Add four M3 holes here.",
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "add_hole",
+            "input": {
+              "face": "face(feature=plate,side=+Z)",
+              "diameter": 3.2,
+              "positions": [
+                [
+                  10,
+                  10
+                ],
+                [
+                  90,
+                  10
+                ],
+                [
+                  10,
+                  50
+                ],
+                [
+                  90,
+                  50
+                ]
+              ],
+              "intent": "Four M3 clearance holes on the selected face"
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "Added four 3.2 mm M3 clearance holes, 10 mm in from each corner of the selected face."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "add_hole",
+        "args": {
+          "face": "face(feature=plate,side=+Z)",
+          "diameter": 3.2,
+          "positions": [
+            [
+              10,
+              10
+            ],
+            [
+              90,
+              10
+            ],
+            [
+              10,
+              50
+            ],
+            [
+              90,
+              50
+            ]
+          ]
+        }
+      }
+    ],
+    "model": {
+      "volume_mm3": 23871.320364908963,
+      "features": 2,
+      "failed": 0
+    }
+  },
+  "setup": [
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "plate",
+        "name": "Base plate",
+        "dx": 100,
+        "dy": 60,
+        "dz": 4
+      }
+    }
+  ],
+  "selection": [
+    "face(feature=plate,side=+Z)"
+  ]
+}

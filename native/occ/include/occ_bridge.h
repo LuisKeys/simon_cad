@@ -65,6 +65,11 @@ occ_status occ_boolean_subtract(occ_handle a, occ_handle b, occ_handle* out);
 occ_status occ_fillet_all_edges(occ_handle s, double radius, occ_handle* out);
 occ_status occ_chamfer_all_edges(occ_handle s, double distance, occ_handle* out);
 
+/* Edge treatments on chosen edges. Indices are 0-based positions in TopExp::MapShapes edge
+ * order, i.e. the edge indices occ_tessellate reports. */
+occ_status occ_fillet_edges(occ_handle s, const int32_t* edges, int32_t n, double radius, occ_handle* out);
+occ_status occ_chamfer_edges(occ_handle s, const int32_t* edges, int32_t n, double distance, occ_handle* out);
+
 /* Transforms */
 occ_status occ_translate(occ_handle s, double dx, double dy, double dz, occ_handle* out);
 occ_status occ_rotate(occ_handle s, double ox, double oy, double oz,
@@ -83,6 +88,50 @@ occ_status occ_export_step(occ_handle s, const char* path);
 /* Binary STL if binary != 0, otherwise ASCII. Meshes with the given linear deflection. */
 occ_status occ_export_stl(occ_handle s, const char* path, double deflection, int32_t binary);
 occ_status occ_import_step(const char* path, occ_handle* out);
+
+
+/* Tessellation for rendering and picking. A mesh carries the topology identity of what it
+ * draws: faces, edges and vertices are numbered in the deterministic order of
+ * TopExp::MapShapes, so index N means the same entity on every rebuild of the same shape.
+ * Triangles are grouped by face (face i owns [tri_start, tri_start+tri_count)). */
+typedef struct occ_mesh occ_mesh;
+
+enum { OCC_SURF_OTHER = 0, OCC_SURF_PLANE = 1, OCC_SURF_CYLINDER = 2, OCC_SURF_CONE = 3,
+       OCC_SURF_SPHERE = 4, OCC_SURF_TORUS = 5 };
+enum { OCC_CURVE_OTHER = 0, OCC_CURVE_LINE = 1, OCC_CURVE_CIRCLE = 2 };
+
+typedef struct {
+  int32_t surface;                 /* OCC_SURF_* */
+  double nx, ny, nz;               /* outward normal (plane) or axis direction (cylinder/cone) */
+  double cx, cy, cz;               /* centroid */
+  double area;
+  double radius;                   /* cylinder/sphere/cone-base radius, else 0 */
+  double min_x, min_y, min_z, max_x, max_y, max_z;
+  int32_t tri_start, tri_count;
+} occ_face_info;
+
+typedef struct {
+  int32_t curve;                   /* OCC_CURVE_* */
+  double length;
+  double sx, sy, sz, ex, ey, ez;   /* start / end point */
+  double min_x, min_y, min_z, max_x, max_y, max_z;
+  int32_t pt_start, pt_count;      /* polyline in the edge point buffer */
+} occ_edge_info;
+
+typedef struct {
+  int32_t vertices, triangles, faces, edges, edge_points, topo_vertices;
+} occ_mesh_counts;
+
+/* Meshes the shape at the given linear deflection. Free with occ_mesh_free. */
+occ_status occ_tessellate(occ_handle s, double deflection, occ_mesh** out);
+occ_status occ_mesh_get_counts(const occ_mesh* m, occ_mesh_counts* out);
+/* Copies into caller buffers sized from occ_mesh_get_counts: positions/normals 3*vertices
+ * floats, indices 3*triangles, faces, edges, edge_pts 3*edge_points floats,
+ * vertex_pts 3*topo_vertices floats. Any output may be NULL to skip it. */
+occ_status occ_mesh_copy(const occ_mesh* m, float* positions, float* normals, uint32_t* indices,
+                         occ_face_info* faces, occ_edge_info* edges, float* edge_pts, float* vertex_pts);
+void occ_mesh_free(occ_mesh* m);
+int64_t occ_live_mesh_count(void);
 
 #ifdef __cplusplus
 }

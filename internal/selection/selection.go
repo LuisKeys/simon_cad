@@ -18,22 +18,22 @@ type Context struct {
 	Entities []Entity `json:"entities"`
 }
 
-// BoundsFn looks up a feature's bounding box in the current model.
-type BoundsFn func(featureID string) (selectors.Bounds, bool)
+// TopologyFn looks up a feature's topology in the current model.
+type TopologyFn func(featureID string) (*selectors.Topology, bool)
 
 // Resolve parses and resolves selector strings against the model.
-func Resolve(raw []string, bounds BoundsFn) (Context, error) {
+func Resolve(raw []string, topo TopologyFn) (Context, error) {
 	var c Context
 	for _, r := range raw {
 		sel, err := selectors.Parse(r)
 		if err != nil {
 			return Context{}, err
 		}
-		b, ok := bounds(sel.Feature())
+		t, ok := topo(sel.Feature())
 		if !ok {
 			return Context{}, fmt.Errorf("selection %s: feature %q has no geometry", sel.String(), sel.Feature())
 		}
-		d, err := selectors.Resolve(sel, b)
+		d, err := selectors.ResolveTopo(sel, t)
 		if err != nil {
 			return Context{}, err
 		}

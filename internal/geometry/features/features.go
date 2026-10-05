@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"sync"
 
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/geometry/api"
@@ -53,6 +54,68 @@ func (p Params) Positive(name string) (float64, error) {
 type Body struct {
 	Shape *api.Shape
 	Props api.Props
+
+	topoOnce sync.Once
+	topo     *selectors.Topology
+}
+
+// topologyDeflection only affects the throwaway mesh used to enumerate faces; face
+// descriptors come from the exact B-Rep, not from triangles.
+const topologyDeflection = 0.5
+
+// Topology lazily derives the face/edge/vertex descriptors selectors resolve against.
+// It returns nil if the shape cannot be meshed.
+func (b *Body) Topology() *selectors.Topology {
+	b.topoOnce.Do(func() {
+		if m, err := b.Shape.Tessellate(topologyDeflection); err == nil {
+			b.topo = TopologyOf(b.Bounds(), m)
+		}
+	})
+	return b.topo
+}
+
+var surfaceNames = map[int]string{api.SurfPlane: "plane", api.SurfCylinder: "cylinder", api.SurfCone: "cone",
+	api.SurfSphere: "sphere", api.SurfTorus: "torus"}
+
+// r6 rounds kernel noise (1e-15) away so descriptors are tidy and byte-stable.
+func r6(v float64) float64 {
+	v = math.Round(v*1e6) / 1e6
+	if v == 0 {
+		return 0
+	}
+	return v
+}
+
+func r6v(v [3]float64) [3]float64 { return [3]float64{r6(v[0]), r6(v[1]), r6(v[2])} }
+
+func r6b(min, max [3]float64) selectors.Bounds { return selectors.Bounds{Min: r6v(min), Max: r6v(max)} }
+
+// TopologyOf converts a kernel mesh's topology tables into selector descriptors.
+func TopologyOf(bounds selectors.Bounds, m *api.Mesh) *selectors.Topology {
+	t := &selectors.Topology{Bounds: bounds}
+	for _, f := range m.Faces {
+		name := surfaceNames[f.Surface]
+		if name == "" {
+			name = "other"
+		}
+		t.Faces = append(t.Faces, selectors.FaceInfo{Surface: name, Normal: r6v(f.Normal), Centroid: r6v(f.Centroid),
+			Area: r6(f.Area), Radius: r6(f.Radius), BBox: r6b(f.Min, f.Max)})
+	}
+	for _, e := range m.Edges {
+		curve := "other"
+		switch e.Curve {
+		case api.CurveLine:
+			curve = "line"
+		case api.CurveCircle:
+			curve = "circle"
+		}
+		t.Edges = append(t.Edges, selectors.EdgeInfo{Curve: curve, Length: r6(e.Length), Start: r6v(e.Start), End: r6v(e.End),
+			BBox: r6b(e.Min, e.Max)})
+	}
+	for i := 0; i+2 < len(m.Vertices); i += 3 {
+		t.Vertices = append(t.Vertices, [3]float64{float64(m.Vertices[i]), float64(m.Vertices[i+1]), float64(m.Vertices[i+2])})
+	}
+	return t
 }
 
 func (b *Body) Bounds() selectors.Bounds {

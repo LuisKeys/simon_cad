@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 #include "occ_bridge.h"
 
@@ -57,6 +58,58 @@ int main() {
     CHECK(q.max_x <= 1e-9 && std::fabs(q.min_x + 10) < 1e-6);
     CHECK(occ_extrude_polygon(tri, 2, 2, &prism) == OCC_ERR_INVALID_ARG);
     occ_release(cone); occ_release(prism); occ_release(mir);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
+  // Tessellation: a box has 6 planar faces, 12 edges, 8 vertices; winding agrees with normals.
+  {
+    occ_handle box2 = 0;
+    occ_mesh* m = nullptr;
+    CHECK(occ_box(10, 20, 30, &box2) == OCC_OK);
+    CHECK(occ_tessellate(box2, 0.1, &m) == OCC_OK);
+    occ_mesh_counts c;
+    CHECK(occ_mesh_get_counts(m, &c) == OCC_OK);
+    CHECK(c.faces == 6 && c.edges == 12 && c.topo_vertices == 8 && c.triangles == 12);
+    std::vector<float> pos(3 * c.vertices), nrm(3 * c.vertices);
+    std::vector<uint32_t> idx(3 * c.triangles);
+    std::vector<occ_face_info> faces(c.faces);
+    CHECK(occ_mesh_copy(m, pos.data(), nrm.data(), idx.data(), faces.data(), nullptr, nullptr, nullptr) == OCC_OK);
+    double area = 0;
+    for (auto& f : faces) {
+      CHECK(f.surface == OCC_SURF_PLANE && f.tri_count == 2);
+      area += f.area;
+      for (int t = f.tri_start; t < f.tri_start + f.tri_count; ++t) {
+        const float* a = &pos[3 * idx[3 * t]];
+        const float* b = &pos[3 * idx[3 * t + 1]];
+        const float* d = &pos[3 * idx[3 * t + 2]];
+        double u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v[3] = {d[0] - a[0], d[1] - a[1], d[2] - a[2]};
+        double cr[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+        CHECK(cr[0] * f.nx + cr[1] * f.ny + cr[2] * f.nz > 0);  // CCW seen from outside
+      }
+    }
+    CHECK(std::fabs(area - 2 * (200 + 300 + 600)) < 1e-6);
+    CHECK(occ_live_mesh_count() == 1);
+    occ_mesh_free(m);
+    CHECK(occ_live_mesh_count() == 0);
+    CHECK(occ_tessellate(box2, -1, &m) == OCC_ERR_INVALID_ARG);
+    occ_release(box2);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
+  // Selective edges: filleting one edge of a box removes exactly the corner material.
+  {
+    occ_handle bx = 0, f1 = 0, bad = 0;
+    occ_props q0, q1;
+    CHECK(occ_box(10, 20, 30, &bx) == OCC_OK);
+    CHECK(occ_mass_props(bx, &q0) == OCC_OK);
+    const int32_t one[] = {0};
+    CHECK(occ_fillet_edges(bx, one, 1, 2.0, &f1) == OCC_OK);
+    CHECK(occ_mass_props(f1, &q1) == OCC_OK);
+    CHECK(q1.volume < q0.volume && q1.face_count == q0.face_count + 1);
+    const int32_t oob[] = {99};
+    CHECK(occ_fillet_edges(bx, oob, 1, 1.0, &bad) == OCC_ERR_INVALID_ARG);
+    CHECK(occ_chamfer_edges(bx, nullptr, 0, 1.0, &bad) == OCC_ERR_INVALID_ARG);
+    occ_release(bx); occ_release(f1);
     CHECK(occ_live_handle_count() == 0);
   }
 

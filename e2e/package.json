@@ -1,0 +1,7 @@
+{
+  "name": "simoncad-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end check of the M2 flow. Run with `make e2e` (needs Chrome/Chromium).",
+  "devDependencies": { "playwright-core": "1.54.2" }
+}

@@ -13,7 +13,8 @@ The only code that touches OpenCascade.
 | `bridge.cpp` | Handle table (mutex-guarded map), thread-local error message, `guarded()` exception→status translation, release, translate / rotate / mirror, `occ_is_valid`, `occ_mass_props`. |
 | `primitives.cpp` | `occ_box`, `occ_cylinder`, `occ_cone`, `occ_extrude_polygon` (closed XY polygon prism). |
 | `booleans.cpp` | `occ_boolean_union`, `occ_boolean_subtract` (inputs not consumed). |
-| `fillets.cpp` | `occ_fillet_all_edges`, `occ_chamfer_all_edges`. |
+| `fillets.cpp` | `occ_fillet_all_edges`, `occ_chamfer_all_edges`, and the selective `occ_fillet_edges`, `occ_chamfer_edges` (kernel edge indices). |
+| `mesh.cpp` | `occ_tessellate` / `occ_mesh_*`: per-face triangle ranges, edge polylines, topological vertices and per-face/edge descriptors; numbering in `TopExp::MapShapes` order. |
 | `export.cpp` | STEP export/import, STL export. Silences OCCT's stdout messages so `--json` output stays clean. |
 | `tests/bridge_test.cpp` | ABI test: validity, volumes, error paths, handle-count returns to 0 after churn. Runs under valgrind. |
 | `CMakeLists.txt` | Builds `libsimon_occ.a` and `bridge_test` against the local OCCT. |
@@ -27,7 +28,7 @@ Scripts: `scripts/build-occt.sh` builds the pinned OCCT (7.8.1) into `third_part
 
 cgo bindings: the **only** package that imports `"C"`. Thin functions over handles (`Box`,
 `Cylinder`, `Cone`, `ExtrudePolygon`, `Union`, `Subtract`, `FilletAllEdges`, `ChamferAllEdges`,
-`Translate`, `Rotate`, `Mirror`, `IsValid`, `MassProps`, `ExportSTEP`, `ExportSTL`, `ImportSTEP`,
+`FilletEdges`, `ChamferEdges`, `Tessellate`, `Translate`, `Rotate`, `Mirror`, `IsValid`, `MassProps`, `ExportSTEP`, `ExportSTL`, `ImportSTEP`,
 `Release`, `LiveHandles`, `Version`). Errors wrap `ErrKernel` with the OCCT message. Never use it
 directly; use `geometry/api`.
 
@@ -60,14 +61,32 @@ Safe expression evaluator for parameter expressions.
 
 ## `internal/selectors`
 
-Semantic topology selectors. `Parse` / `String` (canonical form), `FeatureOf`, `Bounds`, and
-`Resolve(selector, bounds) → Descriptor`. Resolves `body` and planar `face(side=±X/Y/Z)` from
-bounding boxes; edge/vertex kinds parse but return "not resolvable yet". Side aliases
-(`top`, `bottom`, `left`, `right`, `front`, `back`) are accepted.
+Semantic topology selectors. `Parse` / `String` (canonical form), `FeatureOf`, `Bounds`.
+`ResolveTopo(selector, *Topology) → Descriptor` resolves every kind against real B-Rep topology
+(`topology.go`): `body`; `face` by `side=` (extreme planar face), `side=`+`at=` (planar face in a
+given plane) or `index=`; `edge` / `vertex` by `index=`. `Topology.FaceSelector` is the inverse used
+for viewport picks (most semantic selector that resolves back to the face). The older bbox-only
+`Resolve` remains for `body`. Side aliases (`top`, `bottom`, …) are accepted. See [ui.md](ui.md).
+
+## `internal/rendering`
+
+Turns a rebuilt model into viewport meshes. `Renderer.Scene(model, known)` tessellates each visible
+body (the model's leaves) at a size-scaled deflection, caches by node content key, and returns a
+`Delta` with only bodies whose key the client lacks. `BodyMesh` carries positions, normals, indices,
+face ranges, edge polylines, vertices and a selector per entity. `SelectorFor` / `PickFor` /
+`FaceOfTriangle` map pick IDs ↔ selectors.
+
+## `internal/ui`
+
+`Service` (the facade a front end calls: `State`, `Scene`, `Pick`, `SetSelection`, `Preview`,
+`Prompt`, `CallTool`, `SetParameter`, `Commit`, `Reject`, `Undo`, `Redo`, `Restore`, `Compare`,
+`PlaybackFrame`, `New/Open/Save/Export`, `Palette`), `Server` (loopback HTTP + SSE, per-run token,
+Host check), `Hub` (non-blocking notices). `nomutation_test.go` statically enforces that nothing here
+bypasses the tool registry.
 
 ## `internal/selection`
 
-The selection context: `Context{Entities []Descriptor}`, `Resolve(rawSelectors, boundsFn)`,
+The selection context: `Context{Entities []Descriptor}`, `Resolve(rawSelectors, topologyFn)`,
 `Selectors()`, `JSON()`. Selecting something with no geometry is an error.
 
 ## `internal/cadir`
@@ -198,13 +217,19 @@ selection use, "ask when ambiguous", pending-approval behaviour), the `geometry`
 | `project.go` | `tool`, `tools`, `build`, `export`, `history`, `restore`, `commit`, `reject`, `undo`, `replay` |
 | `eval.go` | `eval` command |
 | `bracket.go` | Phase 0 servo bracket proof |
-| `dotenv.go` | `.env` loader |
+| `internal/dotenv` | `.env` loader (shared with `cmd/simoncad`) |
+
+## `cmd/simoncad` and `frontend/`
+
+Launcher (`--project`, `--recording`, `--no-browser`) and the embedded frontend. See [ui.md](ui.md).
 
 ## `testdata/`
 
 | Path | Contents |
 |---|---|
-| `agent/*.json` | Six eval cases: create plate, four holes, thickness change, recovery from a validation error, selection ("here"), sequential calls in one turn. Recordings are **scripted**, not captured from a model. |
+| `agent/*.json` | Eight eval cases: create plate, four holes, thickness change, recovery from a validation error, selection ("here"), sequential calls in one turn, the M2 prompt "four M3 holes here", and a hole on a non-extreme face (pocket floor). Recordings are **scripted**, not captured from a model. |
+| `ui/m2_four_holes.recording.json` | Scripted agent turn for the browser e2e |
+| `robot/elbow_joint/steps.json` | Dogfood 2: the elbow clevis as tool calls |
 | `demo/m1_create.recording.json` | Recording used by `make demo` when no key is set |
 | `robot/servo_bracket/steps.json` | The servo bracket as tool calls (dogfood) |
 | `robot/servo_bracket.scadproj` | Permanent regression project (refresh with `UPDATE_ROBOT=1 go test ./internal/app`) |

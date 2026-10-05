@@ -204,7 +204,7 @@ func (a *App) SelectionContextFor(raw []string) (selection.Context, error) {
 	if err != nil {
 		return selection.Context{}, err
 	}
-	return selection.Resolve(raw, m.Bounds)
+	return selection.Resolve(raw, m.Topology)
 }
 
 // SelectionContext resolves the current selection.

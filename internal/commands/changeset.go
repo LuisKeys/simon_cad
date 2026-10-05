@@ -254,6 +254,32 @@ func summarize(before, after *cadir.Graph, cmds []Command) (Effects, []string) {
 	return e, out
 }
 
+// Preview returns the graph that committing a proposed ChangeSet would produce, without
+// touching the live graph. It fails if the ChangeSet is not proposed or has gone stale.
+func (m *Manager) Preview(id string) (*cadir.Graph, error) {
+	cs := m.find(id)
+	if cs == nil {
+		return nil, fmt.Errorf("unknown ChangeSet %q", id)
+	}
+	if cs.State != StateProposed {
+		return nil, fmt.Errorf("ChangeSet %s is %s, not proposed", id, cs.State)
+	}
+	if cs.BaseHash != m.G.Hash() {
+		return nil, fmt.Errorf("ChangeSet %s is stale: the model changed after it was proposed", id)
+	}
+	work := m.G.Clone()
+	for i, r := range cs.Commands {
+		c, err := Decode(r)
+		if err != nil {
+			return nil, fmt.Errorf("command %d: %w", i+1, err)
+		}
+		if _, err := c.Apply(work); err != nil {
+			return nil, fmt.Errorf("command %d (%s): %w", i+1, c.Type(), err)
+		}
+	}
+	return work, nil
+}
+
 func (m *Manager) applyRecords(recs []Record, reverse bool) error {
 	work := m.G.Clone()
 	order := make([]int, len(recs))

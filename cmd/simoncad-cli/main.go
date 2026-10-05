@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/accelone/simoncad/internal/dotenv"
 	"os"
 	"strings"
 )
@@ -58,7 +59,7 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
-	loadDotEnv(".env")
+	dotenv.Load(".env")
 	cmds := map[string]func([]string) error{
 		"bracket": runBracket, "create": runCreate, "modify": runModify, "tool": runTool,
 		"build": runBuild, "export": runExport, "history": runHistory, "restore": runRestore,

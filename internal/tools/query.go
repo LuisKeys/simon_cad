@@ -84,11 +84,7 @@ func describe(env Env, ref string) (selectors.Descriptor, error) {
 	if err != nil {
 		return selectors.Descriptor{}, err
 	}
-	b, err := requireBounds(env, sel.Feature())
-	if err != nil {
-		return selectors.Descriptor{}, err
-	}
-	return selectors.Resolve(sel, b)
+	return resolveSelector(env, sel)
 }
 
 // ModelSummary is the deterministic description used by get_model_summary and the

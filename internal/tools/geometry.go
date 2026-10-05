@@ -247,16 +247,44 @@ func geometryTools() []*Tool {
 
 func edgeTool(typ, param, desc string) *Tool {
 	return &Tool{
-		Name: typ, Description: desc + " Applies to every edge of the body (selective edge selection arrives with Phase 2 selectors).", Capability: capGeometry,
-		Schema: object(withMeta(props{"target": text("Feature to treat"), param: positive("Size (mm)")}), "target", param),
+		Name: typ, Description: desc + " Treats every edge of the body unless `edges` lists edge(feature=<target>,index=N) selectors (the user's selected edges), in which case only those.", Capability: capGeometry,
+		Schema: object(withMeta(props{"target": text("Feature to treat"), param: positive("Size (mm)"),
+			"edges": array("Only these edges: edge(feature=<target>,index=N) selectors from the selection context. Omit for every edge.", text("An edge selector"), 1, 200)}),
+			"target", param),
 		Plan: func(env Env, a Args) (*Plan, error) {
 			b, err := requireBounds(env, a.Str("target"))
 			if err != nil {
 				return nil, err
 			}
+			var edgeSels []any
+			if raw, ok := a["edges"].([]any); ok {
+				m, err := env.Model()
+				if err != nil {
+					return nil, err
+				}
+				topo, ok := m.Topology(a.Str("target"))
+				if !ok {
+					return nil, fmt.Errorf("feature %q has no resolvable topology", a.Str("target"))
+				}
+				for _, it := range raw {
+					sel, err := selectors.Parse(it.(string))
+					if err != nil {
+						return nil, err
+					}
+					if sel.Kind != "edge" || sel.Feature() != a.Str("target") {
+						return nil, fmt.Errorf("%s must be an edge(feature=%s,index=N) selector", sel.String(), a.Str("target"))
+					}
+					if _, err := selectors.ResolveTopo(sel, topo); err != nil {
+						return nil, err
+					}
+					edgeSels = append(edgeSels, sel.String())
+				}
+			}
 			sz := b.Size()
 			limit := math.Min(sz[0], math.Min(sz[1], sz[2])) / 2
-			if a.Num(param) >= limit {
+			// With every edge treated, size is bounded by the thinnest dimension; for chosen
+			// edges the kernel is the judge (a failure becomes a failed feature, not a crash).
+			if edgeSels == nil && a.Num(param) >= limit {
 				return nil, fmt.Errorf("%s %s mm is too large for %q: its thinnest dimension is %s mm, so use less than %s mm",
 					param, fmtMM(a.Num(param)), a.Str("target"), fmtMM(limit*2), fmtMM(limit))
 			}
@@ -264,8 +292,14 @@ func edgeTool(typ, param, desc string) *Tool {
 			if err != nil {
 				return nil, err
 			}
-			return addPlan(intentOr(a, typ+" "+a.Str("target")), fmt.Sprintf("Applies a %s mm %s to %q.", fmtMM(a.Num(param)), typ, a.Str("target")),
-				newNode(env, a, id, typ, map[string]any{"target": a.Str("target"), param: a.Num(param)}, a.Str("target"))), nil
+			params := map[string]any{"target": a.Str("target"), param: a.Num(param)}
+			what := "every edge"
+			if edgeSels != nil {
+				params["edges"] = edgeSels
+				what = fmt.Sprintf("%d selected edge(s)", len(edgeSels))
+			}
+			return addPlan(intentOr(a, typ+" "+a.Str("target")), fmt.Sprintf("Applies a %s mm %s to %s of %q.", fmtMM(a.Num(param)), typ, what, a.Str("target")),
+				newNode(env, a, id, typ, params, a.Str("target"))), nil
 		},
 	}
 }
@@ -305,13 +339,12 @@ func planHole(env Env, a Args) (*Plan, error) {
 		}
 		sel = selectors.Selector{Kind: "face", Args: map[string]string{"feature": target, "side": "+Z"}}
 	}
-	b, err := requireBounds(env, target)
+	d, err := resolveSelector(env, sel)
 	if err != nil {
 		return nil, err
 	}
-	d, err := selectors.Resolve(sel, b)
-	if err != nil {
-		return nil, err
+	if d.Normal == nil {
+		return nil, fmt.Errorf("selector %s does not select a planar face", sel.String())
 	}
 	axis := 0
 	for i, v := range d.Normal {

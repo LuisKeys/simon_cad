@@ -13,6 +13,8 @@
 | `make eval` | Recorded agent evals |
 | `make demo` | M1 demo (`scripts/demo_m1.sh`) |
 | `make docs` | Regenerate `docs/tools.md` from the live registry |
+| `make ui` | Build and run the desktop UI (`ARGS="--project p.scadproj"`) |
+| `make e2e` | Headless-Chrome run of the M2 flow (needs Chrome; `npm install` in `e2e/` once) |
 
 Notes:
 - `go test ./...` skips `third_party/` because it contains its own `go.mod`.
@@ -36,7 +38,10 @@ Notes:
 | Persistence | `app` | Byte-identical save/load/rebuild/save, replay, traceability |
 | Performance | `app` | 50-feature incremental edit < 300 ms |
 | Agent | `agent/runtime` | Wire formats (Claude, OpenAI), provider selection, text never mutates, only registered tools, recorded evals |
-| Dogfood | `app/dogfood_test.go` | Servo bracket via tools equals the hand-built kernel part |
+| Dogfood | `app/dogfood_test.go` | Servo bracket via tools equals the hand-built kernel part; elbow clevis matches its analytic volume; selective fillet |
+| Rendering | `rendering` | Pick ID ↔ selector bijection, delta scenes, no native mesh leaks |
+| UI | `ui` | M2 flow through the service, preview/commit/undo, playback, HTTP guards, **no mutation path around the tool registry** |
+| Browser e2e | `e2e/m2.mjs` (`make e2e`) | Palette → click face → prompt → preview → commit → undo in real Chrome, no console errors |
 
 ## Agent evals
 

@@ -1,0 +1,25 @@
+{
+  "source": "scripted",
+  "responses": [
+    {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "tu_1",
+          "name": "add_hole",
+          "input": {
+            "face": "face(feature=plate,side=+Z)",
+            "diameter": 3.2,
+            "positions": [[10, 10], [90, 10], [10, 50], [90, 50]],
+            "intent": "Four M3 clearance holes on the selected face"
+          }
+        }
+      ],
+      "stop_reason": "tool_use"
+    },
+    {
+      "content": [{ "type": "text", "text": "I proposed four 3.2 mm M3 clearance holes, 10 mm in from each corner of the selected face. Preview it, then commit." }],
+      "stop_reason": "end_turn"
+    }
+  ]
+}

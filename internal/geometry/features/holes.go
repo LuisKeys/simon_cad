@@ -111,7 +111,7 @@ func faceFor(c *Ctx) (selectors.Descriptor, *Body, error) {
 	if err != nil {
 		return selectors.Descriptor{}, nil, fmt.Errorf("unresolved selector %s: %w", sel.String(), err)
 	}
-	d, err := selectors.Resolve(sel, b.Bounds())
+	d, err := selectors.ResolveTopo(sel, b.Topology())
 	if err != nil {
 		return d, nil, err
 	}

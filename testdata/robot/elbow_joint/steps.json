@@ -1,0 +1,9 @@
+{
+  "description": "Dogfood 2 (Phase 2): the clevis of an elbow joint. A 40 x 30 x 20 block with a 12 mm slot for the forearm link, an 8 mm pivot bore through both ears, and four M4 mounting holes in the base. Faces are addressed with the same selectors the viewport produces when a user clicks them.",
+  "steps": [
+    {"tool": "create_box", "args": {"id": "clevis", "name": "Clevis block", "dx": 40, "dy": 30, "dz": 20, "intent": "Base block of the elbow clevis"}},
+    {"tool": "extrude_profile", "args": {"id": "slot", "name": "Link slot", "target": "clevis", "mode": "cut", "profile": "rectangle", "x": -1, "y": 9, "w": 42, "h": 12, "depth": 15, "offset": 6, "intent": "Slot that receives the forearm link, leaving a 6 mm floor"}},
+    {"tool": "add_hole", "args": {"id": "pivot", "name": "Pivot bore", "face": "face(feature=slot,side=-Y)", "diameter": 8, "positions": [[20, 0, 14]], "intent": "8 mm pivot bore through both ears"}},
+    {"tool": "add_hole", "args": {"id": "mount", "name": "Mounting holes", "face": "face(feature=pivot,side=-Z)", "diameter": 4.3, "positions": [[5, 5], [35, 5], [5, 25], [35, 25]], "intent": "M4 clearance holes to mount the clevis on the upper arm"}}
+  ]
+}

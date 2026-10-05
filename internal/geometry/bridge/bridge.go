@@ -79,6 +79,31 @@ func FilletAllEdges(s Handle, radius float64) (Handle, error) {
 	return Handle(out), err
 }
 
+func edgeCall(op string, s Handle, edges []int32, size float64,
+	fn func(C.occ_handle, *C.int32_t, C.int32_t, C.double, *C.occ_handle) C.occ_status) (Handle, error) {
+	var out C.occ_handle
+	var p *C.int32_t
+	if len(edges) > 0 {
+		p = (*C.int32_t)(unsafe.Pointer(&edges[0]))
+	}
+	err := check(op, fn(C.occ_handle(s), p, C.int32_t(len(edges)), C.double(size), &out))
+	return Handle(out), err
+}
+
+// FilletEdges rounds the edges at the given kernel indices.
+func FilletEdges(s Handle, edges []int32, radius float64) (Handle, error) {
+	return edgeCall("fillet edges", s, edges, radius, func(h C.occ_handle, e *C.int32_t, n C.int32_t, r C.double, o *C.occ_handle) C.occ_status {
+		return C.occ_fillet_edges(h, e, n, r, o)
+	})
+}
+
+// ChamferEdges bevels the edges at the given kernel indices.
+func ChamferEdges(s Handle, edges []int32, d float64) (Handle, error) {
+	return edgeCall("chamfer edges", s, edges, d, func(h C.occ_handle, e *C.int32_t, n C.int32_t, r C.double, o *C.occ_handle) C.occ_status {
+		return C.occ_chamfer_edges(h, e, n, r, o)
+	})
+}
+
 func ChamferAllEdges(s Handle, d float64) (Handle, error) {
 	var out C.occ_handle
 	err := check("chamfer", C.occ_chamfer_all_edges(C.occ_handle(s), C.double(d), &out))
@@ -164,3 +189,95 @@ func Mirror(s Handle, ox, oy, oz, nx, ny, nz float64) (Handle, error) {
 		C.double(nx), C.double(ny), C.double(nz), &out))
 	return Handle(out), err
 }
+
+// Face, Edge and Mesh mirror occ_face_info, occ_edge_info and the occ_mesh buffers.
+type Face struct {
+	Surface            int
+	Normal, Centroid   [3]float64
+	Area, Radius       float64
+	Min, Max           [3]float64
+	TriStart, TriCount int
+}
+
+type Edge struct {
+	Curve            int
+	Length           float64
+	Start, End       [3]float64
+	Min, Max         [3]float64
+	PtStart, PtCount int
+}
+
+type Mesh struct {
+	Positions, Normals []float32
+	Indices            []uint32
+	Faces              []Face
+	Edges              []Edge
+	EdgePoints         []float32
+	Vertices           []float32 // topological vertices, 3 floats each
+}
+
+// Tessellate meshes a shape and copies the result out, freeing the native mesh.
+func Tessellate(s Handle, deflection float64) (*Mesh, error) {
+	var m *C.occ_mesh
+	if err := check("tessellate", C.occ_tessellate(C.occ_handle(s), C.double(deflection), &m)); err != nil {
+		return nil, err
+	}
+	defer C.occ_mesh_free(m)
+	var c C.occ_mesh_counts
+	if err := check("mesh counts", C.occ_mesh_get_counts(m, &c)); err != nil {
+		return nil, err
+	}
+	out := &Mesh{
+		Positions:  make([]float32, 3*int(c.vertices)),
+		Normals:    make([]float32, 3*int(c.vertices)),
+		Indices:    make([]uint32, 3*int(c.triangles)),
+		EdgePoints: make([]float32, 3*int(c.edge_points)),
+		Vertices:   make([]float32, 3*int(c.topo_vertices)),
+	}
+	cf := make([]C.occ_face_info, int(c.faces))
+	ce := make([]C.occ_edge_info, int(c.edges))
+	// Go-allocated buffers may be passed to C when they hold no Go pointers; empty slices
+	// have no &s[0], so route those through nil.
+	pf32 := func(s []float32) *C.float {
+		if len(s) == 0 {
+			return nil
+		}
+		return (*C.float)(unsafe.Pointer(&s[0]))
+	}
+	var pi *C.uint32_t
+	if len(out.Indices) > 0 {
+		pi = (*C.uint32_t)(unsafe.Pointer(&out.Indices[0]))
+	}
+	var pcf *C.occ_face_info
+	if len(cf) > 0 {
+		pcf = &cf[0]
+	}
+	var pce *C.occ_edge_info
+	if len(ce) > 0 {
+		pce = &ce[0]
+	}
+	if err := check("mesh copy", C.occ_mesh_copy(m, pf32(out.Positions), pf32(out.Normals), pi, pcf, pce,
+		pf32(out.EdgePoints), pf32(out.Vertices))); err != nil {
+		return nil, err
+	}
+	for _, f := range cf {
+		out.Faces = append(out.Faces, Face{
+			Surface: int(f.surface), Normal: [3]float64{float64(f.nx), float64(f.ny), float64(f.nz)},
+			Centroid: [3]float64{float64(f.cx), float64(f.cy), float64(f.cz)}, Area: float64(f.area), Radius: float64(f.radius),
+			Min:      [3]float64{float64(f.min_x), float64(f.min_y), float64(f.min_z)},
+			Max:      [3]float64{float64(f.max_x), float64(f.max_y), float64(f.max_z)},
+			TriStart: int(f.tri_start), TriCount: int(f.tri_count)})
+	}
+	for _, e := range ce {
+		out.Edges = append(out.Edges, Edge{
+			Curve: int(e.curve), Length: float64(e.length),
+			Start: [3]float64{float64(e.sx), float64(e.sy), float64(e.sz)}, End: [3]float64{float64(e.ex), float64(e.ey), float64(e.ez)},
+			Min:     [3]float64{float64(e.min_x), float64(e.min_y), float64(e.min_z)},
+			Max:     [3]float64{float64(e.max_x), float64(e.max_y), float64(e.max_z)},
+			PtStart: int(e.pt_start), PtCount: int(e.pt_count)})
+	}
+	return out, nil
+}
+
+// LiveMeshes returns native meshes not yet freed (leak detection).
+func LiveMeshes() int64 { return int64(C.occ_live_mesh_count()) }

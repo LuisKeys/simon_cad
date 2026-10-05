@@ -3,3 +3,4 @@ third_party/
 out/
 *.o
 .vscode/
+e2e/node_modules/

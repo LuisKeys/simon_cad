@@ -1,4 +1,5 @@
-package main
+// Package dotenv loads a .env file into the process environment.
+package dotenv
 
 import (
 	"bufio"
@@ -6,10 +7,10 @@ import (
 	"strings"
 )
 
-// loadDotEnv reads KEY=VALUE lines from path into the process environment. Variables
+// Load reads KEY=VALUE lines from path into the process environment. Variables
 // already set in the real environment, and empty values, are left alone. A missing file
 // is not an error.
-func loadDotEnv(path string) {
+func Load(path string) {
 	f, err := os.Open(path)
 	if err != nil {
 		return

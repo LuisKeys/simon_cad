@@ -320,6 +320,16 @@ func (m *Model) Bounds(id string) (selectors.Bounds, bool) {
 	return r.Body.Bounds(), true
 }
 
+// Topology returns a feature's face/edge/vertex descriptors for selector resolution.
+func (m *Model) Topology(id string) (*selectors.Topology, bool) {
+	r := m.Nodes[id]
+	if r == nil || r.Body == nil {
+		return nil, false
+	}
+	t := r.Body.Topology()
+	return t, t != nil
+}
+
 // Volume is the summed volume of the leaf bodies.
 func (m *Model) Volume() float64 {
 	var v float64

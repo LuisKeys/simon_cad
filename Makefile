@@ -10,7 +10,7 @@ export LD_LIBRARY_PATH := $(OCCT)/lib:$(LD_LIBRARY_PATH)
 STAMP = $(shell sha1sum $(NATIVE)/libsimon_occ.a 2>/dev/null | cut -c1-12)
 export CGO_CFLAGS = -DSIMON_NATIVE_STAMP=$(STAMP)
 
-.PHONY: occt native build build-go test test-go leakcheck bracket eval demo docs
+.PHONY: occt native build build-go test test-go leakcheck bracket eval demo docs ui e2e
 
 occt:
 	bash scripts/build-occt.sh
@@ -24,6 +24,7 @@ build: native
 
 build-go:
 	$(GO) build -o out/simoncad-cli ./cmd/simoncad-cli
+	$(GO) build -o out/simoncad ./cmd/simoncad
 
 test: native
 	$(NATIVE)/bridge_test
@@ -50,3 +51,11 @@ bracket: build
 # Regenerate docs/tools.md from the live tool registry.
 docs: build
 	python3 scripts/gen-tool-docs.py ./out/simoncad-cli
+
+# Run the desktop UI (serves on a loopback port and opens the browser).
+ui: build
+	./out/simoncad $(ARGS)
+
+# Browser end-to-end flow: select face -> prompt -> preview -> commit -> undo (needs Chrome).
+e2e: build
+	node e2e/m2.mjs

@@ -3,7 +3,7 @@
 ## 1. Principles
 
 1. **Agentic-first.** The engine is designed around manipulation by an agent from its first layer.
-   The agent, the CLI and (Phase 2) the UI are three clients of one mutation path.
+   The agent, the CLI and the UI are three clients of one mutation path.
 2. **The CAD-IR is authoritative; the B-Rep is derived.** The model is a graph of semantic
    features. Geometry is rebuilt from it at any time and may be discarded.
 3. **One mutation path.** `tool call → Commands → ChangeSet → commit`. Nothing else changes the
@@ -194,8 +194,10 @@ sorted). Kinds: `body`, `face` (needs `side=±X|±Y|±Z`), plus parsed-but-unres
 `vertex`. A resolved selector becomes a `Descriptor`: surface type, normal, centroid, bbox, area.
 
 The **selection context** is the current selection as a list of descriptors; it is injected into
-every agent request and recorded on nodes created while it is active (`selection_refs`). In Phase 1
-the CLI supplies it with `--select`; Phase 2 will feed it from viewport picking.
+every agent request and recorded on nodes created while it is active (`selection_refs`). The CLI
+supplies it with `--select`; the UI feeds it from viewport picking (pick ID → selector, see
+[ui.md](ui.md)). Selectors resolve against real topology: planar faces by `side`/`at`, any
+face/edge/vertex by kernel `index`.
 
 ## 10. Agent runtime
 
@@ -252,7 +254,7 @@ in place, no migrations yet) and the graph. Saving the same state twice yields i
 
 | Later phase | Where it plugs in |
 |---|---|
-| UI / viewport (Phase 2) | A new client of `app`; tessellation + pick IDs ↔ selectors in a new `rendering` package |
+| UI / viewport (Phase 2, done) | A client of `app` via `internal/ui`; `rendering` holds tessellation + pick IDs ↔ selectors ([ui.md](ui.md)) |
 | Robotics catalog & macros (3) | `component` field, a `macros` package expanding to existing features, new capability + tools |
 | Analysis / critic (4) | `manufacturing` field, `analysis` package, new capabilities |
 | Multi-agent split | Promote a capability; tools and ChangeSets unchanged |

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="simon-token" content="__SIMON_TOKEN__">
+<title>Simon CAD</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/" } }
+</script>
+</head>
+<body>
+<header id="top">
+  <div class="brand">Simon CAD</div>
+  <div id="project" class="project" title="Project"></div>
+  <div class="spacer"></div>
+  <div class="group">
+    <button id="btn-new" title="New project">New</button>
+    <button id="btn-open" title="Open a .scadproj directory">Open</button>
+    <button id="btn-save" title="Save (Ctrl+S)">Save</button>
+    <button id="btn-export" title="Export STEP or STL">Export</button>
+  </div>
+  <div class="group">
+    <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="btn-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+  </div>
+  <div class="group">
+    <label class="inline" title="Auto commits low-risk single-feature changes; Review previews everything first">
+      Level
+      <select id="level"><option value="review">Review</option><option value="auto">Auto</option></select>
+    </label>
+    <button id="btn-palette" title="Command palette (Ctrl+K)">⌘K</button>
+  </div>
+</header>
+
+<main id="layout">
+  <aside id="left">
+    <section>
+      <h2>Design tree</h2>
+      <div id="tree" class="tree" role="tree"></div>
+    </section>
+    <section>
+      <h2>Selection</h2>
+      <div id="sel-list" class="sel-list"></div>
+    </section>
+  </aside>
+
+  <section id="center">
+    <div id="toolbar">
+      <div class="group" role="radiogroup" aria-label="Pick filter">
+        <button data-filter="auto" class="on">Auto</button>
+        <button data-filter="face">Face</button>
+        <button data-filter="edge">Edge</button>
+        <button data-filter="vertex">Vertex</button>
+        <button data-filter="body">Body</button>
+      </div>
+      <div class="group">
+        <button id="btn-measure" title="Measure between two surface points">Measure</button>
+        <label class="inline">Section
+          <select id="sec-axis"><option value="">off</option><option>X</option><option>Y</option><option>Z</option></select>
+        </label>
+        <input id="sec-off" type="range" min="0" max="1" step="0.001" value="0.5" disabled aria-label="Section offset">
+      </div>
+      <div class="group">
+        <button id="btn-fit" title="Fit view (F)">Fit</button>
+        <button id="btn-play" title="Replay the design feature by feature">▶ Play design</button>
+      </div>
+      <div class="spacer"></div>
+      <div id="hud" class="hud"></div>
+    </div>
+    <div id="viewport">
+      <canvas id="gl"></canvas>
+      <canvas id="cube" width="120" height="120" title="View cube"></canvas>
+      <div id="measure-label" class="measure-label" hidden></div>
+      <div id="empty" class="empty">Nothing here yet. Press <kbd>Ctrl</kbd>+<kbd>K</kbd>, or ask the agent: “Create a 100 x 60 x 4 mm plate”.</div>
+      <div id="ghost-bar" class="ghost-bar" hidden></div>
+    </div>
+    <div id="timeline" class="timeline" aria-label="Semantic timeline"></div>
+  </section>
+
+  <aside id="right">
+    <section class="grow">
+      <h2>Conversation</h2>
+      <div id="chat" class="chat" aria-live="polite"></div>
+    </section>
+    <form id="composer" class="composer" autocomplete="off">
+      <div id="chips" class="chips"></div>
+      <div class="row">
+        <textarea id="prompt" rows="2" placeholder="Describe what you want…  (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button id="send" type="submit" class="primary">Send</button>
+      </div>
+    </form>
+  </aside>
+</main>
+
+<div id="palette" class="overlay" hidden>
+  <div class="dialog" role="dialog" aria-label="Command palette">
+    <input id="pal-input" type="text" placeholder="Type an intent, a tool, or a command…" autocomplete="off">
+    <ul id="pal-list" class="pal-list"></ul>
+    <div id="pal-form" class="pal-form" hidden>
+      <div id="pal-form-title"></div>
+      <textarea id="pal-args" rows="5" spellcheck="false"></textarea>
+      <div class="row"><button id="pal-run" class="primary">Run tool</button><button id="pal-back">Back</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="dialog" class="overlay" hidden>
+  <form class="dialog small" id="dialog-form">
+    <div id="dialog-title"></div>
+    <input id="dialog-input" type="text" autocomplete="off">
+    <select id="dialog-format" hidden><option value="step">STEP</option><option value="stl">STL</option></select>
+    <div class="row"><button type="submit" class="primary" id="dialog-ok">OK</button><button type="button" id="dialog-cancel">Cancel</button></div>
+  </form>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

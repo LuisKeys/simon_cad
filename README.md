@@ -1,12 +1,12 @@
 # Simon CAD
 
 Simon CAD is an **agentic-first** CAD environment for robotics, mechatronics and 3D-printable
-mechanical design. Engineering intent, expressed in natural language and (from Phase 2) visual
+mechanical design. Engineering intent, expressed in natural language and visual
 selection, is turned by an agent into **deterministic, validated, replayable operations** on a
 semantic CAD intermediate representation (the *CAD-IR*). Geometry is built by OpenCascade (OCCT)
 behind a small C++ bridge driven from Go.
 
-It is not a conventional CAD system with an assistant bolted on: the CLI, the agent and (later) the
+It is not a conventional CAD system with an assistant bolted on: the CLI, the agent and the
 UI all go through the same **tool → command → ChangeSet** path. There is no separate "AI mutation
 path" and no UI-only mutation path.
 
@@ -24,10 +24,10 @@ Engineering intent (natural language + selection)
 |---|---|---|
 | 0 | M0 Geometry proof (Go → C ABI → OCCT → STEP/STL, leak-free) | Done |
 | 1 | M1 Agentic headless CAD engine | Implemented and verified offline (recorded evals). **Live-LLM runs are not yet verified** |
-| 2 | M2 Visual agentic CAD (viewport, selection UI, preview) | Not started |
+| 2 | M2 Visual agentic CAD (viewport, selection UI, preview) | Implemented; verified headless and in a Chrome end-to-end run. **Wails shell, 60 fps budget and live-LLM use not verified** (see [docs/ui.md](docs/ui.md)) |
 | 3–7 | Robotics-aware CAD, analysis, generative design, assemblies | Not started |
 
-What exists today: a headless engine driven by `simoncad-cli`. There is no desktop UI yet.
+What exists today: a headless engine driven by `simoncad-cli`, and a visual front end (`simoncad`: Three.js viewport, selection-aware conversation, ChangeSet preview, design tree, palette, semantic timeline) over the same services.
 
 ## Quick start
 
@@ -127,11 +127,13 @@ stays **proposed** until you `commit` it.
 
 ```
 cmd/simoncad-cli/      CLI (the first-class headless interface)
+cmd/simoncad/          desktop UI launcher (serves the frontend on a loopback port)
+frontend/              viewport + panels (ES modules, vendored Three.js)
 internal/
   app/                 composition root: the only place that wires everything together
   cadir/               CAD-IR schema, graph, canonical serialization
   expr/                safe expression evaluator
-  selectors/           semantic selectors (face(feature=…,side=…))
+  selectors/           semantic selectors, topology-backed (face/edge/vertex/body)
   selection/           selection context for the agent
   geometry/
     api/               Go geometry API (single kernel worker thread)
@@ -145,6 +147,8 @@ internal/
   persistence/         .scadproj read/write
   agent/runtime/       providers, tool-call loop, recordings, eval harness
   agent/capabilities/  pluggable capabilities (geometry so far)
+  rendering/           tessellation → viewport meshes, pick IDs ↔ selectors
+  ui/                  UI service, local HTTP/SSE server, event hub
   export/              STL watertightness checker
 native/occ/            C ABI (occ_bridge.h) and C++ adapters over OCCT
 testdata/              agent evals, demo recordings, robot dogfood projects
@@ -157,17 +161,19 @@ third_party/           (git-ignored) local Go toolchain and OCCT build
 
 - [docs/architecture.md](docs/architecture.md) — principles, layers, data flow, key decisions
 - [docs/modules.md](docs/modules.md) — every package and component in detail
+- [docs/ui.md](docs/ui.md) — the visual front end: rendering, picking, preview, guarantees, open items
 - [docs/tools.md](docs/tools.md) — the tool reference (what the agent can call)
 - [docs/project-format.md](docs/project-format.md) — the `.scadproj` on-disk format
 - [docs/development.md](docs/development.md) — testing, evals, adding features and tools
 - [docs/robot-backlog.md](docs/robot-backlog.md) — gaps found while dogfooding real robot parts
 
-## Known limitations (Phase 1)
+## Known limitations
 
-- Selectors resolve from bounding boxes: exact for prismatic parts, not for faces of filleted or
-  pocketed bodies. Edge/vertex selectors parse but are not resolvable yet.
-- `fillet` / `chamfer` apply to every edge of a body.
+- Selectors address planar faces by `side`/`at`; curved faces, edges and vertices by kernel `index`,
+  which is only valid for the model they were picked on.
 - Holes start only from axis-aligned planar faces.
-- No UI, no streaming responses, no robotics catalog or macros yet.
+- No streaming of model text, no robotics catalog or macros yet; intent verbs in the palette are
+  natural-language openers for the agent.
+- The desktop shell is a loopback web server for now; the Wails build is not done (see docs/ui.md).
 - Agent evals in `testdata/agent` use hand-scripted recordings; live pass rates are unmeasured.
 - API keys come from the environment/`.env`, not an OS keychain.

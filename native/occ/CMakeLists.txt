@@ -12,7 +12,7 @@ endif()
 find_package(OpenCASCADE REQUIRED PATHS "${OCCT_PREFIX}" NO_DEFAULT_PATH)
 
 add_library(simon_occ STATIC
-  bridge.cpp primitives.cpp booleans.cpp fillets.cpp export.cpp)
+  bridge.cpp primitives.cpp booleans.cpp fillets.cpp export.cpp mesh.cpp)
 target_include_directories(simon_occ PUBLIC include PRIVATE . ${OpenCASCADE_INCLUDE_DIR})
 
 # Standalone C++ test of the C ABI (leak/validity checks, runs under valgrind/ASan).

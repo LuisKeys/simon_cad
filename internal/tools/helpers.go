@@ -107,6 +107,22 @@ func requireBounds(env Env, id string) (selectors.Bounds, error) {
 	return b, nil
 }
 
+// resolveSelector resolves any selector against the feature's real topology.
+func resolveSelector(env Env, sel selectors.Selector) (selectors.Descriptor, error) {
+	if _, err := requireBounds(env, sel.Feature()); err != nil {
+		return selectors.Descriptor{}, err
+	}
+	m, err := env.Model()
+	if err != nil {
+		return selectors.Descriptor{}, err
+	}
+	t, ok := m.Topology(sel.Feature())
+	if !ok {
+		return selectors.Descriptor{}, fmt.Errorf("feature %q has no resolvable topology", sel.Feature())
+	}
+	return selectors.ResolveTopo(sel, t)
+}
+
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 func addPlan(intent, explanation string, nodes ...*cadir.Node) *Plan {

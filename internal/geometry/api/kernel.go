@@ -144,6 +144,26 @@ func (s *Shape) Chamfer(distance float64) (*Shape, error) {
 	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.ChamferAllEdges(h, distance) })
 }
 
+// FilletEdges rounds only the edges with the given kernel indices (as reported by Tessellate).
+func (s *Shape) FilletEdges(edges []int, radius float64) (*Shape, error) {
+	e := toInt32(edges)
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.FilletEdges(h, e, radius) })
+}
+
+// ChamferEdges bevels only the edges with the given kernel indices.
+func (s *Shape) ChamferEdges(edges []int, distance float64) (*Shape, error) {
+	e := toInt32(edges)
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.ChamferEdges(h, e, distance) })
+}
+
+func toInt32(v []int) []int32 {
+	out := make([]int32, len(v))
+	for i, x := range v {
+		out[i] = int32(x)
+	}
+	return out
+}
+
 func (s *Shape) Translate(dx, dy, dz float64) (*Shape, error) {
 	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.Translate(h, dx, dy, dz) })
 }
@@ -203,4 +223,44 @@ func (s *Shape) Mirror(ox, oy, oz, nx, ny, nz float64) (*Shape, error) {
 	return s.unary(func(h bridge.Handle) (bridge.Handle, error) {
 		return bridge.Mirror(h, ox, oy, oz, nx, ny, nz)
 	})
+}
+
+// Mesh types are re-exported so callers never import the bridge package.
+type (
+	Mesh = bridge.Mesh
+	Face = bridge.Face
+	Edge = bridge.Edge
+)
+
+// Surface and curve kinds reported by Mesh faces and edges.
+const (
+	SurfPlane    = 1
+	SurfCylinder = 2
+	SurfCone     = 3
+	SurfSphere   = 4
+	SurfTorus    = 5
+	CurveLine    = 1
+	CurveCircle  = 2
+)
+
+// Tessellate meshes the shape at the given linear deflection (mm). Faces, edges and
+// vertices are numbered deterministically, so an index identifies the same entity on
+// every rebuild of the same shape.
+func (s *Shape) Tessellate(deflection float64) (*Mesh, error) {
+	if s.h == 0 {
+		return nil, ErrReleased
+	}
+	var (
+		m   *Mesh
+		err error
+	)
+	s.k.run(func() { m, err = bridge.Tessellate(s.h, deflection) })
+	return m, err
+}
+
+// LiveMeshes reports native meshes not yet freed (always 0 outside a Tessellate call).
+func (k *Kernel) LiveMeshes() int64 {
+	var n int64
+	k.run(func() { n = bridge.LiveMeshes() })
+	return n
 }

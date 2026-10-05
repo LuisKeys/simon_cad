@@ -1,0 +1,267 @@
+package ui
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/accelone/simoncad/internal/agent/runtime"
+	"github.com/accelone/simoncad/internal/app"
+)
+
+var clock = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+
+func newSvc(t *testing.T) *Service {
+	t.Helper()
+	s := NewService(app.New("m2", clock), "")
+	s.Clock = clock
+	t.Cleanup(s.Close)
+	return s
+}
+
+func scripted(t *testing.T, calls ...string) ProviderFactory {
+	t.Helper()
+	var rec runtime.Recording
+	for i, c := range calls {
+		var in map[string]any
+		if err := json.Unmarshal([]byte(c[strings.Index(c, "{"):]), &in); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(in)
+		rec.Responses = append(rec.Responses, runtime.Response{StopReason: "tool_use", Content: []runtime.Block{
+			{Type: "tool_use", ID: "tu_" + string(rune('1'+i)), Name: strings.TrimSpace(c[:strings.Index(c, "{")]), Input: raw}}})
+	}
+	rec.Responses = append(rec.Responses, runtime.Response{StopReason: "end_turn", Content: []runtime.Block{{Type: "text", Text: "Done."}}})
+	rep := &runtime.Replay{Rec: rec}
+	return func() (runtime.Provider, error) { return rep, nil }
+}
+
+func waitIdle(t *testing.T, s *Service) {
+	t.Helper()
+	ch, cancel := s.Hub().Subscribe()
+	defer cancel()
+	deadline := time.After(10 * time.Second)
+	for {
+		s.mu.Lock()
+		busy := s.busy
+		s.mu.Unlock()
+		if !busy {
+			return
+		}
+		select {
+		case <-ch:
+		case <-time.After(20 * time.Millisecond):
+		case <-deadline:
+			t.Fatal("agent did not finish")
+		}
+	}
+}
+
+// The M2 demo, headless: select a face → "Add four M3 holes here" → preview → commit → undo.
+func TestM2SelectPromptPreviewCommitUndo(t *testing.T) {
+	s := newSvc(t)
+	if _, err := s.CallTool("create_box", json.RawMessage(`{"id":"plate","dx":100,"dy":60,"dz":4,"intent":"Base plate"}`)); err != nil {
+		t.Fatal(err)
+	}
+	// Review level: even a single-feature edit stays proposed until committed.
+	st, _ := s.State()
+	if len(st.Pending) != 1 {
+		t.Fatalf("review level should hold create_box for approval, pending=%d", len(st.Pending))
+	}
+	if _, err := s.Commit(st.Pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Click a triangle of the top face → semantic selector → selection context.
+	sc, err := s.Scene(nil)
+	if err != nil || len(sc.Changed) != 1 {
+		t.Fatalf("scene %v", err)
+	}
+	body := sc.Changed[0]
+	top := -1
+	for _, f := range body.Faces {
+		if f.Normal != nil && f.Normal[2] == 1 {
+			top = f.TriStart
+		}
+	}
+	sv, err := s.Pick(PickRequest{Body: "plate", Kind: "face", Triangle: top, Mode: "replace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sv.Selectors) != 1 || sv.Selectors[0] != "face(feature=plate,side=+Z)" || len(sv.Highlights) != 1 || sv.Entities[0].Area != 6000 {
+		t.Fatalf("selection %+v", sv)
+	}
+
+	s.NewProvider = scripted(t, `add_hole {"face":"face(feature=plate,side=+Z)","diameter":3.2,"positions":[[10,10],[90,10],[10,50],[90,50]],"intent":"Four M3 clearance holes"}`)
+	if err := s.Prompt("Add four M3 holes here"); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	st, _ = s.State()
+	if len(st.Pending) != 1 || st.Pending[0].Intent != "Four M3 clearance holes" || len(st.Tree) != 1 {
+		t.Fatalf("agent should leave one proposed ChangeSet; pending=%+v tree=%d", st.Pending, len(st.Tree))
+	}
+	if st.Chat[len(st.Chat)-1].Text != "Done." {
+		t.Fatalf("chat %+v", st.Chat)
+	}
+	csID := st.Pending[0].ID
+
+	// Preview: the ghost replaces the plate, the live model is untouched.
+	vol := st.Volume
+	g, err := s.Preview(csID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Added) != 1 || g.Added[0].ID != "hole" || len(g.Removed) != 1 || g.Removed[0] != "plate" {
+		t.Fatalf("ghost %+v", g)
+	}
+	if g.ChangeSet.VolumeAfter >= g.ChangeSet.VolumeBefore {
+		t.Fatalf("holes must remove material: %+v", g.ChangeSet)
+	}
+	if st2, _ := s.State(); st2.Volume != vol || len(st2.Tree) != 1 {
+		t.Fatal("preview changed the live model")
+	}
+
+	c, err := s.Commit(csID)
+	if err != nil || c.State != "committed" {
+		t.Fatalf("commit: %v %+v", err, c)
+	}
+	st, _ = s.State()
+	if len(st.Tree) != 2 || st.Volume >= vol || !st.CanUndo || len(st.Selection.Selectors) != 0 {
+		t.Fatalf("after commit: tree=%d vol=%v sel=%v", len(st.Tree), st.Volume, st.Selection.Selectors)
+	}
+	if last := st.Checkpoints[len(st.Checkpoints)-1]; last.Label != "Four M3 clearance holes" || !last.Current {
+		t.Fatalf("semantic checkpoint %+v", last)
+	}
+	if _, err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 1 || st.Volume != vol || !st.CanRedo {
+		t.Fatalf("undo: tree=%d vol=%v", len(st.Tree), st.Volume)
+	}
+	// Provenance: everything traces to validated tool calls.
+	if n := len(s.app.AH.ToolCalls); n != 2 {
+		t.Fatalf("expected 2 recorded tool calls, got %d", n)
+	}
+}
+
+func TestEditsRejectedWhileAgentWorks(t *testing.T) {
+	s := newSvc(t)
+	s.mu.Lock()
+	s.busy = true
+	s.mu.Unlock()
+	if _, err := s.CallTool("create_box", json.RawMessage(`{"dx":1,"dy":1,"dz":1}`)); err != ErrBusy {
+		t.Fatalf("got %v", err)
+	}
+	if err := s.Prompt("hello"); err != ErrBusy {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := s.State(); err != nil {
+		t.Fatal("reads must stay available while the agent works")
+	}
+}
+
+func TestParameterEditTimelineCompareAndPlayback(t *testing.T) {
+	s := newSvc(t)
+	if err := s.SetLevel(LevelAuto); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []string{`{"id":"plate","dx":50,"dy":30,"dz":4}`} {
+		if o, err := s.CallTool("create_box", json.RawMessage(a)); err != nil || !o.Committed {
+			t.Fatalf("%v %+v", err, o)
+		}
+	}
+	if o, err := s.CallTool("add_hole", json.RawMessage(`{"target":"plate","diameter":4,"positions":[[10,10],[40,20]]}`)); err != nil || !o.Committed {
+		t.Fatalf("%v %+v", err, o)
+	}
+	if o, err := s.SetParameter("plate", "dz", 6.0); err != nil || !o.OK || !o.Committed {
+		t.Fatalf("inline edit: %v %+v", err, o)
+	}
+	st, _ := s.State()
+	if st.Tree[0].Params["dz"] != 6.0 || len(st.Checkpoints) != 3 {
+		t.Fatalf("tree %+v checkpoints %d", st.Tree[0].Params, len(st.Checkpoints))
+	}
+	cmp, err := s.Compare("cp_001", "")
+	if err != nil || cmp.Identical || cmp.FeaturesB != 2 || cmp.VolumeB >= cmp.VolumeA*2 {
+		t.Fatalf("compare %+v %v", cmp, err)
+	}
+	// Restore is proposed, never auto-committed, even at the auto level.
+	o, err := s.Restore("cp_001")
+	if err != nil || !o.OK || o.Committed || o.ChangeSet == nil {
+		t.Fatalf("restore %+v %v", o, err)
+	}
+	if err := s.Reject(o.ChangeSet.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Playback rebuilds the design feature by feature from the committed ChangeSets.
+	f0, err := s.PlaybackFrame(0, nil)
+	if err != nil || f0.Total != 3 || len(f0.Scene.Changed) != 0 {
+		t.Fatalf("frame 0 %+v %v", f0, err)
+	}
+	f1, _ := s.PlaybackFrame(1, nil)
+	f3, _ := s.PlaybackFrame(3, f1.Scene.Keys)
+	if len(f1.Scene.Changed) != 1 || f1.ChangeSet.Intent == "" || len(f3.Scene.Changed) != 1 || f3.Scene.Changed[0].Triangles <= f1.Scene.Changed[0].Triangles/2 {
+		t.Fatalf("frames %+v %+v", f1.Scene.Stats, f3.Scene.Stats)
+	}
+	if _, err := s.PlaybackFrame(9, nil); err == nil {
+		t.Fatal("out-of-range frame must fail")
+	}
+}
+
+func TestSelectionModesAndStaleCleanup(t *testing.T) {
+	s := newSvc(t)
+	s.SetLevel(LevelAuto)
+	s.CallTool("create_box", json.RawMessage(`{"id":"b","dx":20,"dy":20,"dz":20}`))
+	if _, err := s.Pick(PickRequest{Body: "b", Kind: "face", Index: 0, Triangle: -1}); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := s.Pick(PickRequest{Body: "b", Kind: "edge", Index: 3, Triangle: -1, Mode: "add"})
+	if len(v.Selectors) != 2 || len(v.Highlights) != 2 {
+		t.Fatalf("add mode %+v", v)
+	}
+	v, _ = s.Pick(PickRequest{Body: "b", Kind: "edge", Index: 3, Triangle: -1, Mode: "toggle"})
+	if len(v.Selectors) != 1 {
+		t.Fatalf("toggle %+v", v)
+	}
+	v, _ = s.Pick(PickRequest{}) // click on empty space clears
+	if len(v.Selectors) != 0 {
+		t.Fatalf("clear %+v", v)
+	}
+	if _, err := s.Pick(PickRequest{Body: "ghost", Kind: "face", Triangle: -1}); err == nil {
+		t.Fatal("unknown body must fail")
+	}
+	if _, err := s.Pick(PickRequest{Body: "b", Kind: "face", Index: 99, Triangle: -1}); err == nil {
+		t.Fatal("out-of-range pick must fail")
+	}
+	// A selection that stops resolving is dropped when the model changes under it.
+	s.Pick(PickRequest{Body: "b", Kind: "face", Index: 0, Triangle: -1})
+	o, _ := s.CallTool("remove_feature", json.RawMessage(`{"feature":"b"}`))
+	if _, err := s.Commit(o.ChangeSet.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.State(); len(st.Selection.Selectors) != 0 {
+		t.Fatalf("stale selection survived: %+v", st.Selection)
+	}
+}
+
+func TestPaletteListsEveryToolAndIntentVerb(t *testing.T) {
+	s := newSvc(t)
+	kinds := map[string]int{}
+	tools := map[string]bool{}
+	for _, e := range s.Palette() {
+		kinds[e.Kind]++
+		if e.Kind == "tool" {
+			tools[e.ID] = true
+		}
+	}
+	if kinds["intent"] != len(IntentVerbs) || kinds["command"] < 5 {
+		t.Fatalf("palette %v", kinds)
+	}
+	for _, n := range s.app.Reg.Names() {
+		if !tools[n] {
+			t.Fatalf("tool %s missing from palette", n)
+		}
+	}
+}

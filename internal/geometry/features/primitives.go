@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/accelone/simoncad/internal/geometry/api"
+	"github.com/accelone/simoncad/internal/selectors"
 )
 
 func init() {
@@ -112,15 +113,63 @@ func buildEdgeTreatment(fillet bool) func(*Ctx) (*api.Shape, error) {
 		if err != nil {
 			return nil, err
 		}
+		edges, err := edgeIndices(c.P, c.P.Str("target"), t.Topology())
+		if err != nil {
+			return nil, err
+		}
 		sz := t.Bounds().Size()
-		if limit := math.Min(sz[0], math.Min(sz[1], sz[2])) / 2; v >= limit {
+		if limit := math.Min(sz[0], math.Min(sz[1], sz[2])) / 2; edges == nil && v >= limit {
 			return nil, fmt.Errorf("%s %g mm is too large for this body (must be < %g mm)", name, v, limit)
 		}
-		if fillet {
+		switch {
+		case edges == nil && fillet:
 			return t.Shape.Fillet(v)
+		case edges == nil:
+			return t.Shape.Chamfer(v)
+		case fillet:
+			return t.Shape.FilletEdges(edges, v)
 		}
-		return t.Shape.Chamfer(v)
+		return t.Shape.ChamferEdges(edges, v)
 	}
+}
+
+// edgeIndices reads the optional `edges` parameter: edge(feature=<target>,index=N)
+// selectors. nil means every edge.
+func edgeIndices(p Params, target string, topo *selectors.Topology) ([]int, error) {
+	raw, ok := p["edges"]
+	if !ok {
+		return nil, nil
+	}
+	list, ok := raw.([]any)
+	if !ok || len(list) == 0 {
+		return nil, fmt.Errorf("edges must be a non-empty list of edge(...) selectors")
+	}
+	if topo == nil {
+		return nil, fmt.Errorf("the target has no resolvable topology")
+	}
+	seen := map[int]bool{}
+	var out []int
+	for _, it := range list {
+		str, _ := it.(string)
+		sel, err := selectors.Parse(str)
+		if err != nil {
+			return nil, err
+		}
+		if sel.Kind != "edge" {
+			return nil, fmt.Errorf("%s is not an edge selector", sel.String())
+		}
+		if sel.Feature() != target {
+			return nil, fmt.Errorf("edge selector %s is not on the target %q", sel.String(), target)
+		}
+		if _, err := selectors.ResolveTopo(sel, topo); err != nil {
+			return nil, fmt.Errorf("unresolved selector %s: %w", sel.String(), err)
+		}
+		if i := sel.IndexOf(); !seen[i] {
+			seen[i] = true
+			out = append(out, i)
+		}
+	}
+	return out, nil
 }
 
 func buildTransform(c *Ctx) (*api.Shape, error) {

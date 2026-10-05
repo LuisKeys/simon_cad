@@ -47,11 +47,12 @@ Combine two features: op=union merges `tool` into `target`; op=subtract removes 
 
 ### `chamfer`
 
-Chamfer all edges of a feature with the given distance (mm). Applies to every edge of the body (selective edge selection arrives with Phase 2 selectors).
+Chamfer all edges of a feature with the given distance (mm). Treats every edge of the body unless `edges` lists edge(feature=<target>,index=N) selectors (the user's selected edges), in which case only those.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `distance` | number > 0 | yes | Size (mm) |
+| `edges` | array of string |  | Only these edges: edge(feature=<target>,index=N) selectors from the selection context. Omit for every edge. |
 | `target` | string | yes | Feature to treat |
 
 ### `circular_pattern`
@@ -122,10 +123,11 @@ Sketch a planar profile and extrude it, adding material (mode=add, optionally me
 
 ### `fillet`
 
-Round all edges of a feature with the given radius (mm). Applies to every edge of the body (selective edge selection arrives with Phase 2 selectors).
+Round all edges of a feature with the given radius (mm). Treats every edge of the body unless `edges` lists edge(feature=<target>,index=N) selectors (the user's selected edges), in which case only those.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
+| `edges` | array of string |  | Only these edges: edge(feature=<target>,index=N) selectors from the selection context. Omit for every edge. |
 | `radius` | number > 0 | yes | Size (mm) |
 | `target` | string | yes | Feature to treat |
 
