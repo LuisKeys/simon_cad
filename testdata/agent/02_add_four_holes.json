@@ -1,0 +1,83 @@
+{
+  "name": "02_add_four_holes",
+  "notes": "Scripted recording (hand-written to mirror a well-behaved model). Re-capture with: simoncad-cli eval --live --record testdata/agent",
+  "prompt": "Add four 3.2 mm holes.",
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "add_hole",
+            "input": {
+              "target": "plate",
+              "diameter": 3.2,
+              "positions": [
+                [
+                  6,
+                  6
+                ],
+                [
+                  94,
+                  6
+                ],
+                [
+                  6,
+                  54
+                ],
+                [
+                  94,
+                  54
+                ]
+              ],
+              "intent": "M3 clearance holes near the corners"
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "Added four 3.2 mm (M3 clearance) holes, 6 mm in from each corner."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "add_hole",
+        "args": {
+          "target": "plate",
+          "diameter": 3.2,
+          "positions": {
+            "len": 4
+          }
+        }
+      }
+    ],
+    "model": {
+      "volume_mm3": 23871.320364908963,
+      "features": 2,
+      "failed": 0
+    }
+  },
+  "setup": [
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "plate",
+        "name": "Base plate",
+        "dx": 100,
+        "dy": 60,
+        "dz": 4
+      }
+    }
+  ]
+}

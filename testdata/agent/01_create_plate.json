@@ -1,0 +1,58 @@
+{
+  "name": "01_create_plate",
+  "notes": "Scripted recording (hand-written to mirror a well-behaved model). Re-capture with: simoncad-cli eval --live --record testdata/agent",
+  "prompt": "Create a 100 x 60 x 4 mm plate.",
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "I'll create the plate."
+          },
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "create_box",
+            "input": {
+              "name": "plate",
+              "dx": 100,
+              "dy": 60,
+              "dz": 4,
+              "intent": "Base plate 100 x 60 x 4 mm"
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "Created a 100 x 60 x 4 mm plate (feature `plate`)."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "create_box",
+        "args": {
+          "dx": 100,
+          "dy": 60,
+          "dz": 4
+        }
+      }
+    ],
+    "model": {
+      "volume_mm3": 24000,
+      "features": 1,
+      "bodies": 1,
+      "failed": 0
+    }
+  }
+}

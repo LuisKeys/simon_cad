@@ -1,0 +1,17 @@
+{
+  "source": "scripted",
+  "responses": [
+    {
+      "content": [
+        {"type": "text", "text": "Creating the plate."},
+        {"type": "tool_use", "id": "tu_1", "name": "create_box",
+         "input": {"name": "plate", "dx": 80, "dy": 60, "dz": 4, "intent": "Base plate 80 x 60 x 4 mm"}}
+      ],
+      "stop_reason": "tool_use"
+    },
+    {
+      "content": [{"type": "text", "text": "Created an 80 x 60 x 4 mm plate (feature `plate`)."}],
+      "stop_reason": "end_turn"
+    }
+  ]
+}

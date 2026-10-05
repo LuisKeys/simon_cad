@@ -1,0 +1,96 @@
+{
+  "name": "04_recovers_from_validation_error",
+  "notes": "Scripted recording (hand-written to mirror a well-behaved model). Re-capture with: simoncad-cli eval --live --record testdata/agent",
+  "prompt": "Add one 3.2 mm hole near the lower-left corner.",
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "add_hole",
+            "input": {
+              "target": "plate",
+              "diameter": 3.2,
+              "positions": [
+                [
+                  0.5,
+                  5
+                ]
+              ]
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "That position is too close to the edge; moving it inward."
+          },
+          {
+            "type": "tool_use",
+            "id": "tu_2",
+            "name": "add_hole",
+            "input": {
+              "target": "plate",
+              "diameter": 3.2,
+              "positions": [
+                [
+                  6,
+                  6
+                ]
+              ],
+              "intent": "Corner mounting hole"
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "Added a 3.2 mm hole 6 mm from the lower-left corner."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "add_hole",
+        "args": {
+          "positions": [
+            [
+              6,
+              6
+            ]
+          ]
+        }
+      }
+    ],
+    "model": {
+      "volume_mm3": 23967.83009122724,
+      "features": 2,
+      "failed": 0
+    }
+  },
+  "setup": [
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "plate",
+        "name": "Base plate",
+        "dx": 100,
+        "dy": 60,
+        "dz": 4
+      }
+    }
+  ]
+}
