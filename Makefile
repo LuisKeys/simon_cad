@@ -10,7 +10,7 @@ export LD_LIBRARY_PATH := $(OCCT)/lib:$(LD_LIBRARY_PATH)
 STAMP = $(shell sha1sum $(NATIVE)/libsimon_occ.a 2>/dev/null | cut -c1-12)
 export CGO_CFLAGS = -DSIMON_NATIVE_STAMP=$(STAMP)
 
-.PHONY: occt native build build-go test test-go leakcheck bracket eval demo
+.PHONY: occt native build build-go test test-go leakcheck bracket eval demo docs
 
 occt:
 	bash scripts/build-occt.sh
@@ -46,3 +46,7 @@ leakcheck: native
 
 bracket: build
 	./out/simoncad-cli bracket --out out/
+
+# Regenerate docs/tools.md from the live tool registry.
+docs: build
+	python3 scripts/gen-tool-docs.py ./out/simoncad-cli
