@@ -1,0 +1,5 @@
+.env
+third_party/
+out/
+*.o
+.vscode/

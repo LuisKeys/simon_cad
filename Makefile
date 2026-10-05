@@ -1,0 +1,48 @@
+ROOT      := $(CURDIR)
+GO        := $(ROOT)/third_party/go/bin/go
+OCCT      := $(ROOT)/third_party/occt-install
+NATIVE    := $(ROOT)/out/native
+export PATH := $(ROOT)/third_party/go/bin:$(PATH)
+export LD_LIBRARY_PATH := $(OCCT)/lib:$(LD_LIBRARY_PATH)
+
+# Go's build cache does not notice changes to the native static library, so stamp its
+# checksum into CGO_CFLAGS: a rebuilt libsimon_occ.a then forces cgo packages to relink.
+STAMP = $(shell sha1sum $(NATIVE)/libsimon_occ.a 2>/dev/null | cut -c1-12)
+export CGO_CFLAGS = -DSIMON_NATIVE_STAMP=$(STAMP)
+
+.PHONY: occt native build build-go test test-go leakcheck bracket eval demo
+
+occt:
+	bash scripts/build-occt.sh
+
+native:
+	cmake -S native/occ -B $(NATIVE) -DOCCT_PREFIX=$(OCCT) -DCMAKE_BUILD_TYPE=Release
+	cmake --build $(NATIVE) -j$$(nproc)
+
+build: native
+	$(MAKE) --no-print-directory build-go
+
+build-go:
+	$(GO) build -o out/simoncad-cli ./cmd/simoncad-cli
+
+test: native
+	$(NATIVE)/bridge_test
+	$(MAKE) --no-print-directory test-go
+
+test-go:
+	$(GO) vet ./cmd/... ./internal/...
+	$(GO) test ./...
+
+# Recorded agent evals (no network); add `--live` via the CLI for the nightly run.
+eval: build
+	./out/simoncad-cli eval
+
+demo: build
+	bash scripts/demo_m1.sh
+
+# Valgrind over the C++ ABI test: no leaks, no invalid accesses.
+leakcheck: native
+	valgrind --leak-check=full --errors-for-leak-kinds=definite --error-exitcode=1 $(NATIVE)/bridge_test
+
+bracket: build
+	./out/simoncad-cli bracket --out out/
