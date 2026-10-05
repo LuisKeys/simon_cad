@@ -28,7 +28,7 @@ export class Viewport {
     const key = new THREE.DirectionalLight(0xffffff, 1.6);
     key.position.set(1, -1.5, 2.5);
     this.scene.add(key);
-    this.grid = new THREE.GridHelper(400, 40, 0x445066, 0x2a3240);
+    this.grid = new THREE.GridHelper(400, 40, 0x5a3a1a, 0x2a2018);
     this.grid.rotation.x = Math.PI / 2; // lie in XY, Z up
     this.grid.material.transparent = true; this.grid.material.opacity = 0.5;
     this.scene.add(this.grid);
@@ -446,8 +446,8 @@ export class Viewport {
     const face = (txt) => {
       const cv = document.createElement('canvas'); cv.width = cv.height = 128;
       const g = cv.getContext('2d');
-      g.fillStyle = '#2b3442'; g.fillRect(0, 0, 128, 128);
-      g.strokeStyle = '#6b7b92'; g.lineWidth = 6; g.strokeRect(3, 3, 122, 122);
+      g.fillStyle = '#1f1f1f'; g.fillRect(0, 0, 128, 128);
+      g.strokeStyle = '#ff7a00'; g.lineWidth = 6; g.strokeRect(3, 3, 122, 122);
       g.fillStyle = '#e4e8ee'; g.font = 'bold 26px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(txt, 64, 66);
       const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="simon-token" content="__SIMON_TOKEN__">
 <title>Simon CAD</title>
-<link rel="icon" href="data:,">
+<link rel="icon" type="image/png" href="assets/icon.png">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/" } }
@@ -13,7 +13,7 @@
 </head>
 <body>
 <header id="top">
-  <div class="brand">Simon CAD</div>
+  <div class="brand" title="Simon CAD — Design in control."><img src="assets/mark.png" alt="" class="mark"><span class="word">SIMON <b>CAD</b></span></div>
   <div id="project" class="project" title="Project"></div>
   <div class="spacer"></div>
   <div class="group">
@@ -74,7 +74,7 @@
       <canvas id="gl"></canvas>
       <canvas id="cube" width="120" height="120" title="View cube"></canvas>
       <div id="measure-label" class="measure-label" hidden></div>
-      <div id="empty" class="empty">Nothing here yet. Press <kbd>Ctrl</kbd>+<kbd>K</kbd>, or ask the agent: “Create a 100 x 60 x 4 mm plate”.</div>
+      <div id="empty" class="empty"><img src="assets/logo.png" alt="Simon CAD — Design in control." class="empty-logo"><p>Nothing here yet. Press <kbd>Ctrl</kbd>+<kbd>K</kbd>, or ask the agent: “Create a 100 x 60 x 4 mm plate”.</p></div>
       <div id="ghost-bar" class="ghost-bar" hidden></div>
     </div>
     <div id="timeline" class="timeline" aria-label="Semantic timeline"></div>
