@@ -1,0 +1,800 @@
+{
+  "prompts": [],
+  "tool_calls": [
+    {
+      "id": "tc_0001",
+      "actor": "cli",
+      "name": "create_box",
+      "args": {
+        "dx": 70,
+        "dy": 40,
+        "dz": 4,
+        "id": "plate",
+        "intent": "Base plate for the MG996R servo bracket",
+        "name": "Bracket plate"
+      },
+      "status": "ok",
+      "changeset_id": "cs_0001"
+    },
+    {
+      "id": "tc_0002",
+      "actor": "cli",
+      "name": "fillet",
+      "args": {
+        "id": "plate_rounded",
+        "intent": "Round the plate edges",
+        "radius": 1.5,
+        "target": "plate"
+      },
+      "status": "ok",
+      "changeset_id": "cs_0002"
+    },
+    {
+      "id": "tc_0003",
+      "actor": "cli",
+      "name": "extrude_profile",
+      "args": {
+        "h": 20.5,
+        "id": "servo_pocket",
+        "intent": "Pocket for the MG996R body",
+        "mode": "cut",
+        "profile": "rectangle",
+        "target": "plate_rounded",
+        "through": true,
+        "w": 41,
+        "x": 14.5,
+        "y": 9.75
+      },
+      "status": "ok",
+      "changeset_id": "cs_0003"
+    },
+    {
+      "id": "tc_0004",
+      "actor": "cli",
+      "name": "add_hole",
+      "args": {
+        "diameter": 3.2,
+        "id": "ear_holes",
+        "intent": "M3 clearance holes for the servo mounting ears",
+        "positions": [
+          [
+            10.25,
+            15
+          ],
+          [
+            10.25,
+            25
+          ],
+          [
+            59.75,
+            15
+          ],
+          [
+            59.75,
+            25
+          ]
+        ],
+        "target": "servo_pocket"
+      },
+      "status": "ok",
+      "changeset_id": "cs_0004"
+    },
+    {
+      "id": "tc_0005",
+      "actor": "cli",
+      "name": "export_step",
+      "args": {
+        "path": "/tmp/TestDogfoodServoBracket664077976/001/b.step"
+      },
+      "status": "ok",
+      "result": {
+        "bytes": 95090,
+        "format": "step",
+        "path": "/tmp/TestDogfoodServoBracket664077976/001/b.step",
+        "reimport_volume_rel_error": 4.85474306477237e-15,
+        "valid": true,
+        "volume_mm3": 7493.658796260706
+      }
+    },
+    {
+      "id": "tc_0006",
+      "actor": "cli",
+      "name": "export_stl",
+      "args": {
+        "path": "/tmp/TestDogfoodServoBracket664077976/001/b.stl"
+      },
+      "status": "ok",
+      "result": {
+        "bytes": 54084,
+        "format": "stl",
+        "path": "/tmp/TestDogfoodServoBracket664077976/001/b.stl",
+        "triangles": 1080,
+        "valid": true,
+        "volume_mm3": 7493.658796260706,
+        "watertight": true
+      }
+    }
+  ],
+  "changesets": [
+    {
+      "id": "cs_0001",
+      "seq": 1,
+      "state": "committed",
+      "intent": "Base plate for the MG996R servo bracket",
+      "explanation": "Adds block \"plate\" (70 x 40 x 4 mm).",
+      "commands": [
+        {
+          "type": "AddFeature",
+          "data": {
+            "node": {
+              "id": "plate",
+              "type": "box",
+              "parameters": {
+                "dx": 70,
+                "dy": 40,
+                "dz": 4
+              },
+              "intent": "Base plate for the MG996R servo bracket",
+              "provenance": {
+                "created_by": "cli",
+                "tool_call_id": "tc_0001",
+                "changeset_id": "cs_0001"
+              },
+              "metadata": {
+                "name": "Bracket plate",
+                "created": "2026-01-02T03:04:05Z",
+                "modified": "2026-01-02T03:04:05Z"
+              }
+            },
+            "index": -1
+          }
+        }
+      ],
+      "rollback": [
+        {
+          "type": "RemoveFeature",
+          "data": {
+            "id": "plate"
+          }
+        }
+      ],
+      "affected": [
+        "plate"
+      ],
+      "expected_effects": {
+        "volume_before": 0,
+        "volume_after": 11199.999999999998,
+        "added": [
+          "plate"
+        ]
+      },
+      "validation": [
+        {
+          "check": "schema",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "semantic",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "rebuild",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "geometry",
+          "ok": true,
+          "severity": "info"
+        }
+      ],
+      "provenance": {
+        "created_by": "cli",
+        "tool_call_id": "tc_0001",
+        "changeset_id": "cs_0001"
+      },
+      "base_hash": "e799d076774b0363285b76802168e8157226a53956b6af21d0744b91d4239235",
+      "result_hash": "b43ad6a27c652dffe7d7e915f0ede9fed54938acf3212344fb00ac6df702459a",
+      "time": "2026-01-02T03:04:05Z"
+    },
+    {
+      "id": "cs_0002",
+      "seq": 2,
+      "state": "committed",
+      "intent": "Round the plate edges",
+      "explanation": "Applies a 1.5 mm fillet to \"plate\".",
+      "commands": [
+        {
+          "type": "AddFeature",
+          "data": {
+            "node": {
+              "id": "plate_rounded",
+              "type": "fillet",
+              "parameters": {
+                "radius": 1.5,
+                "target": "plate"
+              },
+              "dependencies": [
+                "plate"
+              ],
+              "intent": "Round the plate edges",
+              "provenance": {
+                "created_by": "cli",
+                "tool_call_id": "tc_0002",
+                "changeset_id": "cs_0002"
+              },
+              "metadata": {
+                "name": "plate_rounded",
+                "created": "2026-01-02T03:04:05Z",
+                "modified": "2026-01-02T03:04:05Z"
+              }
+            },
+            "index": -1
+          }
+        }
+      ],
+      "rollback": [
+        {
+          "type": "RemoveFeature",
+          "data": {
+            "id": "plate_rounded"
+          }
+        }
+      ],
+      "affected": [
+        "plate_rounded"
+      ],
+      "expected_effects": {
+        "volume_before": 11199.999999999998,
+        "volume_after": 10984.338431351742,
+        "added": [
+          "plate_rounded"
+        ]
+      },
+      "validation": [
+        {
+          "check": "schema",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "semantic",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "rebuild",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "geometry",
+          "ok": true,
+          "severity": "info"
+        }
+      ],
+      "provenance": {
+        "created_by": "cli",
+        "tool_call_id": "tc_0002",
+        "changeset_id": "cs_0002"
+      },
+      "base_hash": "b43ad6a27c652dffe7d7e915f0ede9fed54938acf3212344fb00ac6df702459a",
+      "result_hash": "da919afe8314b978c1b2692085ad23e567eae0baa42fc2b98d9a5ecbed12d772",
+      "time": "2026-01-02T03:04:05Z"
+    },
+    {
+      "id": "cs_0003",
+      "seq": 3,
+      "state": "committed",
+      "intent": "Pocket for the MG996R body",
+      "explanation": "Extrudes a rectangle profile (cut).",
+      "commands": [
+        {
+          "type": "AddFeature",
+          "data": {
+            "node": {
+              "id": "servo_pocket",
+              "type": "extrude",
+              "parameters": {
+                "h": 20.5,
+                "mode": "cut",
+                "profile": "rectangle",
+                "target": "plate_rounded",
+                "through": true,
+                "w": 41,
+                "x": 14.5,
+                "y": 9.75
+              },
+              "dependencies": [
+                "plate_rounded"
+              ],
+              "intent": "Pocket for the MG996R body",
+              "provenance": {
+                "created_by": "cli",
+                "tool_call_id": "tc_0003",
+                "changeset_id": "cs_0003"
+              },
+              "metadata": {
+                "name": "servo_pocket",
+                "created": "2026-01-02T03:04:05Z",
+                "modified": "2026-01-02T03:04:05Z"
+              }
+            },
+            "index": -1
+          }
+        }
+      ],
+      "rollback": [
+        {
+          "type": "RemoveFeature",
+          "data": {
+            "id": "servo_pocket"
+          }
+        }
+      ],
+      "affected": [
+        "servo_pocket"
+      ],
+      "expected_effects": {
+        "volume_before": 10984.338431351742,
+        "volume_after": 7622.338431351746,
+        "added": [
+          "servo_pocket"
+        ]
+      },
+      "validation": [
+        {
+          "check": "schema",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "semantic",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "rebuild",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "geometry",
+          "ok": true,
+          "severity": "info"
+        }
+      ],
+      "provenance": {
+        "created_by": "cli",
+        "tool_call_id": "tc_0003",
+        "changeset_id": "cs_0003"
+      },
+      "base_hash": "da919afe8314b978c1b2692085ad23e567eae0baa42fc2b98d9a5ecbed12d772",
+      "result_hash": "eb9a23031465e01798f4df57bb517d7f212fe24a1046e5477079e0bdcd2eb7f9",
+      "time": "2026-01-02T03:04:05Z"
+    },
+    {
+      "id": "cs_0004",
+      "seq": 4,
+      "state": "committed",
+      "intent": "M3 clearance holes for the servo mounting ears",
+      "explanation": "Drills 4 3.2 mm simple hole(s) into \"servo_pocket\" (face(feature=servo_pocket,side=+Z)).",
+      "commands": [
+        {
+          "type": "AddFeature",
+          "data": {
+            "node": {
+              "id": "ear_holes",
+              "type": "hole",
+              "parameters": {
+                "diameter": 3.2,
+                "positions": [
+                  [
+                    10.25,
+                    15
+                  ],
+                  [
+                    10.25,
+                    25
+                  ],
+                  [
+                    59.75,
+                    15
+                  ],
+                  [
+                    59.75,
+                    25
+                  ]
+                ],
+                "target": "servo_pocket"
+              },
+              "dependencies": [
+                "servo_pocket"
+              ],
+              "intent": "M3 clearance holes for the servo mounting ears",
+              "provenance": {
+                "created_by": "cli",
+                "tool_call_id": "tc_0004",
+                "changeset_id": "cs_0004"
+              },
+              "metadata": {
+                "name": "ear_holes",
+                "created": "2026-01-02T03:04:05Z",
+                "modified": "2026-01-02T03:04:05Z"
+              }
+            },
+            "index": -1
+          }
+        }
+      ],
+      "rollback": [
+        {
+          "type": "RemoveFeature",
+          "data": {
+            "id": "ear_holes"
+          }
+        }
+      ],
+      "affected": [
+        "ear_holes"
+      ],
+      "expected_effects": {
+        "volume_before": 7622.338431351746,
+        "volume_after": 7493.658796260706,
+        "added": [
+          "ear_holes"
+        ]
+      },
+      "validation": [
+        {
+          "check": "schema",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "semantic",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "rebuild",
+          "ok": true,
+          "severity": "info"
+        },
+        {
+          "check": "geometry",
+          "ok": true,
+          "severity": "info"
+        }
+      ],
+      "provenance": {
+        "created_by": "cli",
+        "tool_call_id": "tc_0004",
+        "changeset_id": "cs_0004"
+      },
+      "base_hash": "eb9a23031465e01798f4df57bb517d7f212fe24a1046e5477079e0bdcd2eb7f9",
+      "result_hash": "6890c43a162111f179dfe7a7f7df2401a3ca647f28e22a1df141b61fa832f4d1",
+      "time": "2026-01-02T03:04:05Z"
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "cp_001",
+      "seq": 1,
+      "label": "create_box",
+      "actor": "cli",
+      "changesets": [
+        "cs_0001"
+      ],
+      "graph_hash": "b43ad6a27c652dffe7d7e915f0ede9fed54938acf3212344fb00ac6df702459a",
+      "time": "2026-01-02T03:04:05Z",
+      "snapshot": {
+        "units": "mm",
+        "nodes": [
+          {
+            "id": "plate",
+            "type": "box",
+            "parameters": {
+              "dx": 70,
+              "dy": 40,
+              "dz": 4
+            },
+            "intent": "Base plate for the MG996R servo bracket",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0001",
+              "changeset_id": "cs_0001"
+            },
+            "metadata": {
+              "name": "Bracket plate",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cp_002",
+      "seq": 2,
+      "label": "fillet",
+      "actor": "cli",
+      "changesets": [
+        "cs_0002"
+      ],
+      "graph_hash": "da919afe8314b978c1b2692085ad23e567eae0baa42fc2b98d9a5ecbed12d772",
+      "time": "2026-01-02T03:04:05Z",
+      "snapshot": {
+        "units": "mm",
+        "nodes": [
+          {
+            "id": "plate",
+            "type": "box",
+            "parameters": {
+              "dx": 70,
+              "dy": 40,
+              "dz": 4
+            },
+            "intent": "Base plate for the MG996R servo bracket",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0001",
+              "changeset_id": "cs_0001"
+            },
+            "metadata": {
+              "name": "Bracket plate",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          },
+          {
+            "id": "plate_rounded",
+            "type": "fillet",
+            "parameters": {
+              "radius": 1.5,
+              "target": "plate"
+            },
+            "dependencies": [
+              "plate"
+            ],
+            "intent": "Round the plate edges",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0002",
+              "changeset_id": "cs_0002"
+            },
+            "metadata": {
+              "name": "plate_rounded",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cp_003",
+      "seq": 3,
+      "label": "extrude_profile",
+      "actor": "cli",
+      "changesets": [
+        "cs_0003"
+      ],
+      "graph_hash": "eb9a23031465e01798f4df57bb517d7f212fe24a1046e5477079e0bdcd2eb7f9",
+      "time": "2026-01-02T03:04:05Z",
+      "snapshot": {
+        "units": "mm",
+        "nodes": [
+          {
+            "id": "plate",
+            "type": "box",
+            "parameters": {
+              "dx": 70,
+              "dy": 40,
+              "dz": 4
+            },
+            "intent": "Base plate for the MG996R servo bracket",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0001",
+              "changeset_id": "cs_0001"
+            },
+            "metadata": {
+              "name": "Bracket plate",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          },
+          {
+            "id": "plate_rounded",
+            "type": "fillet",
+            "parameters": {
+              "radius": 1.5,
+              "target": "plate"
+            },
+            "dependencies": [
+              "plate"
+            ],
+            "intent": "Round the plate edges",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0002",
+              "changeset_id": "cs_0002"
+            },
+            "metadata": {
+              "name": "plate_rounded",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          },
+          {
+            "id": "servo_pocket",
+            "type": "extrude",
+            "parameters": {
+              "h": 20.5,
+              "mode": "cut",
+              "profile": "rectangle",
+              "target": "plate_rounded",
+              "through": true,
+              "w": 41,
+              "x": 14.5,
+              "y": 9.75
+            },
+            "dependencies": [
+              "plate_rounded"
+            ],
+            "intent": "Pocket for the MG996R body",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0003",
+              "changeset_id": "cs_0003"
+            },
+            "metadata": {
+              "name": "servo_pocket",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cp_004",
+      "seq": 4,
+      "label": "add_hole",
+      "actor": "cli",
+      "changesets": [
+        "cs_0004"
+      ],
+      "graph_hash": "6890c43a162111f179dfe7a7f7df2401a3ca647f28e22a1df141b61fa832f4d1",
+      "time": "2026-01-02T03:04:05Z",
+      "snapshot": {
+        "units": "mm",
+        "nodes": [
+          {
+            "id": "plate",
+            "type": "box",
+            "parameters": {
+              "dx": 70,
+              "dy": 40,
+              "dz": 4
+            },
+            "intent": "Base plate for the MG996R servo bracket",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0001",
+              "changeset_id": "cs_0001"
+            },
+            "metadata": {
+              "name": "Bracket plate",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          },
+          {
+            "id": "plate_rounded",
+            "type": "fillet",
+            "parameters": {
+              "radius": 1.5,
+              "target": "plate"
+            },
+            "dependencies": [
+              "plate"
+            ],
+            "intent": "Round the plate edges",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0002",
+              "changeset_id": "cs_0002"
+            },
+            "metadata": {
+              "name": "plate_rounded",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          },
+          {
+            "id": "servo_pocket",
+            "type": "extrude",
+            "parameters": {
+              "h": 20.5,
+              "mode": "cut",
+              "profile": "rectangle",
+              "target": "plate_rounded",
+              "through": true,
+              "w": 41,
+              "x": 14.5,
+              "y": 9.75
+            },
+            "dependencies": [
+              "plate_rounded"
+            ],
+            "intent": "Pocket for the MG996R body",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0003",
+              "changeset_id": "cs_0003"
+            },
+            "metadata": {
+              "name": "servo_pocket",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          },
+          {
+            "id": "ear_holes",
+            "type": "hole",
+            "parameters": {
+              "diameter": 3.2,
+              "positions": [
+                [
+                  10.25,
+                  15
+                ],
+                [
+                  10.25,
+                  25
+                ],
+                [
+                  59.75,
+                  15
+                ],
+                [
+                  59.75,
+                  25
+                ]
+              ],
+              "target": "servo_pocket"
+            },
+            "dependencies": [
+              "servo_pocket"
+            ],
+            "intent": "M3 clearance holes for the servo mounting ears",
+            "provenance": {
+              "created_by": "cli",
+              "tool_call_id": "tc_0004",
+              "changeset_id": "cs_0004"
+            },
+            "metadata": {
+              "name": "ear_holes",
+              "created": "2026-01-02T03:04:05Z",
+              "modified": "2026-01-02T03:04:05Z"
+            },
+            "status": "ok"
+          }
+        ]
+      }
+    }
+  ]
+}

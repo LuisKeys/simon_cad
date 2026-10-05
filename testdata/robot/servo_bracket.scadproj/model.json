@@ -1,0 +1,119 @@
+{
+  "units": "mm",
+  "nodes": [
+    {
+      "id": "plate",
+      "type": "box",
+      "parameters": {
+        "dx": 70,
+        "dy": 40,
+        "dz": 4
+      },
+      "intent": "Base plate for the MG996R servo bracket",
+      "provenance": {
+        "created_by": "cli",
+        "tool_call_id": "tc_0001",
+        "changeset_id": "cs_0001"
+      },
+      "metadata": {
+        "name": "Bracket plate",
+        "created": "2026-01-02T03:04:05Z",
+        "modified": "2026-01-02T03:04:05Z"
+      },
+      "status": "ok"
+    },
+    {
+      "id": "plate_rounded",
+      "type": "fillet",
+      "parameters": {
+        "radius": 1.5,
+        "target": "plate"
+      },
+      "dependencies": [
+        "plate"
+      ],
+      "intent": "Round the plate edges",
+      "provenance": {
+        "created_by": "cli",
+        "tool_call_id": "tc_0002",
+        "changeset_id": "cs_0002"
+      },
+      "metadata": {
+        "name": "plate_rounded",
+        "created": "2026-01-02T03:04:05Z",
+        "modified": "2026-01-02T03:04:05Z"
+      },
+      "status": "ok"
+    },
+    {
+      "id": "servo_pocket",
+      "type": "extrude",
+      "parameters": {
+        "h": 20.5,
+        "mode": "cut",
+        "profile": "rectangle",
+        "target": "plate_rounded",
+        "through": true,
+        "w": 41,
+        "x": 14.5,
+        "y": 9.75
+      },
+      "dependencies": [
+        "plate_rounded"
+      ],
+      "intent": "Pocket for the MG996R body",
+      "provenance": {
+        "created_by": "cli",
+        "tool_call_id": "tc_0003",
+        "changeset_id": "cs_0003"
+      },
+      "metadata": {
+        "name": "servo_pocket",
+        "created": "2026-01-02T03:04:05Z",
+        "modified": "2026-01-02T03:04:05Z"
+      },
+      "status": "ok"
+    },
+    {
+      "id": "ear_holes",
+      "type": "hole",
+      "parameters": {
+        "diameter": 3.2,
+        "positions": [
+          [
+            10.25,
+            15
+          ],
+          [
+            10.25,
+            25
+          ],
+          [
+            59.75,
+            15
+          ],
+          [
+            59.75,
+            25
+          ]
+        ],
+        "target": "servo_pocket"
+      },
+      "dependencies": [
+        "servo_pocket"
+      ],
+      "intent": "M3 clearance holes for the servo mounting ears",
+      "provenance": {
+        "created_by": "cli",
+        "tool_call_id": "tc_0004",
+        "changeset_id": "cs_0004"
+      },
+      "metadata": {
+        "name": "ear_holes",
+        "created": "2026-01-02T03:04:05Z",
+        "modified": "2026-01-02T03:04:05Z"
+      },
+      "status": "ok"
+    }
+  ]
+}

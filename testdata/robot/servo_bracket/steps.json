@@ -1,0 +1,9 @@
+{
+  "description": "Phase 0 rectangular MG996R servo bracket plate, re-created through the Phase 1 tool pipeline (dogfood).",
+  "steps": [
+    {"tool": "create_box", "args": {"id": "plate", "name": "Bracket plate", "dx": 70, "dy": 40, "dz": 4, "intent": "Base plate for the MG996R servo bracket"}},
+    {"tool": "fillet", "args": {"id": "plate_rounded", "target": "plate", "radius": 1.5, "intent": "Round the plate edges"}},
+    {"tool": "extrude_profile", "args": {"id": "servo_pocket", "target": "plate_rounded", "mode": "cut", "profile": "rectangle", "x": 14.5, "y": 9.75, "w": 41, "h": 20.5, "through": true, "intent": "Pocket for the MG996R body"}},
+    {"tool": "add_hole", "args": {"id": "ear_holes", "target": "servo_pocket", "diameter": 3.2, "positions": [[10.25, 15], [10.25, 25], [59.75, 15], [59.75, 25]], "intent": "M3 clearance holes for the servo mounting ears"}}
+  ]
+}

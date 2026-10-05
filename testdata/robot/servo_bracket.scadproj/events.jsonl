@@ -1,0 +1,34 @@
+{"seq":1,"type":"AgentToolRequested","time":"2026-01-02T03:04:05Z","data":{"args":{"dx":70,"dy":40,"dz":4,"id":"plate","intent":"Base plate for the MG996R servo bracket","name":"Bracket plate"},"id":"tc_0001","tool":"create_box"}}
+{"seq":2,"type":"ChangeSetProposed","time":"2026-01-02T03:04:05Z","data":{"commands":1,"id":"cs_0001","intent":"Base plate for the MG996R servo bracket","valid":true}}
+{"seq":3,"type":"ChangeSetCommitted","time":"2026-01-02T03:04:05Z","data":{"affected":["plate"],"id":"cs_0001","result_hash":"b43ad6a27c652dffe7d7e915f0ede9fed54938acf3212344fb00ac6df702459a"}}
+{"seq":4,"type":"FeatureGraphUpdated","time":"2026-01-02T03:04:05Z","data":{"hash":"b43ad6a27c652dffe7d7e915f0ede9fed54938acf3212344fb00ac6df702459a","nodes":1}}
+{"seq":5,"type":"ModelRebuilt","time":"2026-01-02T03:04:05Z","data":{"cache_hits":1,"cache_misses":1,"failed":null,"hash":"b43ad6a27c652dffe7d7e915f0ede9fed54938acf3212344fb00ac6df702459a","volume_mm3":11199.999999999998}}
+{"seq":6,"type":"AgentToolResult","time":"2026-01-02T03:04:05Z","data":{"error":"","id":"tc_0001","ok":true}}
+{"seq":7,"type":"CheckpointCreated","time":"2026-01-02T03:04:05Z","data":{"hash":"b43ad6a27c652dffe7d7e915f0ede9fed54938acf3212344fb00ac6df702459a","id":"cp_001","label":"create_box"}}
+{"seq":8,"type":"AgentToolRequested","time":"2026-01-02T03:04:05Z","data":{"args":{"id":"plate_rounded","intent":"Round the plate edges","radius":1.5,"target":"plate"},"id":"tc_0002","tool":"fillet"}}
+{"seq":9,"type":"ChangeSetProposed","time":"2026-01-02T03:04:05Z","data":{"commands":1,"id":"cs_0002","intent":"Round the plate edges","valid":true}}
+{"seq":10,"type":"ChangeSetCommitted","time":"2026-01-02T03:04:05Z","data":{"affected":["plate_rounded"],"id":"cs_0002","result_hash":"da919afe8314b978c1b2692085ad23e567eae0baa42fc2b98d9a5ecbed12d772"}}
+{"seq":11,"type":"FeatureGraphUpdated","time":"2026-01-02T03:04:05Z","data":{"hash":"da919afe8314b978c1b2692085ad23e567eae0baa42fc2b98d9a5ecbed12d772","nodes":2}}
+{"seq":12,"type":"ModelRebuilt","time":"2026-01-02T03:04:05Z","data":{"cache_hits":6,"cache_misses":2,"failed":null,"hash":"da919afe8314b978c1b2692085ad23e567eae0baa42fc2b98d9a5ecbed12d772","volume_mm3":10984.338431351742}}
+{"seq":13,"type":"AgentToolResult","time":"2026-01-02T03:04:05Z","data":{"error":"","id":"tc_0002","ok":true}}
+{"seq":14,"type":"CheckpointCreated","time":"2026-01-02T03:04:05Z","data":{"hash":"da919afe8314b978c1b2692085ad23e567eae0baa42fc2b98d9a5ecbed12d772","id":"cp_002","label":"fillet"}}
+{"seq":15,"type":"AgentToolRequested","time":"2026-01-02T03:04:05Z","data":{"args":{"h":20.5,"id":"servo_pocket","intent":"Pocket for the MG996R body","mode":"cut","profile":"rectangle","target":"plate_rounded","through":true,"w":41,"x":14.5,"y":9.75},"id":"tc_0003","tool":"extrude_profile"}}
+{"seq":16,"type":"ChangeSetProposed","time":"2026-01-02T03:04:05Z","data":{"commands":1,"id":"cs_0003","intent":"Pocket for the MG996R body","valid":true}}
+{"seq":17,"type":"ChangeSetCommitted","time":"2026-01-02T03:04:05Z","data":{"affected":["servo_pocket"],"id":"cs_0003","result_hash":"eb9a23031465e01798f4df57bb517d7f212fe24a1046e5477079e0bdcd2eb7f9"}}
+{"seq":18,"type":"FeatureGraphUpdated","time":"2026-01-02T03:04:05Z","data":{"hash":"eb9a23031465e01798f4df57bb517d7f212fe24a1046e5477079e0bdcd2eb7f9","nodes":3}}
+{"seq":19,"type":"ModelRebuilt","time":"2026-01-02T03:04:05Z","data":{"cache_hits":15,"cache_misses":3,"failed":null,"hash":"eb9a23031465e01798f4df57bb517d7f212fe24a1046e5477079e0bdcd2eb7f9","volume_mm3":7622.338431351746}}
+{"seq":20,"type":"AgentToolResult","time":"2026-01-02T03:04:05Z","data":{"error":"","id":"tc_0003","ok":true}}
+{"seq":21,"type":"CheckpointCreated","time":"2026-01-02T03:04:05Z","data":{"hash":"eb9a23031465e01798f4df57bb517d7f212fe24a1046e5477079e0bdcd2eb7f9","id":"cp_003","label":"extrude_profile"}}
+{"seq":22,"type":"AgentToolRequested","time":"2026-01-02T03:04:05Z","data":{"args":{"diameter":3.2,"id":"ear_holes","intent":"M3 clearance holes for the servo mounting ears","positions":[[10.25,15],[10.25,25],[59.75,15],[59.75,25]],"target":"servo_pocket"},"id":"tc_0004","tool":"add_hole"}}
+{"seq":23,"type":"ChangeSetProposed","time":"2026-01-02T03:04:05Z","data":{"commands":1,"id":"cs_0004","intent":"M3 clearance holes for the servo mounting ears","valid":true}}
+{"seq":24,"type":"ChangeSetCommitted","time":"2026-01-02T03:04:05Z","data":{"affected":["ear_holes"],"id":"cs_0004","result_hash":"6890c43a162111f179dfe7a7f7df2401a3ca647f28e22a1df141b61fa832f4d1"}}
+{"seq":25,"type":"FeatureGraphUpdated","time":"2026-01-02T03:04:05Z","data":{"hash":"6890c43a162111f179dfe7a7f7df2401a3ca647f28e22a1df141b61fa832f4d1","nodes":4}}
+{"seq":26,"type":"ModelRebuilt","time":"2026-01-02T03:04:05Z","data":{"cache_hits":28,"cache_misses":4,"failed":null,"hash":"6890c43a162111f179dfe7a7f7df2401a3ca647f28e22a1df141b61fa832f4d1","volume_mm3":7493.658796260706}}
+{"seq":27,"type":"AgentToolResult","time":"2026-01-02T03:04:05Z","data":{"error":"","id":"tc_0004","ok":true}}
+{"seq":28,"type":"CheckpointCreated","time":"2026-01-02T03:04:05Z","data":{"hash":"6890c43a162111f179dfe7a7f7df2401a3ca647f28e22a1df141b61fa832f4d1","id":"cp_004","label":"add_hole"}}
+{"seq":29,"type":"AgentToolRequested","time":"2026-01-02T03:04:05Z","data":{"args":{"path":"/tmp/TestDogfoodServoBracket664077976/001/b.step"},"id":"tc_0005","tool":"export_step"}}
+{"seq":30,"type":"ExportCompleted","time":"2026-01-02T03:04:05Z","data":{"bytes":95090,"format":"step","path":"/tmp/TestDogfoodServoBracket664077976/001/b.step","reimport_volume_rel_error":4.85474306477237e-15,"valid":true,"volume_mm3":7493.658796260706}}
+{"seq":31,"type":"AgentToolResult","time":"2026-01-02T03:04:05Z","data":{"error":"","id":"tc_0005","ok":true}}
+{"seq":32,"type":"AgentToolRequested","time":"2026-01-02T03:04:05Z","data":{"args":{"path":"/tmp/TestDogfoodServoBracket664077976/001/b.stl"},"id":"tc_0006","tool":"export_stl"}}
+{"seq":33,"type":"ExportCompleted","time":"2026-01-02T03:04:05Z","data":{"bytes":54084,"format":"stl","path":"/tmp/TestDogfoodServoBracket664077976/001/b.stl","triangles":1080,"valid":true,"volume_mm3":7493.658796260706,"watertight":true}}
+{"seq":34,"type":"AgentToolResult","time":"2026-01-02T03:04:05Z","data":{"error":"","id":"tc_0006","ok":true}}
