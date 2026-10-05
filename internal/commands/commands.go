@@ -1,0 +1,337 @@
+// Package commands defines the serializable, invertible edits to the CAD-IR and the
+// ChangeSet lifecycle built on them. Every mutation of the model — from the UI, the CLI
+// or the agent — is a Command inside a ChangeSet.
+package commands
+
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+
+	"github.com/accelone/simoncad/internal/cadir"
+	"github.com/accelone/simoncad/internal/expr"
+)
+
+var idPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
+
+// ValidID reports whether id is an acceptable node identifier.
+func ValidID(id string) bool { return idPattern.MatchString(id) }
+
+// Command is one atomic graph edit. Apply mutates g and returns the exact inverse.
+type Command interface {
+	Type() string
+	Apply(g *cadir.Graph) (inverse Command, err error)
+}
+
+// Record is the serialized form of a Command.
+type Record struct {
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data"`
+}
+
+func Encode(c Command) Record {
+	b, err := json.Marshal(c)
+	if err != nil {
+		panic(err)
+	}
+	return Record{Type: c.Type(), Data: b}
+}
+
+func Decode(r Record) (Command, error) {
+	var c Command
+	switch r.Type {
+	case "AddFeature":
+		c = &AddFeature{}
+	case "RemoveFeature":
+		c = &RemoveFeature{}
+	case "SetParameter":
+		c = &SetParameter{}
+	case "SetExpression":
+		c = &SetExpression{}
+	case "Reorder":
+		c = &Reorder{}
+	case "Suppress":
+		c = &Suppress{}
+	case "Rename":
+		c = &Rename{}
+	case "RestoreSnapshot":
+		c = &RestoreSnapshot{}
+	default:
+		return nil, fmt.Errorf("unknown command type %q", r.Type)
+	}
+	if err := json.Unmarshal(r.Data, c); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", r.Type, err)
+	}
+	return c, nil
+}
+
+func mustNode(g *cadir.Graph, id string) (*cadir.Node, error) {
+	n := g.Get(id)
+	if n == nil {
+		return nil, fmt.Errorf("feature %q does not exist", id)
+	}
+	return n, nil
+}
+
+// checked re-validates the graph after a mutation and undoes it with revert on failure.
+func checked(g *cadir.Graph, revert func()) error {
+	if err := g.Validate(); err != nil {
+		revert()
+		return err
+	}
+	return nil
+}
+
+// ---- AddFeature / RemoveFeature -------------------------------------------------
+
+type AddFeature struct {
+	Node  *cadir.Node `json:"node"`
+	Index int         `json:"index"` // -1 appends
+}
+
+func (*AddFeature) Type() string { return "AddFeature" }
+
+func (c *AddFeature) Apply(g *cadir.Graph) (Command, error) {
+	if c.Node == nil {
+		return nil, fmt.Errorf("AddFeature: node is required")
+	}
+	if !ValidID(c.Node.ID) {
+		return nil, fmt.Errorf("invalid feature id %q (use lowercase letters, digits, underscores)", c.Node.ID)
+	}
+	if g.Get(c.Node.ID) != nil {
+		return nil, fmt.Errorf("feature %q already exists", c.Node.ID)
+	}
+	if c.Node.Type == "" {
+		return nil, fmt.Errorf("feature %q has no type", c.Node.ID)
+	}
+	idx := c.Index
+	if idx < 0 || idx > len(g.Nodes) {
+		idx = len(g.Nodes)
+	}
+	n := cloneNode(c.Node)
+	g.Nodes = append(g.Nodes, nil)
+	copy(g.Nodes[idx+1:], g.Nodes[idx:])
+	g.Nodes[idx] = n
+	if err := checked(g, func() { g.Nodes = append(g.Nodes[:idx], g.Nodes[idx+1:]...) }); err != nil {
+		return nil, err
+	}
+	return &RemoveFeature{ID: n.ID}, nil
+}
+
+type RemoveFeature struct {
+	ID string `json:"id"`
+}
+
+func (*RemoveFeature) Type() string { return "RemoveFeature" }
+
+func (c *RemoveFeature) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	if deps := g.Dependents(c.ID); len(deps) > 0 {
+		return nil, fmt.Errorf("cannot remove %q: %v depend on it", c.ID, deps)
+	}
+	idx := g.Index(c.ID)
+	g.Nodes = append(g.Nodes[:idx], g.Nodes[idx+1:]...)
+	return &AddFeature{Node: n, Index: idx}, nil
+}
+
+func cloneNode(n *cadir.Node) *cadir.Node {
+	b, _ := json.Marshal(n)
+	var c cadir.Node
+	_ = json.Unmarshal(b, &c)
+	return &c
+}
+
+// ---- SetParameter / SetExpression ------------------------------------------------
+
+type SetParameter struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Value  any    `json:"value,omitempty"`
+	Delete bool   `json:"delete,omitempty"`
+}
+
+func (*SetParameter) Type() string { return "SetParameter" }
+
+func (c *SetParameter) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	if c.Name == "" {
+		return nil, fmt.Errorf("parameter name is required")
+	}
+	if _, has := n.Expressions[c.Name]; has && !c.Delete {
+		return nil, fmt.Errorf("%s.%s is driven by an expression; clear the expression first", c.ID, c.Name)
+	}
+	old, existed := n.Parameters[c.Name]
+	if c.Delete {
+		if !existed {
+			return nil, fmt.Errorf("%s has no parameter %q", c.ID, c.Name)
+		}
+		delete(n.Parameters, c.Name)
+		return &SetParameter{ID: c.ID, Name: c.Name, Value: old}, nil
+	}
+	if !jsonScalarOrList(c.Value) {
+		return nil, fmt.Errorf("unsupported value for %s.%s", c.ID, c.Name)
+	}
+	if n.Parameters == nil {
+		n.Parameters = map[string]any{}
+	}
+	n.Parameters[c.Name] = c.Value
+	if !existed {
+		return &SetParameter{ID: c.ID, Name: c.Name, Delete: true}, nil
+	}
+	return &SetParameter{ID: c.ID, Name: c.Name, Value: old}, nil
+}
+
+func jsonScalarOrList(v any) bool {
+	switch x := v.(type) {
+	case float64, string, bool:
+		return true
+	case int:
+		return true
+	case []any:
+		for _, e := range x {
+			if !jsonScalarOrList(e) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+type SetExpression struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Expr   string `json:"expr,omitempty"`
+	Delete bool   `json:"delete,omitempty"`
+}
+
+func (*SetExpression) Type() string { return "SetExpression" }
+
+func (c *SetExpression) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	old, existed := n.Expressions[c.Name]
+	if c.Delete {
+		if !existed {
+			return nil, fmt.Errorf("%s.%s has no expression", c.ID, c.Name)
+		}
+		delete(n.Expressions, c.Name)
+		if len(n.Expressions) == 0 {
+			n.Expressions = nil
+		}
+		return &SetExpression{ID: c.ID, Name: c.Name, Expr: old}, nil
+	}
+	if err := expr.Check(c.Expr); err != nil {
+		return nil, fmt.Errorf("expression %q: %w", c.Expr, err)
+	}
+	if n.Expressions == nil {
+		n.Expressions = map[string]string{}
+	}
+	n.Expressions[c.Name] = c.Expr
+	revert := func() {
+		if existed {
+			n.Expressions[c.Name] = old
+		} else {
+			delete(n.Expressions, c.Name)
+			if len(n.Expressions) == 0 {
+				n.Expressions = nil
+			}
+		}
+	}
+	if err := checked(g, revert); err != nil {
+		return nil, err
+	}
+	if !existed {
+		return &SetExpression{ID: c.ID, Name: c.Name, Delete: true}, nil
+	}
+	return &SetExpression{ID: c.ID, Name: c.Name, Expr: old}, nil
+}
+
+// ---- Reorder / Suppress / Rename --------------------------------------------------
+
+type Reorder struct {
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+}
+
+func (*Reorder) Type() string { return "Reorder" }
+
+func (c *Reorder) Apply(g *cadir.Graph) (Command, error) {
+	from := g.Index(c.ID)
+	if from < 0 {
+		return nil, fmt.Errorf("feature %q does not exist", c.ID)
+	}
+	if c.Index < 0 || c.Index >= len(g.Nodes) {
+		return nil, fmt.Errorf("index %d out of range [0,%d)", c.Index, len(g.Nodes))
+	}
+	n := g.Nodes[from]
+	g.Nodes = append(g.Nodes[:from], g.Nodes[from+1:]...)
+	g.Nodes = append(g.Nodes, nil)
+	copy(g.Nodes[c.Index+1:], g.Nodes[c.Index:])
+	g.Nodes[c.Index] = n
+	return &Reorder{ID: c.ID, Index: from}, nil
+}
+
+type Suppress struct {
+	ID         string `json:"id"`
+	Suppressed bool   `json:"suppressed"`
+}
+
+func (*Suppress) Type() string { return "Suppress" }
+
+func (c *Suppress) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	old := n.Suppressed
+	n.Suppressed = c.Suppressed
+	return &Suppress{ID: c.ID, Suppressed: old}, nil
+}
+
+type Rename struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (*Rename) Type() string { return "Rename" }
+
+func (c *Rename) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	old := n.Metadata.Name
+	n.Metadata.Name = c.Name
+	return &Rename{ID: c.ID, Name: old}, nil
+}
+
+// ---- RestoreSnapshot (checkpoint restore) ------------------------------------------
+
+type RestoreSnapshot struct {
+	Graph *cadir.Graph `json:"graph"`
+	From  string       `json:"from,omitempty"` // checkpoint id, for explanations
+}
+
+func (*RestoreSnapshot) Type() string { return "RestoreSnapshot" }
+
+func (c *RestoreSnapshot) Apply(g *cadir.Graph) (Command, error) {
+	if c.Graph == nil {
+		return nil, fmt.Errorf("snapshot is required")
+	}
+	old := g.Clone()
+	next := c.Graph.Clone()
+	if err := next.Validate(); err != nil {
+		return nil, err
+	}
+	g.Units, g.Nodes = next.Units, next.Nodes
+	return &RestoreSnapshot{Graph: old, From: c.From}, nil
+}
