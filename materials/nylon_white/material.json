@@ -1,0 +1,20 @@
+{
+  "id": "nylon_white",
+  "name": "White Nylon",
+  "category": "Plastics",
+  "tags": [
+    "plastic",
+    "nylon",
+    "white",
+    "gear"
+  ],
+  "baseColor": "#E6E3DA",
+  "metalness": 0.0,
+  "roughness": 0.7,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

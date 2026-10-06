@@ -131,6 +131,10 @@ viewport, which only mutates materials. Hidden bodies still exist and are still 
 appearance; the same `cadir.Appearance` type is reserved for component/assembly instances, catalog default
 appearances and 3MF/STEP color export, none of which exist yet.
 
+Visual (PBR) materials (`internal/materials`, library in `materials/`) follow the same rule: `SetMaterial`,
+`RemoveMaterial` and `SetMaterialScale` are appearance commands, so they never reach the kernel. They are
+separate from engineering materials, which will own density/mass/strength.
+
 `Graph.Hash()` is a content hash that **excludes** derived status/errors and timestamps; it is what
 checkpoints, stale-detection and replay verification compare. It **includes** appearance;
 `Graph.GeometryHash()` ignores it and is what keeps a selection alive across appearance edits.

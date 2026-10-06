@@ -1,0 +1,21 @@
+{
+  "id": "brushed_aluminum",
+  "name": "Brushed Aluminum",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "aluminum",
+    "brushed",
+    "silver",
+    "robotics"
+  ],
+  "baseColor": "#BFC2C4",
+  "metalness": 1.0,
+  "roughness": 0.35,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

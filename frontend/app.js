@@ -1,16 +1,24 @@
 // Simon CAD UI: panels over the ui.Service API. Every mutation here is a call that ends in
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
-import { api, subscribe, h, mm3 } from './api.js';
+import { api, subscribe, h, mm3, materialUrl } from './api.js';
 import { Viewport } from './viewport.js';
 import { initVision } from './vision.js';
+import { MaterialLibrary } from './materials/library.js';
+import { ThumbnailRenderer } from './materials/pbr.js';
+import { materialEditor, materialMenu, DND_TYPE, noteRecentMaterial } from './materials/panel.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false };
 
 // ---- viewport wiring -----------------------------------------------------------------
 
+// Visual materials: presentation only, resolved from the library at render time.
+const library = new MaterialLibrary();
+const textureUrl = (id, file) => materialUrl(id, file);
+
 const vp = new Viewport($('gl'), $('cube'), {
+  library, textureUrl,
   onPick: async (p, mods) => {
     try {
       const mode = mods.shift || mods.ctrl ? 'add' : 'replace';
@@ -27,7 +35,11 @@ const vp = new Viewport($('gl'), $('cube'), {
       } else if (!p) applySelection(await api('select', { selectors: [] }));
     } catch (e) { toast(e.message, 'bad'); return; }
     const n = S.selection?.selectors?.length ?? 0;
-    showMenu(at, [{ label: n > 1 ? `Delete ${n} selected` : 'Delete', key: 'Del', danger: true, disabled: n === 0, run: () => deleteObjects() }]);
+    const ids = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
+    const hasMat = (S.state?.tree ?? []).some((t) => ids.includes(t.id) && t.appearance?.material_id);
+    showMenu(at, [
+      ...(ids.length ? materialMenu(materialCtx, ids, { hasMaterial: hasMat, openPanel: () => materialCtx.rerender() }) : []),
+      { label: n > 1 ? `Delete ${n} selected` : 'Delete', key: 'Del', danger: true, disabled: n === 0, run: () => deleteObjects() }]);
   },
   onHover: (p) => {
     $('hud').textContent = p ? `${p.kind} ${p.kind === 'body' ? p.body : '#' + p.index} on ${p.body}` : hudStats();
@@ -43,7 +55,53 @@ const vp = new Viewport($('gl'), $('cube'), {
   },
   onFrame: () => { if (vp.measure.pts.length === 2) placeMeasureLabel(vp.measure.pts[0].clone().lerp(vp.measure.pts[1], 0.5)); },
 });
-window.simonViewport = vp; // for e2e tests and debugging
+window.simonViewport = vp;
+
+// ---- materials: library, thumbnails, drag & drop --------------------------------------
+
+let thumbs = null;                 // lazy: needs the viewport's environment map
+const thumbCache = new Map();      // id@version -> data URL promise
+const materialCtx = {
+  library,
+  thumb: (def) => {
+    const key = `${def.id}@${library.version}`;
+    if (!thumbCache.has(key)) {
+      thumbs ??= new ThumbnailRenderer(textureUrl);
+      thumbCache.set(key, thumbs ? thumbs.render(def) : Promise.resolve(''));
+    }
+    return thumbCache.get(key);
+  },
+  apply: (tool, ids, extra) => applyAppearance(tool, ids, extra),
+  // The picker can be open in the selection panel and in an expanded tree row; repaint both.
+  rerender: () => { renderSelection(S.selection); if (S.state) renderTree(S.state); },
+};
+
+let materialsFor = null;
+async function loadMaterials(path) {
+  if (materialsFor === path && library.version) return;
+  try {
+    library.load(await api('materials'));
+    materialsFor = path;
+    thumbCache.clear();
+    vp.reapplyMaterials();
+    if (library.warnings.length) console.warn('materials:', library.warnings);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+const hasMat = (e) => [...(e.dataTransfer?.types ?? [])].includes(DND_TYPE);
+async function dropMaterial(e, bodyId) {
+  e.preventDefault();
+  const id = e.dataTransfer.getData(DND_TYPE);
+  if (!id || !bodyId) return;
+  // Dropping on a selected object applies to the whole selection; otherwise just to that object.
+  const sel = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
+  noteRecentMaterial(id);
+  applyAppearance('set_material', sel.includes(bodyId) ? sel : [bodyId], { material_id: id });
+}
+$('gl').addEventListener('dragover', (e) => { if (hasMat(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+$('gl').addEventListener('drop', (e) => { if (hasMat(e)) dropMaterial(e, vp.pick(e)?.body); });
+$('tree').addEventListener('dragover', (e) => { if (hasMat(e) && e.target.closest?.('[data-id]')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+$('tree').addEventListener('drop', (e) => { if (hasMat(e)) dropMaterial(e, e.target.closest?.('[data-id]')?.dataset.id); }); // for e2e tests and debugging
 
 function placeMeasureLabel(mid) {
   const s = vp.projectToPixels(mid);
@@ -110,6 +168,7 @@ const vision = initVision({
 });
 
 function render(st) {
+  loadMaterials(st.path ?? st.name);
   $('project').replaceChildren(...[h('span', {}, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, ' ●') : null].filter(Boolean));
   $('btn-undo').disabled = !st.can_undo || st.busy;
   $('btn-clear').disabled = st.busy || st.chat.length === 0;
@@ -131,7 +190,7 @@ function renderTree(st) {
   const selFeatures = new Set((st.selection.selectors ?? []).map(featureOf));
   el.replaceChildren(...st.tree.map((n) => {
     const open = S.openNode === n.id;
-    const row = h('div', { class: 'row', role: 'treeitem', 'aria-expanded': String(open), tabindex: '0',
+    const row = h('div', { class: 'row', role: 'treeitem', 'aria-expanded': String(open), tabindex: '0', dataset: { id: n.id },
       oncontextmenu: (e) => {
         e.preventDefault();
         showMenu({ x: e.clientX, y: e.clientY }, [{ label: `Delete ${n.name}`, key: 'Del', danger: true, run: () => deleteObjects({ features: [n.id] }) }]);
@@ -271,7 +330,7 @@ function parseColor(text) {
 function appearanceEditor(nodes) {
   const ids = nodes.map((n) => n.id);
   const uniq = (f) => { const v = new Set(nodes.map(f)); return v.size === 1 ? [...v][0] : undefined; };
-  const color = uniq((n) => n.appearance?.color ?? '');
+  const color = uniq((n) => n.appearance?.color ?? '');  // color overrides the material's base color
   const opacity = uniq((n) => n.appearance?.opacity ?? 1);
   const visible = uniq((n) => n.appearance?.visible !== false);
   const key = ids.join('-');
@@ -300,6 +359,7 @@ function appearanceEditor(nodes) {
     h('label', { for: picker.id }, 'color'), h('span', { class: 'color-row' }, picker, hex),
     h('label', { for: slider.id }, 'opacity'), h('span', { class: 'color-row' }, slider, pct),
     h('label', { for: vis.id }, 'visible'), vis,
+    ...materialEditor(materialCtx, nodes),
     h('span', {}), reset);
 }
 

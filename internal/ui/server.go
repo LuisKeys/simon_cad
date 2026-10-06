@@ -285,6 +285,25 @@ func (s *Server) routes() {
 		c, err := s.Svc.Compare(r.URL.Query().Get("a"), r.URL.Query().Get("b"))
 		reply(w, c, err)
 	})
+	m.HandleFunc("/api/materials", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, s.Svc.Materials())
+	})
+	m.HandleFunc("/api/materials/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/materials/"), "/")
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
+		data, ct, ok := s.Svc.MaterialFile(parts[0], parts[1])
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-cache") // project materials can change under the same id
+		_, _ = w.Write(data)
+	})
 	m.HandleFunc("/api/palette", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.Svc.Palette())
 	})

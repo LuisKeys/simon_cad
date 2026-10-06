@@ -24,6 +24,7 @@ import (
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
+	"github.com/accelone/simoncad/internal/materials"
 	"github.com/accelone/simoncad/internal/rendering"
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
@@ -613,6 +614,45 @@ func (s *Service) ImageData(id string) ([]byte, string, bool) {
 		return nil, "", false
 	}
 	return im.Data, im.MediaType, true
+}
+
+// MaterialsView is the material library as the panels show it.
+type MaterialsView struct {
+	Categories []string             `json:"categories"`
+	Materials  []materials.Material `json:"materials"`
+	Warnings   []string             `json:"warnings,omitempty"`
+	// Defaults maps an engineering material id to its default visual material id.
+	Defaults map[string]string `json:"engineering_defaults"`
+}
+
+// Materials lists the visual materials available to the open project.
+func (s *Service) Materials() MaterialsView {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l := s.app.Materials
+	return MaterialsView{Categories: materials.Categories, Materials: l.List(""), Warnings: l.Warnings(),
+		Defaults: materials.EngineeringDefaults}
+}
+
+// MaterialFile returns one declared texture of a material and its content type.
+func (s *Service) MaterialFile(id, name string) ([]byte, string, bool) {
+	s.mu.Lock()
+	l := s.app.Materials
+	s.mu.Unlock()
+	b, err := l.ReadFile(id, name)
+	if err != nil {
+		return nil, "", false
+	}
+	ct := "application/octet-stream"
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg":
+		ct = "image/jpeg"
+	case ".png":
+		ct = "image/png"
+	case ".webp":
+		ct = "image/webp"
+	}
+	return b, ct, true
 }
 
 // RetainImage chooses whether an image is stored inside the project (assets/images/).

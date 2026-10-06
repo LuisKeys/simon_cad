@@ -60,6 +60,12 @@ func Decode(r Record) (Command, error) {
 		c = &SetOpacity{}
 	case "SetVisibility":
 		c = &SetVisibility{}
+	case "SetMaterial":
+		c = &SetMaterial{}
+	case "RemoveMaterial":
+		c = &RemoveMaterial{}
+	case "SetMaterialScale":
+		c = &SetMaterialScale{}
 	case "ResetAppearance":
 		c = &ResetAppearance{}
 	case "RestoreSnapshot":
@@ -327,7 +333,7 @@ func (c *Rename) Apply(g *cadir.Graph) (Command, error) {
 // IsAppearance reports whether a command type only edits presentation metadata.
 func IsAppearance(t string) bool {
 	switch t {
-	case "SetColor", "SetOpacity", "SetVisibility", "ResetAppearance":
+	case "SetColor", "SetOpacity", "SetVisibility", "ResetAppearance", "SetMaterial", "RemoveMaterial", "SetMaterialScale":
 		return true
 	}
 	return false
@@ -416,6 +422,67 @@ func (c *SetVisibility) Apply(g *cadir.Graph) (Command, error) {
 		return nil, err
 	}
 	return &SetVisibility{ID: c.ID, Visible: prev}, nil
+}
+
+// SetMaterial assigns a visual material by id (empty clears it). A material change never
+// touches the kernel; the library is resolved at render time, so unknown ids are allowed.
+// ClearColor also drops the color override so the material's own color shows (the usual
+// intent of "make it aluminum"); the inverse restores the whole previous appearance.
+type SetMaterial struct {
+	ID         string `json:"id"`
+	MaterialID string `json:"material_id"`
+	ClearColor bool   `json:"clear_color,omitempty"`
+}
+
+func (*SetMaterial) Type() string { return "SetMaterial" }
+
+func (c *SetMaterial) Apply(g *cadir.Graph) (Command, error) {
+	old, err := editAppearance(g, c.ID, func(a *cadir.Appearance) {
+		a.MaterialID = c.MaterialID
+		if c.ClearColor {
+			a.Color = ""
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &ResetAppearance{ID: c.ID, Restore: old}, nil
+}
+
+// RemoveMaterial clears the visual material. Its inverse is a SetMaterial restoring it.
+type RemoveMaterial struct {
+	ID string `json:"id"`
+}
+
+func (*RemoveMaterial) Type() string { return "RemoveMaterial" }
+
+func (c *RemoveMaterial) Apply(g *cadir.Graph) (Command, error) {
+	var prev string
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) { prev = a.MaterialID; a.MaterialID = "" }); err != nil {
+		return nil, err
+	}
+	return &SetMaterial{ID: c.ID, MaterialID: prev}, nil
+}
+
+// SetMaterialScale sets the texture scale multiplier (>0); nil clears the override.
+type SetMaterialScale struct {
+	ID    string   `json:"id"`
+	Scale *float64 `json:"scale"`
+}
+
+func (*SetMaterialScale) Type() string { return "SetMaterialScale" }
+
+func (c *SetMaterialScale) Apply(g *cadir.Graph) (Command, error) {
+	if c.Scale != nil {
+		if err := cadir.ValidateTextureScale(*c.Scale); err != nil {
+			return nil, err
+		}
+	}
+	var prev *float64
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) { prev = a.TextureScale; a.TextureScale = c.Scale }); err != nil {
+		return nil, err
+	}
+	return &SetMaterialScale{ID: c.ID, Scale: prev}, nil
 }
 
 // ResetAppearance replaces the whole appearance with Restore (nil = defaults). Its

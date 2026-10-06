@@ -1,0 +1,21 @@
+{
+  "id": "raw_steel",
+  "name": "Raw Steel",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "steel",
+    "raw",
+    "gray",
+    "shaft"
+  ],
+  "baseColor": "#7C7F82",
+  "metalness": 0.9,
+  "roughness": 0.55,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

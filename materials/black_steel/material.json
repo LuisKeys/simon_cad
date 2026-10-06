@@ -1,0 +1,21 @@
+{
+  "id": "black_steel",
+  "name": "Black Steel",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "steel",
+    "black",
+    "oxide",
+    "fastener"
+  ],
+  "baseColor": "#2B2D2F",
+  "metalness": 0.85,
+  "roughness": 0.5,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

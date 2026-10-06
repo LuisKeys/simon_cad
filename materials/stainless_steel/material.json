@@ -1,0 +1,21 @@
+{
+  "id": "stainless_steel",
+  "name": "Stainless Steel",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "steel",
+    "stainless",
+    "silver",
+    "shaft"
+  ],
+  "baseColor": "#B8BBBE",
+  "metalness": 1.0,
+  "roughness": 0.3,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

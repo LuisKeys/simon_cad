@@ -1,0 +1,21 @@
+{
+  "id": "black_abs",
+  "name": "Black ABS",
+  "category": "Plastics",
+  "tags": [
+    "plastic",
+    "abs",
+    "black",
+    "printed",
+    "housing"
+  ],
+  "baseColor": "#1E1F21",
+  "metalness": 0.0,
+  "roughness": 0.5,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

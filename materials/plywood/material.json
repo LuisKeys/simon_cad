@@ -1,0 +1,20 @@
+{
+  "id": "plywood",
+  "name": "Plywood",
+  "category": "Wood",
+  "tags": [
+    "wood",
+    "plywood",
+    "light",
+    "laser"
+  ],
+  "baseColor": "#C9A675",
+  "metalness": 0.0,
+  "roughness": 0.7,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

@@ -19,10 +19,12 @@ import (
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/history"
+	"github.com/accelone/simoncad/internal/materials"
 	"github.com/accelone/simoncad/internal/persistence"
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
 	"github.com/accelone/simoncad/internal/vision"
+	materialsdata "github.com/accelone/simoncad/materials"
 )
 
 // Policy decides whether a valid ChangeSet commits immediately.
@@ -58,6 +60,10 @@ type App struct {
 	// Neither is CAD state.
 	Vision *vision.Store
 	Images *vision.ImageStore
+	// Materials is the visual material library (built-in plus the open project's own).
+	// Presentation only; it is never an input to geometry.
+	Materials *materials.Library
+	matDir    string // project dir whose assets/materials feed Materials ("" = none)
 
 	// Raw preserved files not interpreted in Phase 1.
 	components, constraints, materials json.RawMessage
@@ -77,7 +83,8 @@ func newApp(clock func() time.Time) *App {
 	k := api.New()
 	a := &App{K: k, Engine: rebuild.New(k), Graph: cadir.NewGraph(), Hist: &history.Log{}, Bus: events.NewBus(),
 		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI},
-		Vision: vision.NewStore(), Images: vision.NewImageStore()}
+		Vision: vision.NewStore(), Images: vision.NewImageStore(),
+		Materials: materials.New(materialsdata.FS())}
 	a.Bus.Now = clock
 	a.Mgr = commands.NewManager(a.Graph, a, a.Bus)
 	a.Mgr.Now = clock
@@ -100,6 +107,7 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 	}
 	a := newApp(clock)
 	a.Meta, a.AH = p.Meta, p.History
+	a.useProjectMaterials(dir)
 	a.components, a.constraints, a.materials = p.Components, p.Constraints, p.Materials
 	*a.Graph = *p.Graph
 	if len(a.AH.Interpretations) > 0 {
@@ -132,6 +140,51 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 func (a *App) Close() {
 	a.Engine.Close()
 	a.K.Close()
+}
+
+// ProjectMaterialsDir is where a project keeps its own materials.
+const ProjectMaterialsDir = "assets/materials"
+
+// useProjectMaterials points the library at dir/assets/materials (a no-op layer when absent).
+func (a *App) useProjectMaterials(dir string) {
+	a.matDir = dir
+	root := filepath.Join(dir, filepath.FromSlash(ProjectMaterialsDir))
+	if st, err := os.Stat(root); err == nil && st.IsDir() {
+		a.Materials.SetProject(os.DirFS(root))
+		return
+	}
+	a.Materials.SetProject(nil)
+}
+
+// carryProjectMaterials copies project-specific materials when saving to a new location, so
+// "Save as" never strands the assets a project's materials reference.
+func (a *App) carryProjectMaterials(dir string) error {
+	if a.matDir == "" || a.matDir == dir {
+		return nil
+	}
+	src := filepath.Join(a.matDir, filepath.FromSlash(ProjectMaterialsDir))
+	if st, err := os.Stat(src); err != nil || !st.IsDir() {
+		return nil
+	}
+	dst := filepath.Join(dir, filepath.FromSlash(ProjectMaterialsDir))
+	err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), b, 0o644)
+	})
+	if err == nil {
+		a.useProjectMaterials(dir)
+	}
+	return err
 }
 
 // Save writes the project to dir.
@@ -169,10 +222,13 @@ func (a *App) Save(dir string) error {
 		ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[im.MediaType]
 		imgs = append(imgs, persistence.Image{ID: im.ID, Ext: ext, Data: im.Data})
 	}
-	return persistence.Save(dir, &persistence.Project{
+	if err := persistence.Save(dir, &persistence.Project{
 		Meta: a.Meta, Graph: a.Graph, History: a.AH, Events: a.Bus.Events(),
 		Components: a.components, Constraints: a.constraints, Materials: a.materials, Images: imgs,
-	})
+	}); err != nil {
+		return err
+	}
+	return a.carryProjectMaterials(dir)
 }
 
 // SetActor sets who is driving subsequent tool calls.
@@ -263,6 +319,7 @@ func (e toolEnv) SelectionRefs() []string        { return append([]string(nil), 
 func (e toolEnv) Checkpoints() *history.Log      { return e.a.Hist }
 func (e toolEnv) Vision() *vision.Store          { return e.a.Vision }
 func (e toolEnv) Images() *vision.ImageStore     { return e.a.Images }
+func (e toolEnv) Materials() *materials.Library  { return e.a.Materials }
 func (e toolEnv) Provenance() cadir.Provenance {
 	return cadir.Provenance{CreatedBy: e.a.actor.CreatedBy, Capability: e.a.actor.Capability,
 		ToolCallID: e.a.callID, Model: e.a.actor.Model}

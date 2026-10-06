@@ -10,6 +10,7 @@ my_part.scadproj/
   components.json      catalog instances (empty until Phase 3)
   constraints.json     reserved
   materials.json       reserved
+  assets/materials/    project-specific visual materials (<id>/material.json + textures); optional
   agent-history.json   prompts, tool calls, ChangeSets, checkpoints
   events.jsonl         append-only event recorder, one JSON object per line
   thumbnails/          reserved (.gitkeep)
@@ -89,3 +90,13 @@ Commands inside a ChangeSet are `{ "type": "AddFeature" | "RemoveFeature" | "Set
 
 One event per line: `{"seq": 1, "type": "ChangeSetCommitted", "time": "…", "data": { … }}`.
 `seq` continues across sessions. View with `simoncad-cli replay <project> --events`.
+
+## Visual materials
+
+A feature's `appearance` may carry `material_id` (a library id), `texture_scale` (multiplier > 0) and a
+`color` override on top of the material. Only these references are stored: the built-in library
+(`materials/` in the repository, embedded in the binary) is never copied into a project. A project may add
+or override materials in `assets/materials/<id>/material.json`; they are carried along on "Save as".
+A reference to a material that no longer exists loads fine and renders with the generic gray fallback; the id
+is preserved. Visual materials are independent of any engineering material (density, strength) — the
+mapping `EngineeringDefaults` only suggests a default look.

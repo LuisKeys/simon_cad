@@ -1,0 +1,19 @@
+{
+  "id": "generic_white",
+  "name": "Generic White",
+  "category": "Generic",
+  "tags": [
+    "generic",
+    "white",
+    "matte"
+  ],
+  "baseColor": "#F2F2F2",
+  "metalness": 0.0,
+  "roughness": 0.5,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

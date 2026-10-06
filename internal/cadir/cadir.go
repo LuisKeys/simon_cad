@@ -62,6 +62,10 @@ type Appearance struct {
 	Color   string   `json:"color,omitempty"`   // "#RRGGBB"
 	Opacity *float64 `json:"opacity,omitempty"` // 0..1
 	Visible *bool    `json:"visible,omitempty"`
+	// MaterialID references a visual (PBR) material in the material library; Color, when
+	// set, overrides the material's base color. TextureScale (>0) multiplies the material's own scale.
+	MaterialID   string   `json:"material_id,omitempty"`
+	TextureScale *float64 `json:"texture_scale,omitempty"`
 }
 
 var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
@@ -82,9 +86,17 @@ func ValidateOpacity(o float64) error {
 	return nil
 }
 
+// ValidateTextureScale checks s > 0.
+func ValidateTextureScale(s float64) error {
+	if !(s > 0) || s > 1000 {
+		return fmt.Errorf("texture scale %v out of range (0,1000]", s)
+	}
+	return nil
+}
+
 // IsZero reports whether the appearance carries no overrides.
 func (a *Appearance) IsZero() bool {
-	return a == nil || (a.Color == "" && a.Opacity == nil && a.Visible == nil)
+	return a == nil || (a.Color == "" && a.Opacity == nil && a.Visible == nil && a.MaterialID == "" && a.TextureScale == nil)
 }
 
 // Clone returns a deep copy (nil-safe).
@@ -92,7 +104,7 @@ func (a *Appearance) Clone() *Appearance {
 	if a == nil {
 		return nil
 	}
-	c := Appearance{Color: a.Color}
+	c := Appearance{Color: a.Color, MaterialID: a.MaterialID}
 	if a.Opacity != nil {
 		v := *a.Opacity
 		c.Opacity = &v
@@ -100,6 +112,10 @@ func (a *Appearance) Clone() *Appearance {
 	if a.Visible != nil {
 		v := *a.Visible
 		c.Visible = &v
+	}
+	if a.TextureScale != nil {
+		v := *a.TextureScale
+		c.TextureScale = &v
 	}
 	return &c
 }

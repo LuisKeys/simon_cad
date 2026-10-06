@@ -1,0 +1,21 @@
+{
+  "id": "brass",
+  "name": "Brass",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "brass",
+    "gold",
+    "yellow",
+    "bushing"
+  ],
+  "baseColor": "#C9A24B",
+  "metalness": 1.0,
+  "roughness": 0.3,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

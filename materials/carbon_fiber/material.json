@@ -1,0 +1,22 @@
+{
+  "id": "carbon_fiber",
+  "name": "Carbon Fiber",
+  "category": "Carbon Fiber",
+  "tags": [
+    "carbon",
+    "fiber",
+    "composite",
+    "black",
+    "panel",
+    "robotics"
+  ],
+  "baseColor": "#1A1B1D",
+  "metalness": 0.2,
+  "roughness": 0.3,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

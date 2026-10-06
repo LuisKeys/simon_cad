@@ -150,6 +150,8 @@ func Compare(a, b *cadir.Graph) Diff {
 			{"appearance.color", appearanceField(n.Appearance, "color"), appearanceField(bn.Appearance, "color")},
 			{"appearance.opacity", appearanceField(n.Appearance, "opacity"), appearanceField(bn.Appearance, "opacity")},
 			{"appearance.visible", appearanceField(n.Appearance, "visible"), appearanceField(bn.Appearance, "visible")},
+			{"appearance.material", appearanceField(n.Appearance, "material"), appearanceField(bn.Appearance, "material")},
+			{"appearance.texture_scale", appearanceField(n.Appearance, "texture_scale"), appearanceField(bn.Appearance, "texture_scale")},
 		} {
 			if f.from != f.to {
 				d.Changed = append(d.Changed, ParamChange{n.ID, f.name, f.from, f.to})
@@ -174,6 +176,12 @@ func appearanceField(a *cadir.Appearance, field string) string {
 	case "visible":
 		if a.Visible != nil {
 			return fmt.Sprint(*a.Visible)
+		}
+	case "material":
+		return a.MaterialID
+	case "texture_scale":
+		if a.TextureScale != nil {
+			return fmt.Sprint(*a.TextureScale)
 		}
 	}
 	return ""

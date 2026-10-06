@@ -284,6 +284,14 @@ Delete a feature. Fails if other features depend on it; remove or re-point those
 |---|---|---|---|
 | `feature` | string | yes | Feature id |
 
+### `remove_material`
+
+Remove the visual material from features/bodies (color/opacity overrides stay). Defaults to the current selection.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+
 ### `rename_feature`
 
 Change a feature's human-readable name (its id does not change).
@@ -327,6 +335,25 @@ Drive a numeric parameter by an expression over other features' parameters, e.g.
 | `expression` | string |  | Expression, or omit to clear |
 | `feature` | string | yes | Feature id |
 | `parameter` | string | yes | Parameter name |
+
+### `set_material`
+
+Assign a visual material (e.g. brushed_aluminum, black_abs, stainless_steel, carbon_fiber, clear_glass) to features/bodies. Presentation only; does not change geometry or engineering properties. Defaults to the current selection. If the user's wording could match several materials, call search_materials first and offer the options instead of guessing.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+| `keep_color` | boolean |  | true to keep the object's color override on top of the material; default false (the material's own color shows) |
+| `material_id` | string | yes | Material id from list_materials / search_materials |
+
+### `set_material_scale`
+
+Set the texture scale multiplier (>0; 1 = the material's natural scale) of features/bodies. Presentation only.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+| `scale` | number | yes | Texture scale multiplier, > 0 |
 
 ### `set_opacity`
 
@@ -438,6 +465,14 @@ Read the appearance (color, opacity, visible) of features. Omit `features` to li
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 
+### `get_material`
+
+Read one library material's properties (color, metalness, roughness, opacity, tags, license).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `material_id` | string | yes | Material id |
+
 ### `get_model_summary`
 
 Describe the current model: every feature (id, type, key parameters, status), bounding boxes and volumes of the resulting bodies, and recent checkpoints. Call this before editing an unfamiliar model.
@@ -452,6 +487,14 @@ Read an interpretation's current proposal and its validation report (missing / u
 |---|---|---|---|
 | `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
 
+### `list_materials`
+
+List the visual materials in the library (built-in plus project materials), optionally for one category (Metals, Plastics, Rubber, Carbon Fiber, Glass, Electronics, Wood, Generic).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `category` | string |  | Category filter, optional |
+
 ### `measure_distance`
 
 Measure between two things. Each of `from`/`to` is a selector like face(feature=plate,side=+Z) / body(feature=plate) or a bare feature id (= its body). For two parallel faces the result is the perpendicular gap; otherwise the distance between centroids. Also returns the minimum gap between the bounding boxes.
@@ -460,6 +503,14 @@ Measure between two things. Each of `from`/`to` is a selector like face(feature=
 |---|---|---|---|
 | `from` | string | yes | Selector or feature id |
 | `to` | string | yes | Selector or feature id |
+
+### `search_materials`
+
+Search materials by free text (e.g. 'metallic', 'black plastic', 'brushed aluminum'). Returns up to 5 ranked candidates; when `ambiguous` is true, show the options to the user instead of choosing one.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | yes | What the material should look like or be called |
 
 ### `set_sketch_scale`
 

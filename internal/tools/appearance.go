@@ -97,7 +97,7 @@ func appearanceTool(name, desc string, extra props, required []string,
 // IsAppearanceTool reports whether name is a presentation-only mutation tool.
 func IsAppearanceTool(name string) bool {
 	switch name {
-	case "set_color", "set_opacity", "set_visibility", "reset_appearance":
+	case "set_color", "set_opacity", "set_visibility", "reset_appearance", "set_material", "remove_material", "set_material_scale":
 		return true
 	}
 	return false
@@ -163,8 +163,14 @@ func appearanceTools() []*Tool {
 
 // AppearanceView is the effective appearance with defaults filled in.
 func AppearanceView(a *cadir.Appearance) map[string]any {
-	v := map[string]any{"color": nil, "opacity": 1.0, "visible": true, "overridden": !a.IsZero()}
+	v := map[string]any{"color": nil, "opacity": 1.0, "visible": true, "material": nil, "texture_scale": 1.0, "overridden": !a.IsZero()}
 	if a != nil {
+		if a.MaterialID != "" {
+			v["material"] = a.MaterialID
+		}
+		if a.TextureScale != nil {
+			v["texture_scale"] = *a.TextureScale
+		}
 		if a.Color != "" {
 			v["color"] = a.Color
 		}

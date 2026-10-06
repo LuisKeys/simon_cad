@@ -3,6 +3,8 @@
 // and draws selection, hover, preview ghost, section plane and measurement overlays.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
+import { MaterialManager } from './materials/pbr.js';
 
 const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xffb347, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
 const PICK_PX = 7;
@@ -24,8 +26,16 @@ export class Viewport {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = false;
     this.controls.addEventListener('change', () => this.dirty());
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, 1.1));
-    const key = new THREE.DirectionalLight(0xffffff, 1.6);
+    // Image-based lighting gives metals something to reflect; the direct lights stay as fill.
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      this.scene.environment = this.envMap;
+      pmrem.dispose();
+    } catch (e) { console.warn('environment map unavailable', e); }
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, this.envMap ? 0.35 : 1.1));
+    const key = new THREE.DirectionalLight(0xffffff, this.envMap ? 1.0 : 1.6);
     key.position.set(1, -1.5, 2.5);
     this.scene.add(key);
     this.grid = new THREE.GridHelper(400, 40, 0x5a3a1a, 0x2a2018);
@@ -33,7 +43,8 @@ export class Viewport {
     this.grid.material.transparent = true; this.grid.material.opacity = 0.5;
     this.scene.add(this.grid);
 
-    this.appearance = {};       // body id -> {color, opacity, visible} from the CAD-IR
+    this.appearance = {};       // body id -> {color, opacity, visible, material_id, texture_scale} from the CAD-IR
+    this.materials = new MaterialManager(hooks.library, hooks.textureUrl, () => this.dirty());
     this.bodies = new Map();   // id -> { data, group, mesh, edges, material }
     this.ghost = new THREE.Group(); this.scene.add(this.ghost);
     this.hoverGroup = new THREE.Group(); this.scene.add(this.hoverGroup);
@@ -94,7 +105,7 @@ export class Viewport {
     geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(d.indices ?? []), 1));
     geo.computeBoundingSphere();
     const material = new THREE.MeshStandardMaterial({ color: COLORS.body, metalness: 0.25, roughness: 0.45, side: THREE.FrontSide });
-    const mesh = new THREE.Mesh(geo, material);
+    const mesh = new THREE.Mesh(geo, material); // placeholder until _applyAppearance assigns the shared material
     mesh.userData.body = d.id;
 
     const segs = [];
@@ -111,28 +122,46 @@ export class Viewport {
     const group = new THREE.Group();
     group.add(mesh, edges);
     this.scene.add(group);
-    const b = { data: d, group, mesh, edges, material };
+    const b = { data: d, group, mesh, edges, material, matKey: null, uvTile: 0 };
     this.bodies.set(d.id, b);
     this._applyAppearance(b);
   }
 
-  /** Applies the body's CAD-IR appearance (color / opacity / visibility) to its material. */
+  /**
+   * Applies the body's CAD-IR appearance: visual material, color override, opacity, scale
+   * and visibility. Materials are shared and cached; no geometry is rebuilt (only the
+   * derived `uv` attribute, and only when a textured material's tile size changes).
+   */
   _applyAppearance(b) {
     const a = this.appearance?.[b.data.id] ?? {};
-    const op = typeof a.opacity === 'number' ? a.opacity : 1;
-    b.material.color.set(a.color || COLORS.body);
-    b.material.transparent = op < 1;
-    b.material.opacity = op;
-    b.material.depthWrite = op >= 1;
-    b.material.needsUpdate = true;
     b.group.visible = a.visible !== false;
+    if (!b.group.visible && !b.matKey) return; // lazy: hidden bodies never load textures
+    const next = this.materials.acquire(a);
+    if (next.key === b.matKey) { this.materials.release(next.key); } // same look: drop the extra ref
+    else {
+      if (b.matKey) this.materials.release(b.matKey); else b.material.dispose(); // placeholder is unshared
+      b.matKey = next.key;
+      b.material = next.material;
+      b.mesh.material = next.material;
+    }
+    if (MaterialManager.textured(next.def)) {
+      const tile = this.materials.tileMM(next.def, a);
+      if (b.uvTile !== tile) { this.materials.applyUVs(b.mesh, b.data, tile); b.uvTile = tile; }
+    }
+  }
+
+  /** Re-resolves every body's material (after the library changed, e.g. project open or reload). */
+  reapplyMaterials() {
+    for (const b of this.bodies.values()) this._applyAppearance(b);
+    this.dirty();
   }
 
   _dropBody(id) {
     const b = this.bodies.get(id);
     if (!b) return;
     this.scene.remove(b.group);
-    b.mesh.geometry.dispose(); b.edges.geometry.dispose(); b.material.dispose(); b.edges.material.dispose();
+    b.mesh.geometry.dispose(); b.edges.geometry.dispose(); b.edges.material.dispose();
+    if (b.matKey) this.materials.release(b.matKey); else b.material.dispose();
     this.bodies.delete(id);
   }
 

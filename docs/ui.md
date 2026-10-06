@@ -147,6 +147,19 @@ for all of them (differing values read "mixed"). Every edit calls `set_color` / 
 `set_visibility` / `reset_appearance` through the tool registry, and the viewport updates from
 `scene.appearance` without re-tessellating. Hidden bodies are not pickable and are excluded from Fit.
 
+### Materials
+
+The Appearance group also holds a **material** row: **Choose…** opens a picker with search, category chips
+and sphere thumbnails (rendered with the viewport's lighting). Click one to assign it to the selected
+objects, or drag a thumbnail onto an object in the viewport or a row in the design tree (dropping on a
+selected object applies to the whole selection). Right-click an object → recent materials, **Material…**
+and **Remove material**. Texture scale multiplies the material's natural tile size; color and opacity act
+as overrides on top of the material. All of it goes through `set_material` / `remove_material` /
+`set_material_scale` — ChangeSets with undo/redo that never rebuild geometry. Rendering uses
+`MeshStandardMaterial` with a shared RoomEnvironment for reflections; textures and materials are cached
+and reference counted (`frontend/materials/cache.js`) and UVs are generated per face from its surface type
+(`uv.js`: planar, cylindrical, box).
+
 ## Delete
 
 `Delete` / `Backspace` (outside text fields) or the **Delete** context-menu item (right-click an object in the

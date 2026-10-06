@@ -1,0 +1,21 @@
+{
+  "id": "clear_glass",
+  "name": "Clear Glass",
+  "category": "Glass",
+  "tags": [
+    "glass",
+    "clear",
+    "transparent",
+    "window"
+  ],
+  "baseColor": "#E8F2F4",
+  "metalness": 0.0,
+  "roughness": 0.03,
+  "opacity": 0.25,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}
