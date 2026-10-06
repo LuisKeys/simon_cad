@@ -530,13 +530,29 @@ $('level').addEventListener('change', async () => {
 
 // ---- project dialogs ---------------------------------------------------------------------
 
-function ask({ title, value = '', format = false, ok = 'OK' }) {
+function ask({ title, value = '', format = false, ok = 'OK', choices = null }) {
   return new Promise((resolve) => {
     const d = $('dialog'), input = $('dialog-input'), fmt = $('dialog-format');
     $('dialog-title').textContent = title;
     input.value = value; fmt.hidden = !format; $('dialog-ok').textContent = ok;
+    const list = $('dialog-list');
+    list.replaceChildren();
+    list.hidden = !choices;
+    if (choices) {
+      if (!choices.length) {
+        const li = document.createElement('li'); li.className = 'd'; li.textContent = 'No saved projects yet'; list.append(li);
+      }
+      for (const c of choices) {
+        const li = document.createElement('li');
+        const k = document.createElement('span'); k.textContent = c.label;
+        const dsc = document.createElement('span'); dsc.className = 'd'; dsc.textContent = c.detail ?? '';
+        li.append(k, dsc);
+        li.onclick = () => close({ value: c.value, format: fmt.value });
+        list.append(li);
+      }
+    }
     d.hidden = false; input.focus(); input.select();
-    const close = (v) => { d.hidden = true; $('dialog-form').onsubmit = null; $('dialog-cancel').onclick = null; resolve(v); };
+    const close = (v) => { d.hidden = true; list.hidden = true; $('dialog-form').onsubmit = null; $('dialog-cancel').onclick = null; resolve(v); };
     $('dialog-form').onsubmit = (e) => { e.preventDefault(); close({ value: input.value.trim(), format: fmt.value }); };
     $('dialog-cancel').onclick = () => close(null);
   });
@@ -549,7 +565,10 @@ $('btn-new').addEventListener('click', async () => {
   scheduleRefresh();
 });
 $('btn-open').addEventListener('click', async () => {
-  const r = await ask({ title: 'Path of the .scadproj directory', ok: 'Open' });
+  let projects = [];
+  try { projects = await api('project/list'); } catch { /* fall back to typing a path */ }
+  const choices = projects.map((p) => ({ label: p.name, value: p.path, detail: new Date(p.modified).toLocaleString() }));
+  const r = await ask({ title: 'Open a project (click one, or type a path)', ok: 'Open', choices });
   if (!r?.value) return;
   try { await api('project/open', { path: r.value }); clearPreview(); vp.clear(); } catch (e) { toast(e.message, 'bad'); }
   scheduleRefresh();
@@ -558,7 +577,7 @@ async function save() {
   try {
     let path = S.state?.path;
     if (!path) {
-      const r = await ask({ title: 'Save project to (a .scadproj directory)', value: `${S.state?.name || 'project'}.scadproj`, ok: 'Save' });
+      const r = await ask({ title: 'Save project as (relative names go to projects_output)', value: `${S.state?.name || 'project'}.scadproj`, ok: 'Save' });
       if (!r?.value) return;
       path = r.value;
     }

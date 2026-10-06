@@ -10,6 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -1012,6 +1014,7 @@ func (s *Service) Open(dir string) error {
 	if err := s.guard(); err != nil {
 		return err
 	}
+	dir = s.findProject(dir)
 	a, err := app.Open(dir, s.Clock)
 	if err != nil {
 		return err
@@ -1019,6 +1022,78 @@ func (s *Service) Open(dir string) error {
 	s.attach(a, dir)
 	s.hub.Publish(Notice{Kind: "state"})
 	return nil
+}
+
+const (
+	projectExt = ".scadproj"
+	// OutputDir is where projects saved with a relative path are written.
+	OutputDir = "projects_output"
+)
+
+// resolveProjectPath places a bare or relative project path under OutputDir; absolute
+// paths and paths already under OutputDir are kept as typed.
+func resolveProjectPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || filepath.IsAbs(p) || strings.HasPrefix(p, "~") {
+		return p
+	}
+	clean := filepath.Clean(p)
+	if clean == OutputDir || strings.HasPrefix(clean, OutputDir+string(filepath.Separator)) {
+		return clean
+	}
+	return filepath.Join(OutputDir, clean)
+}
+
+// withProjectExt restores the .scadproj extension when the user typed a bare name.
+func withProjectExt(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.HasSuffix(strings.ToLower(strings.TrimRight(p, "/")), projectExt) {
+		return p
+	}
+	return strings.TrimRight(p, "/") + projectExt
+}
+
+// ProjectInfo describes a saved project found in OutputDir.
+type ProjectInfo struct {
+	Name     string    `json:"name"`
+	Path     string    `json:"path"`
+	Modified time.Time `json:"modified"`
+}
+
+// ListProjects returns the .scadproj directories in OutputDir, newest first.
+func (s *Service) ListProjects() []ProjectInfo {
+	out := []ProjectInfo{}
+	entries, err := os.ReadDir(OutputDir)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), projectExt) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, ProjectInfo{
+			Name:     e.Name()[:len(e.Name())-len(projectExt)],
+			Path:     filepath.Join(OutputDir, e.Name()),
+			Modified: info.ModTime(),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })
+	return out
+}
+
+// findProject resolves a typed path to an existing project: as typed, then under
+// OutputDir, each with and without the .scadproj extension.
+func (s *Service) findProject(p string) string {
+	for _, c := range []string{p, withProjectExt(p), resolveProjectPath(p), resolveProjectPath(withProjectExt(p))} {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return p
 }
 
 // Save writes the project; an empty dir saves in place.
@@ -1031,6 +1106,7 @@ func (s *Service) Save(dir string) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("this project has no location yet; give a path")
 	}
+	dir = resolveProjectPath(withProjectExt(dir))
 	if err := s.app.Save(dir); err != nil {
 		return "", err
 	}

@@ -308,6 +308,9 @@ func (s *Server) routes() {
 		}
 		reply(w, map[string]any{"ok": true}, s.Svc.New(in.Name))
 	})
+	m.HandleFunc("/api/project/list", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, s.Svc.ListProjects())
+	})
 	m.HandleFunc("/api/project/open", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Path string }
 		if err := decode(r, &in); err != nil {
