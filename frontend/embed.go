@@ -8,7 +8,7 @@ import (
 	"io/fs"
 )
 
-//go:embed index.html style.css *.js materials vendor assets
+//go:embed index.html style.css help.html help.css *.js materials vendor assets
 var files embed.FS
 
 // FS returns the frontend files rooted at the package directory.

@@ -38,6 +38,13 @@ free-form prompts still works (palette tools, parameter edits, undo/redo, timeli
 | `frontend/` | `viewport.js` (Three.js, picking, overlays, view cube), `app.js` (panels, palette, timeline), `api.js`. No build step; Three.js r186 is vendored under `frontend/vendor/`. |
 | `cmd/simoncad` | Launcher. |
 
+## Help microsite
+
+The header's **Help** link opens `frontend/help.html` (with `help.css`, `help.js`) in a new tab: the full
+user guide with copy-paste example prompts for every feature, the tool reference and keyboard shortcuts.
+It is served by the same embedded static handler, so it ships in the binary. When you add a tool or a
+user-visible feature, update the prompts in `help.html` and the `TOOLS` table in `help.js`.
+
 ## Selectors are topology-backed now
 
 Phase 1 resolved faces from bounding boxes, which is wrong for pocketed or filleted parts. Now:

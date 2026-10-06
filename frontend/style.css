@@ -217,3 +217,5 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .params.appearance { grid-template-columns: auto minmax(0, 1fr); }
 
 .chip.spec { border-color: var(--line); color: inherit; }
+a.btnlink { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 10px; color: var(--text); text-decoration: none; }
+a.btnlink:hover { border-color: var(--accent); }
