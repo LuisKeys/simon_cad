@@ -1,10 +1,12 @@
-// primitives.cpp — box and cylinder.
+// primitives.cpp — box, cylinder, cone, sphere, torus and polygon prism.
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepPrimAPI_MakeTorus.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
@@ -49,6 +51,30 @@ occ_status occ_cone(double r1, double r2, double height, occ_handle* out) {
     BRepPrimAPI_MakeCone mk(r1, r2, height);
     mk.Build();
     if (!mk.IsDone()) throw BridgeError{OCC_ERR_KERNEL, "cone construction failed"};
+    *out = store_shape(mk.Shape());
+  });
+}
+
+occ_status occ_sphere(double radius, occ_handle* out) {
+  return guarded([&] {
+    require_out(out);
+    if (!(radius > 0)) throw BridgeError{OCC_ERR_INVALID_ARG, "sphere radius must be positive"};
+    BRepPrimAPI_MakeSphere mk(radius);
+    mk.Build();
+    if (!mk.IsDone()) throw BridgeError{OCC_ERR_KERNEL, "sphere construction failed"};
+    *out = store_shape(mk.Shape());
+  });
+}
+
+occ_status occ_torus(double major_radius, double minor_radius, occ_handle* out) {
+  return guarded([&] {
+    require_out(out);
+    if (!(minor_radius > 0 && major_radius > minor_radius)) {
+      throw BridgeError{OCC_ERR_INVALID_ARG, "torus radii must satisfy 0 < minor < major"};
+    }
+    BRepPrimAPI_MakeTorus mk(major_radius, minor_radius);
+    mk.Build();
+    if (!mk.IsDone()) throw BridgeError{OCC_ERR_KERNEL, "torus construction failed"};
     *out = store_shape(mk.Shape());
   });
 }

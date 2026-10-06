@@ -61,6 +61,18 @@ func Cylinder(r, h float64) (Handle, error) {
 	return Handle(out), err
 }
 
+func Sphere(r float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("sphere", C.occ_sphere(C.double(r), &out))
+	return Handle(out), err
+}
+
+func Torus(major, minor float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("torus", C.occ_torus(C.double(major), C.double(minor), &out))
+	return Handle(out), err
+}
+
 func Union(a, b Handle) (Handle, error) {
 	var out C.occ_handle
 	err := check("union", C.occ_boolean_union(C.occ_handle(a), C.occ_handle(b), &out))

@@ -90,6 +90,16 @@ func (k *Kernel) Cylinder(radius, height float64) (*Shape, error) {
 	return k.wrap(func() (bridge.Handle, error) { return bridge.Cylinder(radius, height) })
 }
 
+// Sphere is centered at the origin.
+func (k *Kernel) Sphere(radius float64) (*Shape, error) {
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Sphere(radius) })
+}
+
+// Torus is centered at the origin with its axis along +Z.
+func (k *Kernel) Torus(major, minor float64) (*Shape, error) {
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Torus(major, minor) })
+}
+
 // Cone is a frustum with base radius r1 at z=0 and top radius r2 at z=h.
 func (k *Kernel) Cone(r1, r2, h float64) (*Shape, error) {
 	return k.wrap(func() (bridge.Handle, error) { return bridge.Cone(r1, r2, h) })

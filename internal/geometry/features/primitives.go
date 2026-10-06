@@ -12,6 +12,9 @@ import (
 func init() {
 	register(&Feature{Type: "box", Build: buildBox})
 	register(&Feature{Type: "cylinder", Build: buildCylinder})
+	register(&Feature{Type: "cone", Build: buildCone})
+	register(&Feature{Type: "sphere", Build: buildSphere})
+	register(&Feature{Type: "torus", Build: buildTorus})
 	register(&Feature{Type: "union", Build: buildBoolean(false), Target: targetOf})
 	register(&Feature{Type: "subtract", Build: buildBoolean(true), Target: targetOf})
 	register(&Feature{Type: "fillet", Build: buildEdgeTreatment(true), Target: targetOf})
@@ -78,6 +81,84 @@ func buildCylinder(c *Ctx) (*api.Shape, error) {
 	}
 	defer cyl.Release()
 	aligned, err := alignZ(cyl, c.P.Str("axis"))
+	if err != nil {
+		return nil, err
+	}
+	defer aligned.Release()
+	return aligned.Translate(x, y, z)
+}
+
+func buildCone(c *Ctx) (*api.Shape, error) {
+	r, err := c.P.Positive("radius")
+	if err != nil {
+		return nil, err
+	}
+	top, _ := c.P.NumOr("top_radius", 0)
+	if top < 0 {
+		return nil, fmt.Errorf("top_radius must be >= 0")
+	}
+	h, err := c.P.Positive("height")
+	if err != nil {
+		return nil, err
+	}
+	x, _ := c.P.NumOr("x", 0)
+	y, _ := c.P.NumOr("y", 0)
+	z, _ := c.P.NumOr("z", 0)
+	cone, err := c.K.Cone(r, top, h)
+	if err != nil {
+		return nil, err
+	}
+	defer cone.Release()
+	aligned, err := alignZ(cone, c.P.Str("axis"))
+	if err != nil {
+		return nil, err
+	}
+	defer aligned.Release()
+	return aligned.Translate(x, y, z)
+}
+
+// buildSphere centers the sphere at (x,y,z).
+func buildSphere(c *Ctx) (*api.Shape, error) {
+	r, err := c.P.Positive("radius")
+	if err != nil {
+		return nil, err
+	}
+	x, _ := c.P.NumOr("x", 0)
+	y, _ := c.P.NumOr("y", 0)
+	z, _ := c.P.NumOr("z", 0)
+	s, err := c.K.Sphere(r)
+	if err != nil {
+		return nil, err
+	}
+	if x == 0 && y == 0 && z == 0 {
+		return s, nil
+	}
+	defer s.Release()
+	return s.Translate(x, y, z)
+}
+
+// buildTorus centers the torus at (x,y,z) with its axis along `axis`.
+func buildTorus(c *Ctx) (*api.Shape, error) {
+	major, err := c.P.Positive("major_radius")
+	if err != nil {
+		return nil, err
+	}
+	minor, err := c.P.Positive("minor_radius")
+	if err != nil {
+		return nil, err
+	}
+	if minor >= major {
+		return nil, fmt.Errorf("minor_radius (%g) must be smaller than major_radius (%g)", minor, major)
+	}
+	x, _ := c.P.NumOr("x", 0)
+	y, _ := c.P.NumOr("y", 0)
+	z, _ := c.P.NumOr("z", 0)
+	t, err := c.K.Torus(major, minor)
+	if err != nil {
+		return nil, err
+	}
+	defer t.Release()
+	aligned, err := alignZ(t, c.P.Str("axis"))
 	if err != nil {
 		return nil, err
 	}

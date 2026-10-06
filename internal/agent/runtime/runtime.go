@@ -25,6 +25,9 @@ type Runtime struct {
 	Provider Provider
 	Caps     []Capability
 	MaxSteps int
+	// History is the prior conversation (plain user/assistant text, oldest first). It is
+	// prepended to the turn; the live model context is only attached to the newest request.
+	History []Message
 	// OnStep, if set, observes each tool call (for CLI progress output).
 	OnStep func(name string, args json.RawMessage, o app.Outcome)
 }
@@ -89,7 +92,8 @@ func (rt *Runtime) Run(ctx context.Context, a *app.App, intent string, policy ap
 	}
 	sb.WriteString("## User request\n")
 	sb.WriteString(intent)
-	msgs := []Message{{Role: "user", Content: []Block{{Type: "text", Text: sb.String()}}}}
+	msgs := append(append([]Message(nil), rt.History...),
+		Message{Role: "user", Content: []Block{{Type: "text", Text: sb.String()}}})
 
 	for step := 0; step < rt.MaxSteps; step++ {
 		resp, err := rt.Provider.Complete(ctx, Request{System: rt.systemPrompt(), Messages: msgs, Tools: defs})

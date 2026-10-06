@@ -82,6 +82,20 @@ Create a rectangular block (e.g. a plate). Dimensions in mm; dx/dy/dz are the ex
 | `y` | number |  | Min-corner Y (mm), default 0 |
 | `z` | number |  | Min-corner Z (mm), default 0 |
 
+### `create_cone`
+
+Create a cone or frustum (taper, funnel, chamfer cutter). The base circle (`radius`) is centered at (x,y,z) and the cone extends `height` along `axis` (default z), narrowing to `top_radius` (default 0 = a point).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `axis` | x \| y \| z |  | Axis direction (x \| y \| z) |
+| `height` | number > 0 | yes | Length along the axis (mm) |
+| `radius` | number > 0 | yes | Base radius (mm) |
+| `top_radius` | number |  | Top radius (mm), default 0 (pointed) |
+| `x` | number |  | Base center X (mm) |
+| `y` | number |  | Base center Y (mm) |
+| `z` | number |  | Base center Z (mm) |
+
 ### `create_cylinder`
 
 Create a cylinder (shaft, boss, standoff, pin). The base circle is centered at (x,y,z) and the cylinder extends `height` along `axis` (default z).
@@ -94,6 +108,30 @@ Create a cylinder (shaft, boss, standoff, pin). The base circle is centered at (
 | `x` | number |  | Base center X (mm) |
 | `y` | number |  | Base center Y (mm) |
 | `z` | number |  | Base center Z (mm) |
+
+### `create_sphere`
+
+Create a sphere (ball, dome when cut, rounded end). Centered at (x,y,z), default the origin.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `radius` | number > 0 | yes | Radius (mm) |
+| `x` | number |  | Center X (mm) |
+| `y` | number |  | Center Y (mm) |
+| `z` | number |  | Center Z (mm) |
+
+### `create_torus`
+
+Create a torus (ring, O-ring seat, donut). Centered at (x,y,z); `major_radius` is the distance from the center to the middle of the tube, `minor_radius` the tube radius (must be smaller). The ring lies perpendicular to `axis` (default z).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `axis` | x \| y \| z |  | Axis the ring is perpendicular to (x \| y \| z) |
+| `major_radius` | number > 0 | yes | Ring radius, center to tube center (mm) |
+| `minor_radius` | number > 0 | yes | Tube radius (mm), < major_radius |
+| `x` | number |  | Center X (mm) |
+| `y` | number |  | Center Y (mm) |
+| `z` | number |  | Center Z (mm) |
 
 ### `extrude_profile`
 

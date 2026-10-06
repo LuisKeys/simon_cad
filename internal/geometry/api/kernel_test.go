@@ -96,3 +96,37 @@ func TestChurnNoLeak(t *testing.T) {
 	}
 	t.Logf("RSS %d kB -> %d kB", rss0, rss1)
 }
+
+func TestRoundPrimitiveVolumes(t *testing.T) {
+	k := New()
+	defer k.Close()
+	cases := []struct {
+		name string
+		mk   func() (*Shape, error)
+		want float64
+	}{
+		{"sphere", func() (*Shape, error) { return k.Sphere(5) }, 4.0 / 3 * math.Pi * 125},
+		{"cone", func() (*Shape, error) { return k.Cone(4, 0, 9) }, math.Pi * 16 * 9 / 3},
+		{"torus", func() (*Shape, error) { return k.Torus(10, 2) }, 2 * math.Pi * math.Pi * 10 * 4},
+	}
+	for _, c := range cases {
+		s, err := c.mk()
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		p, err := s.Props()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if math.Abs(p.Volume-c.want)/c.want > 1e-6 {
+			t.Errorf("%s volume %v want %v", c.name, p.Volume, c.want)
+		}
+		s.Release()
+	}
+	if _, err := k.Torus(2, 3); err == nil {
+		t.Error("torus with minor >= major must fail")
+	}
+	if _, err := k.Sphere(0); err == nil {
+		t.Error("sphere radius 0 must fail")
+	}
+}

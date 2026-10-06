@@ -382,6 +382,7 @@ func (s *Service) Prompt(text string) error {
 		return err
 	}
 	s.busy = true
+	prior := s.history()
 	s.say("user", text, "", true, "")
 	s.hub.Publish(Notice{Kind: "state"})
 	level := s.level
@@ -397,7 +398,7 @@ func (s *Service) Prompt(text string) error {
 		// The lock is held for the turn, except while waiting on the model (see unlocking).
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New()}}
+		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New()}, History: prior}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
 			if o.ChangeSet != nil {
@@ -428,6 +429,40 @@ func (s *Service) Prompt(text string) error {
 		s.changed()
 	}()
 	return nil
+}
+
+// maxHistory bounds how many prior chat messages are replayed to the model each turn.
+const maxHistory = 30
+
+// history renders the chat panel as model conversation: only user and agent text, with
+// tool chatter dropped (the current model state is re-injected every turn). Consecutive
+// messages of one role are merged and the result always starts with a user message.
+// The caller holds s.mu.
+func (s *Service) history() []runtime.Message {
+	var out []runtime.Message
+	for _, m := range s.chat {
+		role := ""
+		switch m.Role {
+		case "user":
+			role = "user"
+		case "agent":
+			role = "assistant"
+		default:
+			continue
+		}
+		if n := len(out); n > 0 && out[n-1].Role == role {
+			out[n-1].Content[0].Text += "\n\n" + m.Text
+			continue
+		}
+		out = append(out, runtime.Message{Role: role, Content: []runtime.Block{{Type: "text", Text: m.Text}}})
+	}
+	if len(out) > maxHistory {
+		out = out[len(out)-maxHistory:]
+	}
+	for len(out) > 0 && out[0].Role != "user" {
+		out = out[1:]
+	}
+	return out
 }
 
 // ---- ChangeSets and tools -------------------------------------------------------------

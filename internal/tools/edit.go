@@ -13,6 +13,9 @@ import (
 var knownParams = map[string][]string{
 	"box":              {"dx", "dy", "dz", "x", "y", "z"},
 	"cylinder":         {"radius", "height", "axis", "x", "y", "z"},
+	"cone":             {"radius", "top_radius", "height", "axis", "x", "y", "z"},
+	"sphere":           {"radius", "x", "y", "z"},
+	"torus":            {"major_radius", "minor_radius", "axis", "x", "y", "z"},
 	"hole":             {"diameter", "depth", "kind", "cb_diameter", "cb_depth", "cs_diameter", "cs_angle_deg", "positions"},
 	"extrude":          {"mode", "plane", "offset", "depth", "symmetric", "through", "x", "y", "w", "h", "r", "x1", "y1", "x2", "y2", "width", "points"},
 	"linear_pattern":   {"count", "dx", "dy", "dz"},
@@ -28,7 +31,7 @@ var knownParams = map[string][]string{
 // strictlyPositive parameters must be > 0.
 var strictlyPositive = map[string]bool{
 	"dx": false, "dy": false, "dz": false, // box extents are positive but pattern/transform deltas are not; checked per type
-	"radius": true, "height": true, "diameter": true, "depth": true, "distance": true,
+	"radius": true, "height": true, "major_radius": true, "minor_radius": true, "diameter": true, "depth": true, "distance": true,
 	"cb_diameter": true, "cb_depth": true, "cs_diameter": true, "w": true, "h": true, "r": true, "width": true,
 }
 

@@ -53,6 +53,10 @@ occ_status occ_cylinder(double radius, double height, occ_handle* out);
 
 /* Cone frustum, base circle (radius r1) centered at origin, axis +Z, top radius r2 at z=height. */
 occ_status occ_cone(double r1, double r2, double height, occ_handle* out);
+/* Sphere centered at origin. */
+occ_status occ_sphere(double radius, occ_handle* out);
+/* Torus centered at origin, axis +Z; major = ring radius, minor = tube radius (0 < minor < major). */
+occ_status occ_torus(double major_radius, double minor_radius, occ_handle* out);
 /* Prism of a closed planar polygon in the XY plane (xy = n interleaved x,y pairs, n >= 3),
  * extruded along +Z by height. */
 occ_status occ_extrude_polygon(const double* xy, int32_t n, double height, occ_handle* out);
