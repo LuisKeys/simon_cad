@@ -18,6 +18,7 @@ import (
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/app"
+	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/rendering"
@@ -49,7 +50,7 @@ type Service struct {
 	level string
 	chat  []ChatMessage
 	sel   []string
-	selAt string // graph hash the selection was made against
+	selAt string // geometry hash (appearance excluded) the selection was made against
 
 	rend *rendering.Renderer
 	hub  *Hub
@@ -142,7 +143,7 @@ func (s *Service) changed() {
 	s.dirty = true
 	// Face/edge indices are only meaningful for the model they were picked on, so a
 	// selection never outlives a change to the model.
-	if len(s.sel) > 0 && s.app.Snapshot().Hash() != s.selAt {
+	if len(s.sel) > 0 && s.app.Snapshot().GeometryHash() != s.selAt {
 		s.sel = nil
 		_ = s.app.SetSelection(nil)
 	}
@@ -212,7 +213,7 @@ func (s *Service) setSelection(raw []string) (SelectionView, error) {
 		return SelectionView{}, err
 	}
 	s.sel = append([]string(nil), raw...)
-	s.selAt = s.app.Snapshot().Hash()
+	s.selAt = s.app.Snapshot().GeometryHash()
 	s.hub.Publish(Notice{Kind: "selection"})
 	return s.selectionView(), nil
 }
@@ -302,7 +303,20 @@ func (s *Service) Scene(known map[string]string) (*rendering.Delta, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.rend.Scene(m, known)
+	d, err := s.rend.Scene(m, known)
+	if err != nil {
+		return nil, err
+	}
+	// Appearance is read from the CAD-IR on every call: it is tiny and independent of
+	// the mesh keys, so an appearance-only change never re-tessellates anything.
+	g := s.app.Snapshot()
+	d.Appearance = map[string]*cadir.Appearance{}
+	for _, id := range d.Order {
+		if n := g.Get(id); n != nil && !n.Appearance.IsZero() {
+			d.Appearance[id] = n.Appearance
+		}
+	}
+	return d, nil
 }
 
 // Ghost is the preview overlay of a proposed ChangeSet: the bodies it would add, and the
@@ -891,7 +905,8 @@ type TreeNode struct {
 	CreatedBy  string            `json:"created_by"`
 	Capability string            `json:"capability,omitempty"`
 	Suppressed bool              `json:"suppressed"`
-	Visible    bool              `json:"visible"` // produces a body nothing else consumes
+	Visible    bool              `json:"visible"` // produces a body nothing else consumes (a leaf)
+	Appearance *cadir.Appearance `json:"appearance,omitempty"`
 	Deps       []string          `json:"deps"`
 	Params     map[string]any    `json:"params"`
 	Exprs      map[string]string `json:"expressions,omitempty"`
@@ -948,7 +963,7 @@ func (s *Service) State() (*State, error) {
 		}
 		st.Tree = append(st.Tree, TreeNode{ID: n.ID, Name: name, Type: n.Type, Status: n.Status, Errors: nz(n.Errors),
 			Intent: n.Intent, CreatedBy: n.Provenance.CreatedBy, Capability: n.Provenance.Capability,
-			Suppressed: n.Suppressed, Visible: leaf[n.ID], Deps: nz(n.Dependencies), Params: n.Parameters, Exprs: n.Expressions})
+			Suppressed: n.Suppressed, Visible: leaf[n.ID], Appearance: n.Appearance, Deps: nz(n.Dependencies), Params: n.Parameters, Exprs: n.Expressions})
 	}
 	for _, cs := range s.app.Pending() {
 		st.Pending = append(st.Pending, app.CardOf(cs))

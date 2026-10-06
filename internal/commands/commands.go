@@ -54,6 +54,14 @@ func Decode(r Record) (Command, error) {
 		c = &Suppress{}
 	case "Rename":
 		c = &Rename{}
+	case "SetColor":
+		c = &SetColor{}
+	case "SetOpacity":
+		c = &SetOpacity{}
+	case "SetVisibility":
+		c = &SetVisibility{}
+	case "ResetAppearance":
+		c = &ResetAppearance{}
 	case "RestoreSnapshot":
 		c = &RestoreSnapshot{}
 	default:
@@ -312,6 +320,125 @@ func (c *Rename) Apply(g *cadir.Graph) (Command, error) {
 	old := n.Metadata.Name
 	n.Metadata.Name = c.Name
 	return &Rename{ID: c.ID, Name: old}, nil
+}
+
+// ---- Appearance (presentation only; never affects geometry) ------------------------
+
+// IsAppearance reports whether a command type only edits presentation metadata.
+func IsAppearance(t string) bool {
+	switch t {
+	case "SetColor", "SetOpacity", "SetVisibility", "ResetAppearance":
+		return true
+	}
+	return false
+}
+
+// edit applies f to the node's appearance and normalizes an empty result back to nil.
+func editAppearance(g *cadir.Graph, id string, f func(a *cadir.Appearance)) (old *cadir.Appearance, err error) {
+	n, err := mustNode(g, id)
+	if err != nil {
+		return nil, err
+	}
+	old = n.Appearance.Clone()
+	a := n.Appearance.Clone()
+	if a == nil {
+		a = &cadir.Appearance{}
+	}
+	f(a)
+	if a.IsZero() {
+		a = nil
+	}
+	n.Appearance = a
+	return old, nil
+}
+
+// SetColor sets the color ("#RRGGBB"); an empty Color clears the override.
+type SetColor struct {
+	ID    string `json:"id"`
+	Color string `json:"color"`
+}
+
+func (*SetColor) Type() string { return "SetColor" }
+
+func (c *SetColor) Apply(g *cadir.Graph) (Command, error) {
+	col := ""
+	if c.Color != "" {
+		var err error
+		if col, err = cadir.NormalizeColor(c.Color); err != nil {
+			return nil, err
+		}
+	}
+	var prev string
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) { prev = a.Color; a.Color = col }); err != nil {
+		return nil, err
+	}
+	return &SetColor{ID: c.ID, Color: prev}, nil
+}
+
+// SetOpacity sets opacity in [0,1]; nil clears the override.
+type SetOpacity struct {
+	ID      string   `json:"id"`
+	Opacity *float64 `json:"opacity"`
+}
+
+func (*SetOpacity) Type() string { return "SetOpacity" }
+
+func (c *SetOpacity) Apply(g *cadir.Graph) (Command, error) {
+	if c.Opacity != nil {
+		if err := cadir.ValidateOpacity(*c.Opacity); err != nil {
+			return nil, err
+		}
+	}
+	var prev *float64
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) {
+		prev = a.Opacity
+		a.Opacity = c.Opacity
+	}); err != nil {
+		return nil, err
+	}
+	return &SetOpacity{ID: c.ID, Opacity: prev}, nil
+}
+
+// SetVisibility shows or hides the object; nil clears the override.
+type SetVisibility struct {
+	ID      string `json:"id"`
+	Visible *bool  `json:"visible"`
+}
+
+func (*SetVisibility) Type() string { return "SetVisibility" }
+
+func (c *SetVisibility) Apply(g *cadir.Graph) (Command, error) {
+	var prev *bool
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) {
+		prev = a.Visible
+		a.Visible = c.Visible
+	}); err != nil {
+		return nil, err
+	}
+	return &SetVisibility{ID: c.ID, Visible: prev}, nil
+}
+
+// ResetAppearance replaces the whole appearance with Restore (nil = defaults). Its
+// inverse carries the previous appearance, so undo restores it exactly.
+type ResetAppearance struct {
+	ID      string            `json:"id"`
+	Restore *cadir.Appearance `json:"restore,omitempty"`
+}
+
+func (*ResetAppearance) Type() string { return "ResetAppearance" }
+
+func (c *ResetAppearance) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	old := n.Appearance.Clone()
+	if c.Restore.IsZero() {
+		n.Appearance = nil
+	} else {
+		n.Appearance = c.Restore.Clone()
+	}
+	return &ResetAppearance{ID: c.ID, Restore: old}, nil
 }
 
 // ---- RestoreSnapshot (checkpoint restore) ------------------------------------------

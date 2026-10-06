@@ -56,7 +56,8 @@ func TestRegistryInvariants(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"create_box", "create_cylinder", "create_cone", "create_sphere", "create_torus", "add_hole", "extrude_profile", "linear_pattern", "circular_pattern",
-		"boolean", "mirror", "fillet", "chamfer", "transform", "modify_parameter", "measure_distance", "get_model_summary", "export_step", "export_stl"} {
+		"boolean", "mirror", "fillet", "chamfer", "transform", "modify_parameter", "measure_distance", "get_model_summary", "export_step", "export_stl",
+		"set_color", "set_opacity", "set_visibility", "reset_appearance", "get_appearance"} {
 		if _, ok := r.Get(want); !ok {
 			t.Errorf("missing required Phase 1 tool %s", want)
 		}

@@ -33,6 +33,7 @@ export class Viewport {
     this.grid.material.transparent = true; this.grid.material.opacity = 0.5;
     this.scene.add(this.grid);
 
+    this.appearance = {};       // body id -> {color, opacity, visible} from the CAD-IR
     this.bodies = new Map();   // id -> { data, group, mesh, edges, material }
     this.ghost = new THREE.Group(); this.scene.add(this.ghost);
     this.hoverGroup = new THREE.Group(); this.scene.add(this.hoverGroup);
@@ -75,6 +76,10 @@ export class Viewport {
     for (const id of delta.removed ?? []) this._dropBody(id);
     for (const d of delta.changed ?? []) { this._dropBody(d.id); this._addBody(d); }
     this.known = { ...(delta.keys ?? {}) };
+    // Appearance comes straight from the CAD-IR and is applied to existing meshes:
+    // it never needs new geometry, so an appearance-only change arrives with no bodies.
+    this.appearance = delta.appearance ?? {};
+    for (const b of this.bodies.values()) this._applyAppearance(b);
     this.stats = { bodies: this.bodies.size, triangles: delta.stats?.triangles ?? 0 };
     this._updateSectionRange();
     if (!hadBodies && this.bodies.size > 0) this.fit();
@@ -105,7 +110,21 @@ export class Viewport {
     const group = new THREE.Group();
     group.add(mesh, edges);
     this.scene.add(group);
-    this.bodies.set(d.id, { data: d, group, mesh, edges, material });
+    const b = { data: d, group, mesh, edges, material };
+    this.bodies.set(d.id, b);
+    this._applyAppearance(b);
+  }
+
+  /** Applies the body's CAD-IR appearance (color / opacity / visibility) to its material. */
+  _applyAppearance(b) {
+    const a = this.appearance?.[b.data.id] ?? {};
+    const op = typeof a.opacity === 'number' ? a.opacity : 1;
+    b.material.color.set(a.color || COLORS.body);
+    b.material.transparent = op < 1;
+    b.material.opacity = op;
+    b.material.depthWrite = op >= 1;
+    b.material.needsUpdate = true;
+    b.group.visible = a.visible !== false;
   }
 
   _dropBody(id) {
@@ -129,7 +148,7 @@ export class Viewport {
       this.ghost.remove(c);
       c.traverse?.((o) => { o.geometry?.dispose(); o.material?.dispose(); });
     }
-    for (const b of this.bodies.values()) { b.material.transparent = false; b.material.opacity = 1; b.edges.material.color.setHex(COLORS.edge); }
+    for (const b of this.bodies.values()) { this._applyAppearance(b); b.edges.material.color.setHex(COLORS.edge); }
     this.ghostActive = !!ghost;
     if (ghost) {
       for (const id of ghost.removed ?? []) {
@@ -162,7 +181,7 @@ export class Viewport {
 
   bounds() {
     const box = new THREE.Box3();
-    for (const b of this.bodies.values()) box.expandByObject(b.group);
+    for (const b of this.bodies.values()) if (b.group.visible) box.expandByObject(b.group);
     return box;
   }
 
@@ -273,6 +292,7 @@ export class Viewport {
     if (want('vertex')) {
       let best = null, bd = PICK_PX;
       for (const b of this.bodies.values()) {
+        if (!b.group.visible) continue;
         const vs = b.data.vertices ?? [];
         if (vs.length > MAX_VERTEX_PICK) continue;
         for (const v of vs) {
@@ -289,6 +309,7 @@ export class Viewport {
     if (want('edge')) {
       let best = null, bd = PICK_PX - 1;
       for (const b of this.bodies.values()) {
+        if (!b.group.visible) continue;
         const ep = b.data.edge_points ?? [];
         for (const e of b.data.edges ?? []) {
           for (let i = 0; i + 1 < e.pt_count; i++) {

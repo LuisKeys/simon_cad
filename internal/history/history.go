@@ -143,6 +143,38 @@ func Compare(a, b *cadir.Graph) Diff {
 		if n.Suppressed != bn.Suppressed {
 			d.Changed = append(d.Changed, ParamChange{n.ID, "suppressed", n.Suppressed, bn.Suppressed})
 		}
+		for _, f := range []struct {
+			name     string
+			from, to string
+		}{
+			{"appearance.color", appearanceField(n.Appearance, "color"), appearanceField(bn.Appearance, "color")},
+			{"appearance.opacity", appearanceField(n.Appearance, "opacity"), appearanceField(bn.Appearance, "opacity")},
+			{"appearance.visible", appearanceField(n.Appearance, "visible"), appearanceField(bn.Appearance, "visible")},
+		} {
+			if f.from != f.to {
+				d.Changed = append(d.Changed, ParamChange{n.ID, f.name, f.from, f.to})
+			}
+		}
 	}
 	return d
+}
+
+// appearanceField renders one appearance attribute as text ("" when it is the default).
+func appearanceField(a *cadir.Appearance, field string) string {
+	if a == nil {
+		return ""
+	}
+	switch field {
+	case "color":
+		return a.Color
+	case "opacity":
+		if a.Opacity != nil {
+			return fmt.Sprint(*a.Opacity)
+		}
+	case "visible":
+		if a.Visible != nil {
+			return fmt.Sprint(*a.Visible)
+		}
+	}
+	return ""
 }

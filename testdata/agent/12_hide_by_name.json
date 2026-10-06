@@ -1,0 +1,84 @@
+{
+  "name": "12_hide_by_name",
+  "notes": "Scripted recording (hand-written to mirror a well-behaved model).",
+  "prompt": "Hide the reference servo.",
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "set_visibility",
+            "input": {
+              "features": [
+                "reference_servo"
+              ],
+              "visible": false
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "Done."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "set_visibility",
+        "args": {
+          "features": [
+            "reference_servo"
+          ],
+          "visible": false
+        }
+      }
+    ],
+    "model": {
+      "features": 3,
+      "failed": 0
+    }
+  },
+  "setup": [
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "servo_bracket",
+        "name": "Servo bracket",
+        "dx": 20,
+        "dy": 20,
+        "dz": 5
+      }
+    },
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "reference_servo",
+        "name": "Reference servo",
+        "dx": 20,
+        "dy": 20,
+        "dz": 5
+      }
+    },
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "enclosure",
+        "name": "Electronics enclosure",
+        "dx": 20,
+        "dy": 20,
+        "dz": 5
+      }
+    }
+  ]
+}

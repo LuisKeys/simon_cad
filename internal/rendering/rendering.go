@@ -11,6 +11,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/features"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
@@ -79,6 +80,9 @@ type Delta struct {
 	Changed []*BodyMesh       `json:"changed"` // bodies whose key the client did not have
 	Removed []string          `json:"removed"` // ids the client has that are gone
 	Stats   Stats             `json:"stats"`
+	// Appearance overrides per body id, filled by the caller from the CAD-IR. It is
+	// independent of mesh keys: changing it never changes Keys/Changed.
+	Appearance map[string]*cadir.Appearance `json:"appearance,omitempty"`
 }
 
 // Stats reports work done, for budgets and tests.

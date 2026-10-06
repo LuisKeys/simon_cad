@@ -113,6 +113,7 @@ Every node carries the full schema from day one (even where unused yet):
 | `provenance` | `created_by` (user/agent/cli), capability, tool call id, ChangeSet id, model |
 | `metadata` | Name, created/modified timestamps, tags |
 | `suppressed` | Authoritative suppress flag |
+| `appearance` | Optional `{color "#RRGGBB", opacity 0–1, visible}`; presentation only (see below) |
 | `status`, `errors` | **Derived** by rebuild: `ok / failed / stale / suppressed` + cause chain |
 
 **Effective dependencies** are the union of explicit `dependencies`, nodes referenced from
@@ -120,8 +121,19 @@ expressions (`plate.dz` ⇒ `plate`) and features named in selector references. 
 topological order and "can I remove this?" all use effective dependencies, so a reference can never
 silently dangle.
 
+**Appearance is presentation, not geometry.** The pipeline forks after the CAD-IR:
+`Geometry → OCCT B-Rep → tessellation` and `Appearance → rendering / supported exports`.
+`appearance` is excluded from `Node.ContentKey()` and from the rebuild cache key, so
+`SetColor`, `SetOpacity`, `SetVisibility` and `ResetAppearance` (ordinary invertible commands, auto-committed
+as a group) never invoke the geometry kernel: the rebuild is all cache hits and the renderer re-tessellates
+nothing (`TestAppearanceChangeSetSkipsKernel`). `rendering.Delta.Appearance` carries the values to the
+viewport, which only mutates materials. Hidden bodies still exist and are still exported. STL discards
+appearance; the same `cadir.Appearance` type is reserved for component/assembly instances, catalog default
+appearances and 3MF/STEP color export, none of which exist yet.
+
 `Graph.Hash()` is a content hash that **excludes** derived status/errors and timestamps; it is what
-checkpoints, stale-detection and replay verification compare.
+checkpoints, stale-detection and replay verification compare. It **includes** appearance;
+`Graph.GeometryHash()` ignores it and is what keeps a selection alive across appearance edits.
 
 ## 5. Rebuild engine
 

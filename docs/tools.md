@@ -219,6 +219,14 @@ Change a feature's human-readable name (its id does not change).
 | `feature` | string | yes | Feature id |
 | `name` | string | yes | New name |
 
+### `reset_appearance`
+
+Reset color, opacity and visibility of features/bodies to their defaults. Defaults to the current selection.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+
 ### `restore_checkpoint`
 
 Return the model to an earlier semantic checkpoint, given by id (cp_002), number, 'previous', or part of its label (e.g. 'before we reinforced the shoulder' means the checkpoint preceding the one labelled 'Reinforced shoulder'). Use get_model_summary to list checkpoints.
@@ -226,6 +234,15 @@ Return the model to an earlier semantic checkpoint, given by id (cp_002), number
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `checkpoint` | string | yes | Checkpoint id, number, 'previous', or label text |
+
+### `set_color`
+
+Set the display color of one or more features/bodies (e.g. 'make the bracket red'). Presentation only; does not change geometry. Defaults to the current selection when `features` is omitted.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `color` | string | yes | Color as #RRGGBB hex |
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
 
 ### `set_expression`
 
@@ -236,6 +253,24 @@ Drive a numeric parameter by an expression over other features' parameters, e.g.
 | `expression` | string |  | Expression, or omit to clear |
 | `feature` | string | yes | Feature id |
 | `parameter` | string | yes | Parameter name |
+
+### `set_opacity`
+
+Set display opacity (0 = invisible, 1 = opaque; ~0.5 for 'semi-transparent') of features/bodies. Presentation only. Defaults to the current selection.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+| `opacity` | number | yes | Opacity 0..1 |
+
+### `set_visibility`
+
+Show or hide features/bodies in the viewport (e.g. 'hide the reference servo'). Hidden objects still exist and are still exported. Defaults to the current selection.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+| `visible` | boolean | yes | true to show, false to hide |
 
 ### `suppress_feature`
 
@@ -283,6 +318,14 @@ Export the current model to a binary STL file at `path` for 3D printing (does no
 |---|---|---|---|
 | `deflection_mm` | number > 0 |  | Mesh deflection in mm (default 0.05) |
 | `path` | string | yes | Output file path, e.g. out/plate.stl |
+
+### `get_appearance`
+
+Read the appearance (color, opacity, visible) of features. Omit `features` to list all overridden ones.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
 
 ### `get_model_summary`
 

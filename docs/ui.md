@@ -119,3 +119,12 @@ backlog item "round only the outer edges after pocketing".
 - **macOS/Windows CI** (planned from Phase 2) is not set up; only Linux is built here.
 - **Live LLM** use in the UI is unverified (no key was available); the UI path is covered with the
   same recorded-provider mechanism the evals use.
+
+## Appearance
+
+Expanding a feature in the design tree shows an **Appearance** group: color picker, hex / `rgb(r,g,b)`
+field (empty = reset), opacity slider, visibility checkbox and Reset. The eye button on a tree row toggles
+visibility. When several bodies are selected in the viewport, the Selection panel shows the same controls
+for all of them (differing values read "mixed"). Every edit calls `set_color` / `set_opacity` /
+`set_visibility` / `reset_appearance` through the tool registry, and the viewport updates from
+`scene.appearance` without re-tessellating. Hidden bodies are not pickable and are excluded from Fit.

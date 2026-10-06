@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/accelone/simoncad/internal/expr"
 	"github.com/accelone/simoncad/internal/selectors"
@@ -50,6 +52,55 @@ type Metadata struct {
 	Tags     []string `json:"tags,omitempty"`
 }
 
+// Appearance is presentation metadata. It is authoritative in the CAD-IR but is never an
+// input to geometry: it is excluded from Node.ContentKey and the rebuild cache key, so
+// changing it never invokes the geometry kernel. Nil fields mean "default".
+type Appearance struct {
+	Color   string   `json:"color,omitempty"`   // "#RRGGBB"
+	Opacity *float64 `json:"opacity,omitempty"` // 0..1
+	Visible *bool    `json:"visible,omitempty"`
+}
+
+var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+
+// NormalizeColor validates a "#RRGGBB" color and returns it upper-cased.
+func NormalizeColor(c string) (string, error) {
+	if !colorPattern.MatchString(c) {
+		return "", fmt.Errorf("invalid color %q (want #RRGGBB)", c)
+	}
+	return strings.ToUpper(c), nil
+}
+
+// ValidateOpacity checks 0 <= o <= 1.
+func ValidateOpacity(o float64) error {
+	if !(o >= 0 && o <= 1) {
+		return fmt.Errorf("opacity %v out of range [0,1]", o)
+	}
+	return nil
+}
+
+// IsZero reports whether the appearance carries no overrides.
+func (a *Appearance) IsZero() bool {
+	return a == nil || (a.Color == "" && a.Opacity == nil && a.Visible == nil)
+}
+
+// Clone returns a deep copy (nil-safe).
+func (a *Appearance) Clone() *Appearance {
+	if a == nil {
+		return nil
+	}
+	c := Appearance{Color: a.Color}
+	if a.Opacity != nil {
+		v := *a.Opacity
+		c.Opacity = &v
+	}
+	if a.Visible != nil {
+		v := *a.Visible
+		c.Visible = &v
+	}
+	return &c
+}
+
 // Node is one CAD-IR feature. The full schema exists from day one even where
 // fields (component, manufacturing, ...) are not yet consumed.
 type Node struct {
@@ -67,6 +118,7 @@ type Node struct {
 	Provenance    Provenance        `json:"provenance"`
 	Metadata      Metadata          `json:"metadata"`
 	Suppressed    bool              `json:"suppressed,omitempty"`
+	Appearance    *Appearance       `json:"appearance,omitempty"`
 	Status        string            `json:"status,omitempty"`
 	Errors        []string          `json:"errors,omitempty"`
 }
@@ -231,11 +283,20 @@ func (g *Graph) Canonical() ([]byte, error) {
 }
 
 // Hash is a content hash of the authoritative content (excludes derived status/errors and timestamps).
-func (g *Graph) Hash() string {
+func (g *Graph) Hash() string { return g.hash(false) }
+
+// GeometryHash is Hash ignoring presentation-only appearance: it is unchanged by an
+// appearance-only edit.
+func (g *Graph) GeometryHash() string { return g.hash(true) }
+
+func (g *Graph) hash(ignoreAppearance bool) string {
 	c := g.Clone()
 	for _, n := range c.Nodes {
 		n.Status, n.Errors = "", nil
 		n.Metadata.Created, n.Metadata.Modified = "", ""
+		if ignoreAppearance {
+			n.Appearance = nil
+		}
 	}
 	b, _ := json.Marshal(c)
 	sum := sha256.Sum256(b)

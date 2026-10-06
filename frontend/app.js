@@ -120,11 +120,15 @@ function renderTree(st) {
       h('span', { class: 'name', title: n.id }, n.name),
       h('span', { class: 'type' }, n.type),
       h('span', { class: `badge ${n.created_by}`, title: n.capability ? `${n.created_by} · ${n.capability}` : n.created_by }, n.created_by || '—'),
-      n.visible ? null : h('span', { class: 'badge hidden', title: 'Consumed by a later feature' }, 'input'));
+      n.visible ? null : h('span', { class: 'badge hidden', title: 'Consumed by a later feature' }, 'input'),
+      n.visible ? h('button', { type: 'button', class: 'eye', 'aria-pressed': String(n.appearance?.visible !== false),
+        'aria-label': `${n.appearance?.visible === false ? 'Show' : 'Hide'} ${n.name}`, title: n.appearance?.visible === false ? 'Show' : 'Hide',
+        onclick: (e) => { e.stopPropagation(); applyAppearance('set_visibility', [n.id], { visible: n.appearance?.visible === false }); } },
+        n.appearance?.visible === false ? '🚫' : '👁') : null);
     const kids = [row];
     if (n.intent) kids.push(h('div', { class: 'intent' }, n.intent));
     if (n.errors.length) kids.push(h('div', { class: 'errors' }, n.errors[0]));
-    if (open) kids.push(paramEditor(n));
+    if (open) kids.push(appearanceEditor([n]), paramEditor(n));
     return h('div', { class: `node${selFeatures.has(n.id) ? ' sel' : ''}`, role: 'none' }, ...kids);
   }));
 }
@@ -150,6 +154,66 @@ function paramEditor(n) {
   return h('div', { class: 'params' }, ...rows);
 }
 
+// ---- appearance (color / opacity / visibility) -----------------------------------------
+// Edits go through the tool registry like any other change. They are presentation only:
+// the viewport updates from the CAD-IR without a geometry rebuild.
+
+async function applyAppearance(tool, ids, extra = {}) {
+  try {
+    const o = await api('tool', { name: tool, args: { features: ids, ...extra } });
+    if (!o.ok && !/already as requested/.test(o.error ?? '')) toast(o.error, 'bad');
+  } catch (err) { toast(err.message, 'bad'); }
+  scheduleRefresh();
+}
+
+const HEX_RE = /^#?([0-9a-f]{6})$/i;
+function parseColor(text) {
+  const t = text.trim();
+  const m = HEX_RE.exec(t);
+  if (m) return '#' + m[1].toUpperCase();
+  const rgb = /^rgb\(?\s*(\d{1,3})\s*[, ]\s*(\d{1,3})\s*[, ]\s*(\d{1,3})\s*\)?$/i.exec(t);
+  if (rgb && [1, 2, 3].every((i) => Number(rgb[i]) <= 255)) {
+    return '#' + [1, 2, 3].map((i) => Number(rgb[i]).toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+  return null;
+}
+
+/** Appearance controls for one or many tree nodes; differing values show as "mixed". */
+function appearanceEditor(nodes) {
+  const ids = nodes.map((n) => n.id);
+  const uniq = (f) => { const v = new Set(nodes.map(f)); return v.size === 1 ? [...v][0] : undefined; };
+  const color = uniq((n) => n.appearance?.color ?? '');
+  const opacity = uniq((n) => n.appearance?.opacity ?? 1);
+  const visible = uniq((n) => n.appearance?.visible !== false);
+  const key = ids.join('-');
+
+  const picker = h('input', { id: `ap-c-${key}`, type: 'color', value: color || '#9FB2C8', 'aria-label': 'Color',
+    onchange: (e) => applyAppearance('set_color', ids, { color: e.target.value.toUpperCase() }) });
+  const hex = h('input', { id: `ap-h-${key}`, type: 'text', value: color ?? '', placeholder: color === undefined ? 'mixed' : 'default',
+    'aria-label': 'Color as hex or rgb', spellcheck: 'false',
+    onchange: (e) => {
+      if (!e.target.value.trim()) { applyAppearance('reset_appearance', ids); return; }
+      const c = parseColor(e.target.value);
+      if (!c) { toast('Use #RRGGBB or rgb(r,g,b)', 'bad'); e.target.value = color ?? ''; return; }
+      applyAppearance('set_color', ids, { color: c });
+    } });
+  const pct = h('output', {}, opacity === undefined ? 'mixed' : `${Math.round(opacity * 100)}%`);
+  const slider = h('input', { id: `ap-o-${key}`, type: 'range', min: '0', max: '100', value: String(Math.round((opacity ?? 1) * 100)),
+    'aria-label': 'Opacity',
+    oninput: (e) => { pct.textContent = `${e.target.value}%`; },
+    onchange: (e) => applyAppearance('set_opacity', ids, { opacity: Number(e.target.value) / 100 }) });
+  const vis = h('input', { id: `ap-v-${key}`, type: 'checkbox', checked: visible !== false, 'aria-label': 'Visible',
+    onchange: (e) => applyAppearance('set_visibility', ids, { visible: e.target.checked }) });
+  if (visible === undefined) vis.indeterminate = true;
+  const reset = h('button', { type: 'button', class: 'small', onclick: () => applyAppearance('reset_appearance', ids) }, 'Reset appearance');
+
+  return h('div', { class: 'params appearance', role: 'group', 'aria-label': ids.length > 1 ? `Appearance of ${ids.length} objects` : 'Appearance' },
+    h('label', { for: picker.id }, 'color'), h('span', { class: 'color-row' }, picker, hex),
+    h('label', { for: slider.id }, 'opacity'), h('span', { class: 'color-row' }, slider, pct),
+    h('label', { for: vis.id }, 'visible'), vis,
+    h('span', {}), reset);
+}
+
 function featureOf(sel) { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1].trim() : ''; }
 
 function renderSelection(sel) {
@@ -160,7 +224,8 @@ function renderSelection(sel) {
     chips.replaceChildren();
     return;
   }
-  list.replaceChildren(...ents.map((e) => h('div', { class: 'sel-item' },
+  const selNodes = (S.state?.tree ?? []).filter((n) => n.visible && new Set(ents.map((e) => featureOf(e.selector))).has(n.id));
+  list.replaceChildren(...(selNodes.length ? [h('div', { class: 'sel-item' }, h('b', {}, `Appearance · ${selNodes.length} object${selNodes.length > 1 ? 's' : ''}`), appearanceEditor(selNodes))] : []), ...ents.map((e) => h('div', { class: 'sel-item' },
     h('code', {}, e.selector),
     h('div', { class: 'muted' }, [e.surface_type, e.area ? `${e.area.toFixed(1)} mm²` : null,
       `at (${e.centroid.map((v) => v.toFixed(1)).join(', ')})`].filter(Boolean).join(' · ')))));
