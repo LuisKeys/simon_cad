@@ -106,16 +106,68 @@ type Renderer struct {
 	mu    sync.Mutex
 	cache map[string]*BodyMesh
 	order []string // LRU, oldest first
+	// DetailFn reports the current display detail; nil means DetailFine.
+	DetailFn func() Detail
+}
+
+func (r *Renderer) detail() Detail {
+	if r.DetailFn == nil {
+		return DetailFine
+	}
+	return r.DetailFn()
 }
 
 func New() *Renderer { return &Renderer{cache: map[string]*BodyMesh{}} }
 
+// Detail is how finely bodies are meshed for display. It only changes the viewport mesh
+// (and so the triangle count); geometry, selection and exports are unaffected.
+type Detail string
+
+const (
+	DetailFine   Detail = "fine" // default: smooth curves
+	DetailNormal Detail = "normal"
+	DetailCoarse Detail = "coarse" // fewest triangles
+)
+
+// Details lists the valid levels, finest first.
+var Details = []Detail{DetailFine, DetailNormal, DetailCoarse}
+
+// ParseDetail maps a level name to a Detail; ok is false for an unknown name.
+func ParseDetail(s string) (Detail, bool) {
+	for _, d := range Details {
+		if string(d) == s {
+			return d, true
+		}
+	}
+	return DetailFine, false
+}
+
 // deflectionFor picks a linear deflection from the body size: fine enough to look smooth,
 // coarse enough to hold the triangle budget.
-func deflectionFor(b selectors.Bounds) float64 {
+func deflectionFor(b selectors.Bounds) float64 { return deflectionAt(b, DetailFine) }
+
+// angularAt is the widest angle (radians) one mesh segment of a curve may span.
+func angularAt(d Detail) float64 {
+	switch d {
+	case DetailNormal:
+		return 0.8
+	case DetailCoarse:
+		return 1.2
+	}
+	return 0.5
+}
+
+func deflectionAt(b selectors.Bounds, d Detail) float64 {
 	sz := b.Size()
 	diag := math.Sqrt(sz[0]*sz[0] + sz[1]*sz[1] + sz[2]*sz[2])
-	return math.Max(0.02, 0.0015*diag)
+	rel, floor := 0.0015, 0.02
+	switch d {
+	case DetailNormal:
+		rel, floor = 0.006, 0.08
+	case DetailCoarse:
+		rel, floor = 0.02, 0.3
+	}
+	return math.Max(floor, rel*diag)
 }
 
 func (r *Renderer) touch(k string) {
@@ -138,19 +190,24 @@ func (r *Renderer) Body(id string, res *rebuild.NodeResult) (*BodyMesh, bool, er
 		return nil, false, fmt.Errorf("feature %q has no geometry", id)
 	}
 	bounds := res.Body.Bounds()
-	defl := deflectionFor(bounds)
-	ck := fmt.Sprintf("%s|%s|%g", id, res.Key, defl)
+	det := r.detail()
+	defl := deflectionAt(bounds, det)
+	key := res.Key
+	if det != DetailFine {
+		key += "~" + string(det) // the client re-fetches a body when its mesh detail changes
+	}
+	ck := fmt.Sprintf("%s|%s|%g", id, key, defl)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if m, ok := r.cache[ck]; ok {
 		r.touch(ck)
 		return m, true, nil
 	}
-	mesh, err := res.Body.Shape.Tessellate(defl)
+	mesh, err := res.Body.Shape.TessellateAngular(defl, angularAt(det))
 	if err != nil {
 		return nil, false, err
 	}
-	m := build(id, res.Key, bounds, mesh)
+	m := build(id, key, bounds, mesh)
 	r.cache[ck] = m
 	r.touch(ck)
 	return m, false, nil

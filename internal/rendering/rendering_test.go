@@ -153,3 +153,37 @@ func TestSelectorErrors(t *testing.T) {
 		t.Fatal("no face lies at z=5")
 	}
 }
+
+// Coarser display detail meshes with fewer triangles, re-keys the body so the client
+// re-fetches it, and leaves the topology (and so every selector) untouched.
+func TestMeshDetailSimplifies(t *testing.T) {
+	a := app.New("t", clock)
+	defer a.Close()
+	run(t, a, "create_box", `{"id":"plate","dx":60,"dy":40,"dz":6}`)
+	run(t, a, "add_hole", `{"id":"holes","target":"plate","diameter":3.2,"positions":[[10,10],[50,30]]}`)
+	m, err := a.Model()
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail := rendering.DetailFine
+	r := rendering.New()
+	r.DetailFn = func() rendering.Detail { return detail }
+	fine, err := r.Scene(m, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail = rendering.DetailCoarse
+	coarse, err := r.Scene(m, fine.Keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coarse.Changed) != 1 {
+		t.Fatalf("coarse mesh was not re-sent: %d changed", len(coarse.Changed))
+	}
+	if coarse.Stats.Triangles >= fine.Stats.Triangles {
+		t.Fatalf("coarse %d triangles, fine %d", coarse.Stats.Triangles, fine.Stats.Triangles)
+	}
+	if len(coarse.Changed[0].Faces) != len(fine.Changed[0].Faces) {
+		t.Fatal("topology changed with mesh detail")
+	}
+}

@@ -301,7 +301,11 @@ const (
 // Tessellate meshes the shape at the given linear deflection (mm). Faces, edges and
 // vertices are numbered deterministically, so an index identifies the same entity on
 // every rebuild of the same shape.
-func (s *Shape) Tessellate(deflection float64) (*Mesh, error) {
+func (s *Shape) Tessellate(deflection float64) (*Mesh, error) { return s.TessellateAngular(deflection, 0.5) }
+
+// TessellateAngular is Tessellate with an explicit angular deflection (radians): the widest
+// angle one segment of a curve may span. Larger values give fewer, longer segments.
+func (s *Shape) TessellateAngular(deflection, angular float64) (*Mesh, error) {
 	if s.h == 0 {
 		return nil, ErrReleased
 	}
@@ -309,7 +313,7 @@ func (s *Shape) Tessellate(deflection float64) (*Mesh, error) {
 		m   *Mesh
 		err error
 	)
-	s.k.run(func() { m, err = bridge.Tessellate(s.h, deflection) })
+	s.k.run(func() { m, err = bridge.TessellateAngular(s.h, deflection, angular) })
 	return m, err
 }
 

@@ -575,6 +575,11 @@ $('btn-measure').addEventListener('click', () => {
   $('measure-label').hidden = true;
   $('hud').textContent = on ? 'Measure: click two points' : hudStats();
 });
+$('btn-mesh').addEventListener('click', () => {
+  const on = !vp.meshOnly;
+  $('btn-mesh').classList.toggle('on', on);
+  vp.setMeshOnly(on);
+});
 $('btn-fit').addEventListener('click', () => vp.fit());
 $('sec-axis').addEventListener('change', () => {
   const axis = $('sec-axis').value;

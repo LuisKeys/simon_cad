@@ -512,6 +512,14 @@ Search materials by free text (e.g. 'metallic', 'black plastic', 'brushed alumin
 |---|---|---|---|
 | `query` | string | yes | What the material should look like or be called |
 
+### `set_mesh_detail`
+
+Simplify or refine the displayed triangle mesh (not the geometry). Use level=coarse or normal when the mesh looks over-tessellated or heavy (e.g. many segments on small cylinders, "simplify the mesh"), and fine to restore smooth curves. Display only: geometry, selection and exports are unchanged. Returns the triangle count.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `level` | fine \| normal \| coarse | yes | Mesh detail: fine (default, smooth) \| normal \| coarse (fewest triangles) (fine \| normal \| coarse) |
+
 ### `set_sketch_scale`
 
 Set the real scale of the drawing explicitly, either as mm_per_px, or as a length measured in the image (`pixels`) that equals `mm`. Prefer confirm_detected_dimension when a dimension exists. clear=true removes an explicit scale.

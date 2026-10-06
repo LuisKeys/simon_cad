@@ -161,6 +161,7 @@ export class Viewport {
     if (!b) return;
     this.scene.remove(b.group);
     b.mesh.geometry.dispose(); b.edges.geometry.dispose(); b.edges.material.dispose();
+    if (b.wire) { b.wire.geometry.dispose(); b.wire.material.dispose(); }
     if (b.matKey) this.materials.release(b.matKey); else b.material.dispose();
     this.bodies.delete(id);
   }
@@ -555,7 +556,26 @@ export class Viewport {
     });
   }
 
+  /** Mesh view: shows each body's triangle mesh and hides the grid, B-rep edges and sketch outlines. */
+  setMeshOnly(on) {
+    this.meshOnly = !!on;
+    this.dirty();
+  }
+
   render() {
+    const mo = !!this.meshOnly;
+    this.grid.visible = !mo;
+    if (this.sketches) this.sketches.visible = !mo;
+    for (const b of this.bodies.values()) {
+      b.edges.visible = !mo;
+      b.mesh.visible = !mo; // picking raycasts the mesh regardless of visibility
+      if (mo && !b.wire) { // built lazily, once per body
+        b.wire = new THREE.LineSegments(new THREE.WireframeGeometry(b.mesh.geometry),
+          new THREE.LineBasicMaterial({ color: 0x8fb4d8, transparent: true, opacity: 0.6 }));
+        b.group.add(b.wire);
+      }
+      if (b.wire) b.wire.visible = mo;
+    }
     this.renderer.render(this.scene, this.camera);
     const { r, scene, cam } = this.cube;
     const d = this.camera.position.clone().sub(this.controls.target).normalize().multiplyScalar(6);

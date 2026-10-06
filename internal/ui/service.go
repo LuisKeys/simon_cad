@@ -85,6 +85,7 @@ type ChatMessage struct {
 func NewService(a *app.App, path string) *Service {
 	s := &Service{NewProvider: runtime.NewProviderFromEnv, Clock: time.Now, level: LevelReview,
 		rend: rendering.New(), hub: NewHub()}
+	s.rend.DetailFn = func() rendering.Detail { d, _ := rendering.ParseDetail(s.app.MeshDetail()); return d }
 	s.attach(a, path)
 	return s
 }

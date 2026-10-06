@@ -35,6 +35,10 @@ type Env interface {
 	Images() *vision.ImageStore
 	// Materials is the visual material library (presentation only).
 	Materials() *materials.Library
+	// MeshDetail / SetMeshDetail: viewport mesh detail ("fine" | "normal" | "coarse").
+	// Display only; never CAD state.
+	MeshDetail() string
+	SetMeshDetail(level string)
 	// Export writes the current model ("step" or "stl") and returns a summary.
 	Export(format, path string, deflection float64) (map[string]any, error)
 }

@@ -145,6 +145,8 @@ typedef struct {
 
 /* Meshes the shape at the given linear deflection. Free with occ_mesh_free. */
 occ_status occ_tessellate(occ_handle s, double deflection, occ_mesh** out);
+/* As occ_tessellate with an explicit angular deflection (radians; occ_tessellate uses 0.5). */
+occ_status occ_tessellate_ex(occ_handle s, double deflection, double angular, occ_mesh** out);
 occ_status occ_mesh_get_counts(const occ_mesh* m, occ_mesh_counts* out);
 /* Copies into caller buffers sized from occ_mesh_get_counts: positions/normals 3*vertices
  * floats, indices 3*triangles, faces, edges, edge_pts 3*edge_points floats,

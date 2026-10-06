@@ -64,6 +64,9 @@ type App struct {
 	// Presentation only; it is never an input to geometry.
 	Materials *materials.Library
 	matDir    string // project dir whose assets/materials feed Materials ("" = none)
+	// meshDetail is the viewport mesh detail ("fine" | "normal" | "coarse"). Display only:
+	// it is not CAD state, is not saved and never changes geometry.
+	meshDetail string
 
 	// Raw preserved files not interpreted in Phase 1.
 	components, constraints, materials json.RawMessage
@@ -307,6 +310,14 @@ func (a *App) SelectionContext() selection.Context {
 	return c
 }
 
+// MeshDetail is the viewport mesh detail level (default "fine").
+func (a *App) MeshDetail() string {
+	if a.meshDetail == "" {
+		return "fine"
+	}
+	return a.meshDetail
+}
+
 // ---- tools.Env ----------------------------------------------------------------------
 
 type toolEnv struct{ a *App }
@@ -320,6 +331,8 @@ func (e toolEnv) Checkpoints() *history.Log      { return e.a.Hist }
 func (e toolEnv) Vision() *vision.Store          { return e.a.Vision }
 func (e toolEnv) Images() *vision.ImageStore     { return e.a.Images }
 func (e toolEnv) Materials() *materials.Library  { return e.a.Materials }
+func (e toolEnv) MeshDetail() string             { return e.a.MeshDetail() }
+func (e toolEnv) SetMeshDetail(level string)     { e.a.meshDetail = level }
 func (e toolEnv) Provenance() cadir.Provenance {
 	return cadir.Provenance{CreatedBy: e.a.actor.CreatedBy, Capability: e.a.actor.Capability,
 		ToolCallID: e.a.callID, Model: e.a.actor.Model}

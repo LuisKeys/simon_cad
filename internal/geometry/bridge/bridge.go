@@ -282,9 +282,12 @@ type Mesh struct {
 }
 
 // Tessellate meshes a shape and copies the result out, freeing the native mesh.
-func Tessellate(s Handle, deflection float64) (*Mesh, error) {
+func Tessellate(s Handle, deflection float64) (*Mesh, error) { return TessellateAngular(s, deflection, 0.5) }
+
+// TessellateAngular is Tessellate with an explicit angular deflection (radians).
+func TessellateAngular(s Handle, deflection, angular float64) (*Mesh, error) {
 	var m *C.occ_mesh
-	if err := check("tessellate", C.occ_tessellate(C.occ_handle(s), C.double(deflection), &m)); err != nil {
+	if err := check("tessellate", C.occ_tessellate_ex(C.occ_handle(s), C.double(deflection), C.double(angular), &m)); err != nil {
 		return nil, err
 	}
 	defer C.occ_mesh_free(m)
