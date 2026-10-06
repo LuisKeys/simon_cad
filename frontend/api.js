@@ -27,6 +27,15 @@ export async function uploadImage(blob) {
   return data;
 }
 
+// Uploads a text document (specification) as short-term memory; resolves to {name, chars}.
+export async function uploadSpec(file) {
+  const res = await fetch(`/api/spec?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'X-Simon-Token': token }, body: file });
+  let data = null;
+  try { data = await res.json(); } catch { /* empty body */ }
+  if (!res.ok) throw new Error(data?.error ?? `document upload failed (HTTP ${res.status})`);
+  return data;
+}
+
 // <img src> cannot send headers, so the token travels in the query string for images.
 export const imageUrl = (id) => `/api/image/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
 

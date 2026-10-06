@@ -87,11 +87,12 @@
     </section>
     <form id="composer" class="composer" autocomplete="off">
       <div id="chips" class="chips"></div>
+      <div id="specs" class="chips" aria-label="Attached documents"></div>
       <div id="attachments" class="chips" aria-label="Attached images"></div>
       <div class="row tools">
-        <button id="btn-attach" type="button" title="Attach an image (or drop / paste one anywhere)">📎 Attach</button>
+        <button id="btn-attach" type="button" title="Attach an image or a text document with specifications (or drop / paste one anywhere). Documents are remembered until Clear.">📎 Attach</button>
         <button id="btn-from-image" type="button" title="Create editable geometry from a sketch, scan or drawing">Create from Image</button>
-        <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp,.txt,.md,.markdown,.json,.csv,.yaml,.yml,.xml,text/*" multiple hidden>
       </div>
       <label class="think" title="Off = instant answers, no extended thinking"><input type="checkbox" id="thinking" checked> Thinking mode</label>
       <div class="row">
@@ -133,7 +134,7 @@
 </div>
 
 <div id="interp" class="overlay" hidden></div>
-<div id="drop-hint" class="drop-hint" hidden><div>Drop an image to attach it<br><small>PNG, JPEG or WebP · sketches, scans, drawings</small></div></div>
+<div id="drop-hint" class="drop-hint" hidden><div>Drop a file to attach it<br><small>Images (PNG, JPEG, WebP) · text specs (.txt, .md, .json, .csv)</small></div></div>
 
 <ul id="ctxmenu" class="ctxmenu" role="menu" hidden></ul>
 <div id="toast" class="toast" hidden></div>

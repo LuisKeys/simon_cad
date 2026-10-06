@@ -163,6 +163,29 @@ func (s *Server) routes() {
 		info, err := s.Svc.UploadImage(b)
 		reply(w, info, err)
 	})
+	m.HandleFunc("/api/spec", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST the raw document text with ?name=", http.StatusMethodNotAllowed)
+			return
+		}
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSpecBytes+1))
+		if err != nil {
+			fail(w, fmt.Errorf("document is larger than %d KB or unreadable", maxSpecBytes>>10))
+			return
+		}
+		sp, err := s.Svc.AddSpec(r.URL.Query().Get("name"), b)
+		reply(w, sp, err)
+	})
+	m.HandleFunc("/api/spec/remove", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.RemoveSpec(in.Name))
+	})
 	m.HandleFunc("/api/image/", func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/image/"), "/")
 		if len(parts) == 2 && parts[1] == "retain" && r.Method == http.MethodPost {

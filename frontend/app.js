@@ -171,7 +171,7 @@ function render(st) {
   loadMaterials(st.path ?? st.name);
   $('project').replaceChildren(...[h('span', {}, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, ' ●') : null].filter(Boolean));
   $('btn-undo').disabled = !st.can_undo || st.busy;
-  $('btn-clear').disabled = st.busy || st.chat.length === 0;
+  $('btn-clear').disabled = st.busy || (st.chat.length === 0 && !(st.specs ?? []).length);
   $('btn-redo').disabled = !st.can_redo || st.busy;
   $('level').value = st.level;
   $('btn-play').disabled = st.frames === 0 || S.playing;

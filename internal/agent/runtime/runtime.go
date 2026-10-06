@@ -33,6 +33,8 @@ type Runtime struct {
 	History []Message
 	// ImageIDs are uploaded images (App.Images) attached to this turn's user message.
 	ImageIDs []string
+	// Reference is user-attached document text (specifications) shown to the model every turn.
+	Reference string
 	// OnStep, if set, observes each tool call (for CLI progress output).
 	OnStep func(name string, args json.RawMessage, o app.Outcome)
 }
@@ -111,6 +113,9 @@ func (rt *Runtime) Run(ctx context.Context, a *app.App, intent string, policy ap
 	}
 	for _, line := range attached {
 		sb.WriteString(line + "\n")
+	}
+	if rt.Reference != "" {
+		sb.WriteString(rt.Reference + "\n")
 	}
 	sb.WriteString("## User request\n")
 	sb.WriteString(intent)

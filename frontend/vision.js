@@ -5,7 +5,7 @@
 // Nothing here changes the model: every action is a tool call through /api/tool
 // (confirm_detected_dimension, set_sketch_scale, update_sketch_proposal, create_from_image),
 // and the result is an ordinary proposed ChangeSet.
-import { api, h, svg, uploadImage, imageUrl } from './api.js';
+import { api, h, svg, uploadImage, uploadSpec, imageUrl } from './api.js';
 import { confidenceClass, pct, entityShapes, entityRoles, drawingWidthPx, uncertain, ambiguityEdits, CHOICES } from './vision-geom.js';
 
 const OK_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -43,6 +43,20 @@ export function initVision(ctx) {
 
   // ---- attachments ------------------------------------------------------------------
 
+  const isImage = (f) => OK_TYPES.includes(f.type) || f.type.startsWith('image/');
+
+  async function addSpec(file) {
+    try { await uploadSpec(file); ctx.refresh(); } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  function renderSpecs(st) {
+    $('specs').replaceChildren(...(st?.specs ?? []).map((s) => h('span', { class: 'chip spec', title: `${s.name} · ${s.chars} characters · remembered until Clear` },
+      h('span', {}, `📄 ${s.name}`),
+      h('button', { type: 'button', 'aria-label': `Remove ${s.name}`, onclick: async () => { try { await api('spec/remove', { name: s.name }); ctx.refresh(); } catch (e) { toast(e.message, 'bad'); } } }, '✕'))));
+  }
+
+  const addAny = (f) => (isImage(f) ? addFile(f) : addSpec(f));
+
   async function addFile(file) {
     if (V.attach.length >= MAX_ATTACH) { toast(`Attach at most ${MAX_ATTACH} images.`, 'bad'); return null; }
     try {
@@ -69,7 +83,7 @@ export function initVision(ctx) {
   document.addEventListener('drop', async (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault(); dragDepth = 0; $('drop-hint').hidden = true;
-    for (const f of [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'))) await addFile(f);
+    for (const f of [...e.dataTransfer.files]) await addAny(f);
     $('prompt').focus();
   });
   document.addEventListener('paste', async (e) => {
@@ -84,7 +98,7 @@ export function initVision(ctx) {
   $('file-input').addEventListener('change', async (e) => {
     const files = [...e.target.files];
     e.target.value = '';
-    for (const f of files) await addFile(f);
+    for (const f of files) await addAny(f);
     if (V.fromImage && V.attach.length && !$('prompt').value.trim()) {
       const onFace = (ctx.getSelection()?.selectors ?? []).some((s) => /^face\(/.test(s));
       $('prompt').value = onFace ? 'Create this shape on the selected face from the attached image.' : 'Create this part from the attached image.';
@@ -327,6 +341,7 @@ export function initVision(ctx) {
 
   /** Called after every state refresh: opens the panel for a new interpretation, re-renders an open one. */
   function onState(st) {
+    renderSpecs(st);
     for (const p of st.proposals ?? []) {
       if ((p.used ?? []).length || V.dismissed.has(p.id) || V.seen.has(p.id)) continue;
       V.seen.add(p.id);

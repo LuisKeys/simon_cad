@@ -215,3 +215,5 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .params .color-row input[type="range"] { flex: 1; width: auto; }
 .params input[type="checkbox"] { width: auto; justify-self: start; }
 .params.appearance { grid-template-columns: auto minmax(0, 1fr); }
+
+.chip.spec { border-color: var(--line); color: inherit; }

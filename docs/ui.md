@@ -120,6 +120,13 @@ backlog item "round only the outer edges after pocketing".
 - **Live LLM** use in the UI is unverified (no key was available); the UI path is covered with the
   same recorded-provider mechanism the evals use.
 
+## Attached specification documents
+
+**Attach** (or drop) also accepts a text document (`.txt`, `.md`, `.json`, `.csv`, …, ≤ 200 KB each,
+400 KB total) such as the specification of a part. It shows as a 📄 chip and is sent to the agent with
+every request as short-term memory until **Clear** is pressed (or a project is opened/created). It is
+never saved with the project. `POST /api/spec?name=…` (raw body) attaches; `POST /api/spec/remove` detaches.
+
 ## Image to CAD
 
 Attach a sketch, scan, drawing or photo of paper/whiteboard (PNG, JPEG, WebP) with the **Attach** /
