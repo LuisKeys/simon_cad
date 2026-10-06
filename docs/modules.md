@@ -12,7 +12,7 @@ The only code that touches OpenCascade.
 | `include/occ_bridge.h` | The stable C ABI. No OCCT type crosses it. `occ_handle` is a `uint64` (0 = invalid); `occ_status` 0 = OK. |
 | `bridge.cpp` | Handle table (mutex-guarded map), thread-local error message, `guarded()` exception→status translation, release, translate / rotate / mirror, `occ_is_valid`, `occ_mass_props`. |
 | `primitives.cpp` | `occ_box`, `occ_cylinder`, `occ_cone`, `occ_extrude_polygon` (closed XY polygon prism). |
-| `booleans.cpp` | `occ_boolean_union`, `occ_boolean_subtract` (inputs not consumed). |
+| `booleans.cpp` | `occ_boolean_union`, `occ_boolean_subtract`, `occ_boolean_intersect` (inputs not consumed). |
 | `fillets.cpp` | `occ_fillet_all_edges`, `occ_chamfer_all_edges`, and the selective `occ_fillet_edges`, `occ_chamfer_edges` (kernel edge indices). |
 | `mesh.cpp` | `occ_tessellate` / `occ_mesh_*`: per-face triangle ranges, edge polylines, topological vertices and per-face/edge descriptors; numbering in `TopExp::MapShapes` order. |
 | `export.cpp` | STEP export/import, STL export. Silences OCCT's stdout messages so `--json` output stays clean. |
@@ -110,7 +110,7 @@ properties + `Bounds()`), and `Ctx` (kernel, node, resolved params, already-buil
 | `extrude` | `profile` (rectangle/circle/slot/polygon), `mode` add/cut, `target`, `plane` XY/XZ/YZ, `offset`, `depth`, `symmetric`, `through`, profile fields | Planes map by cyclic permutation. Slot = box + two end cylinders. |
 | `linear_pattern` | `source`, `count`, `dx dy dz` | Repeats a hole / extrude source. |
 | `circular_pattern` | `source`, `count`, `cx cy cz`, `axis`, `total_angle_deg` | 360° spreads evenly; less spans end to end. |
-| `union` / `subtract` | `target`, `tool` | Consume both inputs. |
+| `union` / `subtract` / `intersect` | `target`, `tool` | Consume both inputs. |
 | `fillet` / `chamfer` | `target`, `radius` / `distance` | All edges; size must be below half the thinnest dimension. |
 | `transform` | `target`, `dx dy dz`, `angle_deg`, `ax ay az`, `ox oy oz` | Rotate first, then translate. |
 | `mirror` | `target`, `plane`, `offset` | Result = original ∪ mirrored copy. |

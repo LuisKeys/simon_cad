@@ -125,6 +125,14 @@ func (k *Kernel) Subtract(a, b *Shape) (*Shape, error) {
 	return k.wrap(func() (bridge.Handle, error) { return bridge.Subtract(a.h, b.h) })
 }
 
+// Intersect keeps only the volume common to a and b.
+func (k *Kernel) Intersect(a, b *Shape) (*Shape, error) {
+	if a.h == 0 || b.h == 0 {
+		return nil, ErrReleased
+	}
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Intersect(a.h, b.h) })
+}
+
 func (k *Kernel) ImportSTEP(path string) (*Shape, error) {
 	return k.wrap(func() (bridge.Handle, error) { return bridge.ImportSTEP(path) })
 }

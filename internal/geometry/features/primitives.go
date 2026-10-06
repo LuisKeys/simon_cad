@@ -17,6 +17,7 @@ func init() {
 	register(&Feature{Type: "torus", Build: buildTorus})
 	register(&Feature{Type: "union", Build: buildBoolean(false), Target: targetOf})
 	register(&Feature{Type: "subtract", Build: buildBoolean(true), Target: targetOf})
+	register(&Feature{Type: "intersect", Build: buildIntersect, Target: targetOf})
 	register(&Feature{Type: "fillet", Build: buildEdgeTreatment(true), Target: targetOf})
 	register(&Feature{Type: "chamfer", Build: buildEdgeTreatment(false), Target: targetOf})
 	register(&Feature{Type: "transform", Build: buildTransform, Target: targetOf})
@@ -178,6 +179,18 @@ func buildBoolean(subtract bool) func(*Ctx) (*api.Shape, error) {
 		}
 		return applyTool(c.K, t.Shape, tool.Shape, subtract)
 	}
+}
+
+func buildIntersect(c *Ctx) (*api.Shape, error) {
+	t, err := c.body(c.P.Str("target"))
+	if err != nil {
+		return nil, err
+	}
+	tool, err := c.body(c.P.Str("tool"))
+	if err != nil {
+		return nil, err
+	}
+	return c.K.Intersect(t.Shape, tool.Shape)
 }
 
 func buildEdgeTreatment(fillet bool) func(*Ctx) (*api.Shape, error) {

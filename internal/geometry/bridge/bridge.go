@@ -85,6 +85,12 @@ func Subtract(a, b Handle) (Handle, error) {
 	return Handle(out), err
 }
 
+func Intersect(a, b Handle) (Handle, error) {
+	var out C.occ_handle
+	err := check("intersect", C.occ_boolean_intersect(C.occ_handle(a), C.occ_handle(b), &out))
+	return Handle(out), err
+}
+
 func FilletAllEdges(s Handle, radius float64) (Handle, error) {
 	var out C.occ_handle
 	err := check("fillet", C.occ_fillet_all_edges(C.occ_handle(s), C.double(radius), &out))

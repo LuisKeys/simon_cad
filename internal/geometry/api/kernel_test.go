@@ -130,3 +130,38 @@ func TestRoundPrimitiveVolumes(t *testing.T) {
 		t.Error("sphere radius 0 must fail")
 	}
 }
+
+func TestBoxIntersectBoxVolume(t *testing.T) {
+	k := New()
+	defer k.Close()
+
+	a, err := k.Box(10, 10, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b0, err := k.Box(10, 10, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := b0.Translate(5, 5, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	common, err := k.Intersect(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := common.Props()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(p.Volume-125) > 1e-6 {
+		t.Fatalf("volume %v want 125", p.Volume)
+	}
+	for _, s := range []*Shape{a, b0, b, common} {
+		s.Release()
+	}
+	if n := k.LiveShapes(); n != 0 {
+		t.Fatalf("%d shapes leaked", n)
+	}
+}

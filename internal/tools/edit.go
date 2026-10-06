@@ -26,6 +26,7 @@ var knownParams = map[string][]string{
 	"mirror":           {"plane", "offset"},
 	"union":            {},
 	"subtract":         {},
+	"intersect":        {},
 }
 
 // strictlyPositive parameters must be > 0.

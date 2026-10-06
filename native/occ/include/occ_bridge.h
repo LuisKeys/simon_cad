@@ -64,6 +64,7 @@ occ_status occ_extrude_polygon(const double* xy, int32_t n, double height, occ_h
 /* Booleans (inputs are not consumed) */
 occ_status occ_boolean_union(occ_handle a, occ_handle b, occ_handle* out);
 occ_status occ_boolean_subtract(occ_handle a, occ_handle b, occ_handle* out);
+occ_status occ_boolean_intersect(occ_handle a, occ_handle b, occ_handle* out);
 
 /* Edge treatments: all edges of the shape. */
 occ_status occ_fillet_all_edges(occ_handle s, double radius, occ_handle* out);

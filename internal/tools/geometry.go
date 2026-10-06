@@ -231,10 +231,10 @@ func geometryTools() []*Tool {
 		},
 		{
 			Name:        "boolean",
-			Description: "Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`. Both inputs are consumed (they stop appearing as separate bodies).",
+			Description: "Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`; op=intersect keeps only the volume shared by both. Both inputs are consumed (they stop appearing as separate bodies).",
 			Capability:  capGeometry,
 			Schema: object(withMeta(props{
-				"op": enum("Boolean operation", "union", "subtract"), "target": text("Feature to keep"), "tool": text("Feature to merge or remove"),
+				"op": enum("Boolean operation", "union", "subtract", "intersect"), "target": text("Feature to keep"), "tool": text("Feature to merge or remove"),
 			}), "op", "target", "tool"),
 			Plan: func(env Env, a Args) (*Plan, error) {
 				if a.Str("target") == a.Str("tool") {
@@ -251,7 +251,7 @@ func geometryTools() []*Tool {
 				}
 				p := map[string]any{"target": a.Str("target"), "tool": a.Str("tool")}
 				return addPlan(intentOr(a, a.Str("op")+" "+a.Str("tool")+" with "+a.Str("target")),
-					fmt.Sprintf("%s %q %s %q.", strings.ToUpper(a.Str("op")[:1])+a.Str("op")[1:], a.Str("tool"), map[bool]string{true: "from", false: "into"}[a.Str("op") == "subtract"], a.Str("target")),
+					fmt.Sprintf("%s %q %s %q.", strings.ToUpper(a.Str("op")[:1])+a.Str("op")[1:], a.Str("tool"), map[string]string{"union": "into", "subtract": "from", "intersect": "with"}[a.Str("op")], a.Str("target")),
 					newNode(env, a, id, a.Str("op"), p, a.Str("target"), a.Str("tool"))), nil
 			},
 		},

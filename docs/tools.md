@@ -37,11 +37,11 @@ Drill one or more holes into a feature's face. `positions` are world coordinates
 
 ### `boolean`
 
-Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`. Both inputs are consumed (they stop appearing as separate bodies).
+Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`; op=intersect keeps only the volume shared by both. Both inputs are consumed (they stop appearing as separate bodies).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `op` | union \| subtract | yes | Boolean operation (union \| subtract) |
+| `op` | union \| subtract \| intersect | yes | Boolean operation (union \| subtract \| intersect) |
 | `target` | string | yes | Feature to keep |
 | `tool` | string | yes | Feature to merge or remove |
 
