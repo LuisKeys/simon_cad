@@ -6,7 +6,7 @@ package bridge
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../../native/occ/include
 #cgo LDFLAGS: -L${SRCDIR}/../../../out/native -lsimon_occ
-#cgo LDFLAGS: -L${SRCDIR}/../../../third_party/occt-install/lib -Wl,--disable-new-dtags -Wl,-rpath,${SRCDIR}/../../../third_party/occt-install/lib
+#cgo LDFLAGS: -L${SRCDIR}/../../../third_party/occt-install/lib -Wl,-rpath,${SRCDIR}/../../../third_party/occt-install/lib
 #cgo LDFLAGS: -lTKDESTEP -lTKDESTL -lTKMesh -lTKBO -lTKBool -lTKFillet -lTKOffset -lTKTopAlgo -lTKPrim
 #cgo LDFLAGS: -lTKGeomAlgo -lTKGeomBase -lTKBRep -lTKG3d -lTKG2d -lTKMath -lTKXSBase -lTKShHealing -lTKernel -lstdc++
 #include <stdlib.h>

@@ -20,10 +20,10 @@ if [ ! -d "$SRC" ]; then
 fi
 
 cmake -S "$SRC" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DBUILD_LIBRARY_TYPE=Shared -DBUILD_MODULE_Draw=OFF -DBUILD_MODULE_Visualization=OFF \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_LIBRARY_TYPE=Shared -DBUILD_MODULE_Draw=OFF -DBUILD_MODULE_Visualization=OFF \
   -DBUILD_MODULE_ApplicationFramework=OFF -DBUILD_MODULE_DETools=OFF \
   -DUSE_FREETYPE=OFF -DUSE_TK=OFF -DUSE_FREEIMAGE=OFF -DUSE_RAPIDJSON=OFF -DUSE_TBB=OFF \
   -DBUILD_DOC_Overview=OFF -DBUILD_SAMPLES_QT=OFF -DBUILD_Inspector=OFF
-cmake --build "$BUILD" -j"$(nproc)"
+cmake --build "$BUILD" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 cmake --install "$BUILD"
 touch "$PREFIX/.built-$OCCT_TAG"

@@ -1,5 +1,5 @@
 ROOT      := $(CURDIR)
-GO        := $(ROOT)/third_party/go/bin/go
+GO        := $(shell command -v go || echo $(ROOT)/third_party/go/bin/go)
 OCCT      := $(ROOT)/third_party/occt-install
 NATIVE    := $(ROOT)/out/native
 export PATH := $(ROOT)/third_party/go/bin:$(PATH)
@@ -7,7 +7,7 @@ export LD_LIBRARY_PATH := $(OCCT)/lib:$(LD_LIBRARY_PATH)
 
 # Go's build cache does not notice changes to the native static library, so stamp its
 # checksum into CGO_CFLAGS: a rebuilt libsimon_occ.a then forces cgo packages to relink.
-STAMP = $(shell sha1sum $(NATIVE)/libsimon_occ.a 2>/dev/null | cut -c1-12)
+STAMP = $(shell shasum $(NATIVE)/libsimon_occ.a 2>/dev/null | cut -c1-12)
 export CGO_CFLAGS = -DSIMON_NATIVE_STAMP=$(STAMP)
 
 .PHONY: occt native build build-go test test-go leakcheck bracket eval demo docs ui e2e
@@ -17,7 +17,7 @@ occt:
 
 native:
 	cmake -S native/occ -B $(NATIVE) -DOCCT_PREFIX=$(OCCT) -DCMAKE_BUILD_TYPE=Release
-	cmake --build $(NATIVE) -j$$(nproc)
+	cmake --build $(NATIVE) -j$$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 
 build: native
 	$(MAKE) --no-print-directory build-go
