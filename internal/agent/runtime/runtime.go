@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/accelone/simoncad/internal/app"
+	"github.com/accelone/simoncad/internal/persistence"
 	"github.com/accelone/simoncad/internal/tools"
 )
 
@@ -63,6 +64,28 @@ func (rt *Runtime) toolset(a *app.App) (map[string]bool, []ToolDef) {
 	return allowed, defs
 }
 
+// maxPriorTurns bounds how much earlier conversation is replayed to the model.
+const maxPriorTurns = 20
+
+// priorMessages rebuilds earlier conversation turns as plain user/assistant text so the
+// model remembers what was asked and answered (including its own clarifying questions).
+// Tool calls from past turns are omitted; the current model state arrives via BuildContext.
+func priorMessages(prompts []persistence.Prompt) []Message {
+	if len(prompts) > maxPriorTurns {
+		prompts = prompts[len(prompts)-maxPriorTurns:]
+	}
+	var out []Message
+	for _, p := range prompts {
+		if p.Summary == "" {
+			continue // turn produced no reply (error/cancel); skip to keep roles alternating
+		}
+		out = append(out,
+			Message{Role: "user", Content: []Block{{Type: "text", Text: p.Text}}},
+			Message{Role: "assistant", Content: []Block{{Type: "text", Text: p.Summary}}})
+	}
+	return out
+}
+
 // Run handles one user intent. The model can only act through registered tools; every
 // tool call goes through App.ApplyTool (validation → ChangeSet → policy). Free-form text
 // never mutates state.
@@ -75,6 +98,7 @@ func (rt *Runtime) Run(ctx context.Context, a *app.App, intent string, policy ap
 		capNames[i] = c.Name()
 	}
 	a.SetActor(app.Actor{CreatedBy: "agent", Capability: strings.Join(capNames, ","), Model: rt.Provider.Name()})
+	msgs := priorMessages(a.AH.Prompts) // before RecordPrompt, so the new intent isn't duplicated
 	res := &Result{PromptID: a.RecordPrompt(intent)}
 	allowed, defs := rt.toolset(a)
 
@@ -89,7 +113,7 @@ func (rt *Runtime) Run(ctx context.Context, a *app.App, intent string, policy ap
 	}
 	sb.WriteString("## User request\n")
 	sb.WriteString(intent)
-	msgs := []Message{{Role: "user", Content: []Block{{Type: "text", Text: sb.String()}}}}
+	msgs = append(msgs, Message{Role: "user", Content: []Block{{Type: "text", Text: sb.String()}}})
 
 	for step := 0; step < rt.MaxSteps; step++ {
 		resp, err := rt.Provider.Complete(ctx, Request{System: rt.systemPrompt(), Messages: msgs, Tools: defs})
