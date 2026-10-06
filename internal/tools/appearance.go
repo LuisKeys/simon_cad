@@ -94,6 +94,15 @@ func appearanceTool(name, desc string, extra props, required []string,
 	}
 }
 
+// IsAppearanceTool reports whether name is a presentation-only mutation tool.
+func IsAppearanceTool(name string) bool {
+	switch name {
+	case "set_color", "set_opacity", "set_visibility", "reset_appearance":
+		return true
+	}
+	return false
+}
+
 func appearanceTools() []*Tool {
 	return []*Tool{
 		appearanceTool("set_color", "Set the display color of one or more features/bodies (e.g. 'make the bracket red'). Presentation only; does not change geometry. Defaults to the current selection when `features` is omitted.",

@@ -106,3 +106,33 @@ func TestAppearancePersistsAndReplays(t *testing.T) {
 		t.Error("reset via selection did not clear appearance")
 	}
 }
+
+// Appearance edits are undoable ChangeSets but never form checkpoints; geometry edits do,
+// and their checkpoint does not list the appearance ChangeSets.
+func TestAppearanceDoesNotCheckpoint(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	box := mustOK(t, a.ApplyTool("create_box", []byte(`{"id":"plate","dx":80,"dy":60,"dz":4}`), PolicyAuto))
+	if cp := a.Checkpoint("box", false); cp == nil {
+		t.Fatal("geometry edit should produce a checkpoint")
+	}
+	ap := mustOK(t, a.ApplyTool("set_visibility", []byte(`{"features":["plate"],"visible":false}`), PolicyAuto))
+	if cp := a.Checkpoint("hide", false); cp != nil {
+		t.Fatalf("appearance-only edit produced a checkpoint: %+v", cp)
+	}
+	if _, err := a.Undo(); err != nil { // still undoable
+		t.Fatal(err)
+	}
+	if _, err := a.Redo(); err != nil {
+		t.Fatal(err)
+	}
+	if cp := a.Checkpoint("hide", false); cp != nil {
+		t.Fatalf("redo of appearance edit produced a checkpoint: %+v", cp)
+	}
+	mustOK(t, a.ApplyTool("create_box", []byte(`{"id":"lid","dx":10,"dy":10,"dz":4}`), PolicyAuto))
+	cp := a.Checkpoint("lid", false)
+	if cp == nil || len(cp.ChangeSets) != 1 {
+		t.Fatalf("checkpoint should list only the geometry ChangeSet: %+v", cp)
+	}
+	_, _ = box, ap
+}

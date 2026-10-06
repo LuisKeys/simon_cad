@@ -106,8 +106,8 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 		}
 	}
 	for _, id := range a.Mgr.CommittedIDs() {
-		if !covered[id] {
-			a.sinceCP = append(a.sinceCP, id)
+		if cs, ok := a.Mgr.Get(id); ok && !covered[id] {
+			a.trackForCheckpoint(cs)
 		}
 	}
 	return a, nil
@@ -460,7 +460,7 @@ func (a *App) commit(cs *commands.ChangeSet) error {
 	if _, err := a.Mgr.Commit(cs.ID); err != nil {
 		return err
 	}
-	a.sinceCP = append(a.sinceCP, cs.ID)
+	a.trackForCheckpoint(cs)
 	_, err := a.refresh()
 	return err
 }
@@ -494,9 +494,17 @@ func (a *App) Redo() (*commands.ChangeSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.sinceCP = append(a.sinceCP, cs.ID)
+	a.trackForCheckpoint(cs)
 	_, err = a.refresh()
 	return cs, err
+}
+
+// trackForCheckpoint queues a committed ChangeSet for the next checkpoint. Appearance-only
+// edits are skipped: they are undoable but are not engineering intent.
+func (a *App) trackForCheckpoint(cs *commands.ChangeSet) {
+	if !cs.AppearanceOnly() {
+		a.sinceCP = append(a.sinceCP, cs.ID)
+	}
 }
 
 func (a *App) dropFromSinceCP(id string) {

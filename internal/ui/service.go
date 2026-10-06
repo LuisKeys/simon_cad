@@ -23,6 +23,7 @@ import (
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/rendering"
 	"github.com/accelone/simoncad/internal/selection"
+	"github.com/accelone/simoncad/internal/tools"
 )
 
 // ErrBusy is returned for edits attempted while the agent is working.
@@ -501,7 +502,7 @@ func (s *Service) Prompt(text string, thinking bool) error {
 				msg = o.Error
 			}
 			s.say("tool", msg, name, o.OK, cs)
-			if o.Committed && level == LevelReview {
+			if o.Committed && level == LevelReview && !o.ChangeSet.AppearanceOnly() {
 				s.draft = append(s.draft, cs)
 			}
 			s.hub.Publish(Notice{Kind: "state"})
@@ -584,7 +585,11 @@ func (s *Service) CallTool(name string, args json.RawMessage) (Outcome, error) {
 		return Outcome{}, err
 	}
 	s.app.SetActor(app.Actor{CreatedBy: "user"})
-	o := s.app.ApplyTool(name, args, s.policy())
+	pol := s.policy()
+	if tools.IsAppearanceTool(name) {
+		pol = app.PolicyAuto // presentation edits never wait for approval, even in Review
+	}
+	o := s.app.ApplyTool(name, args, pol)
 	return s.finishTool(name, o), nil
 }
 
@@ -594,7 +599,7 @@ func (s *Service) finishTool(name string, o app.Outcome) Outcome {
 		c := app.CardOf(o.ChangeSet)
 		out.ChangeSet = &c
 	}
-	if o.Committed {
+	if o.Committed && !o.ChangeSet.AppearanceOnly() {
 		s.app.Checkpoint(firstNonEmpty(o.ChangeSet.Intent, name), false)
 	}
 	s.say("tool", firstNonEmpty(o.Error, o.Message, name), name, o.OK, func() string {

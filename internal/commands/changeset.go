@@ -65,17 +65,25 @@ func (c *ChangeSet) Valid() bool {
 	return true
 }
 
+// AppearanceOnly reports whether every command only edits presentation metadata. Such
+// ChangeSets stay undoable but are not engineering intent, so they never form checkpoints
+// or agent drafts.
+func (c *ChangeSet) AppearanceOnly() bool {
+	for _, r := range c.Commands {
+		if !IsAppearance(r.Type) {
+			return false
+		}
+	}
+	return len(c.Commands) > 0
+}
+
 // AutoCommitEligible is the low-risk policy: a single non-destructive command, clean validation.
 func (c *ChangeSet) AutoCommitEligible() bool {
 	if !c.Valid() || len(c.Warnings) > 0 {
 		return false
 	}
 	// Presentation-only edits are always safe, including multi-object ones.
-	allAppearance := len(c.Commands) > 0
-	for _, r := range c.Commands {
-		allAppearance = allAppearance && IsAppearance(r.Type)
-	}
-	if allAppearance {
+	if c.AppearanceOnly() {
 		return true
 	}
 	if len(c.Commands) != 1 {

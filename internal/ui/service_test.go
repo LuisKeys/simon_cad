@@ -268,3 +268,23 @@ func TestReviewTurnRunsSeveralStepsAndDiscards(t *testing.T) {
 		t.Fatalf("after discard: tree=%d draft=%v", len(st.Tree), st.Draft)
 	}
 }
+
+// Toggling visibility at the Review level applies immediately: nothing pending, no draft,
+// no new checkpoint.
+func TestAppearanceNeedsNoApprovalInReview(t *testing.T) {
+	s := newSvc(t)
+	s.CallTool("create_box", json.RawMessage(`{"id":"plate","dx":100,"dy":60,"dz":4}`))
+	st, _ := s.State()
+	if _, err := s.Commit(st.Pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	before := len(s.app.Hist.Checkpoints)
+	o, err := s.CallTool("set_visibility", json.RawMessage(`{"features":["plate"],"visible":false}`))
+	if err != nil || !o.OK || !o.Committed {
+		t.Fatalf("visibility should commit at Review level: %+v %v", o, err)
+	}
+	st, _ = s.State()
+	if len(st.Pending) != 0 || len(st.Draft) != 0 || len(s.app.Hist.Checkpoints) != before {
+		t.Fatalf("pending=%d draft=%d checkpoints %d->%d", len(st.Pending), len(st.Draft), before, len(s.app.Hist.Checkpoints))
+	}
+}
