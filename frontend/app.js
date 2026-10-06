@@ -3,6 +3,7 @@
 // reject, undo, redo, restore); the UI has no other way to change the model.
 import { api, subscribe, h, mm3 } from './api.js';
 import { Viewport } from './viewport.js';
+import { initVision } from './vision.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false };
@@ -71,7 +72,7 @@ async function refreshScene() {
       S.sceneAgain = false;
       const delta = await api('scene', { known: vp.known });
       vp.applyDelta(delta);
-      $('empty').hidden = vp.bodies.size > 0;
+      $('empty').hidden = vp.bodies.size > 0 || (delta.sketches ?? []).length > 0;
       $('hud').textContent = hudStats();
     } while (S.sceneAgain);
   } catch (e) { toast(e.message, 'bad'); } finally { S.busyScene = false; }
@@ -102,6 +103,12 @@ subscribe((n) => {
 
 // ---- rendering of panels ---------------------------------------------------------------
 
+// Image-to-CAD: attachments, interpretation panel (all changes still go through tool calls).
+const vision = initVision({
+  $, toast: (...a) => toast(...a), getState: () => S.state, getSelection: () => S.selection,
+  showPreview: (id) => showPreview(id), refresh: () => refresh(),
+});
+
 function render(st) {
   $('project').replaceChildren(...[h('span', {}, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, ' ●') : null].filter(Boolean));
   $('btn-undo').disabled = !st.can_undo || st.busy;
@@ -115,6 +122,7 @@ function render(st) {
   renderSelection(st.selection);
   renderTimeline(st);
   renderChat(st);
+  vision.onState(st);
 }
 
 function renderTree(st) {
@@ -339,8 +347,9 @@ function renderChat(st) {
     const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
     if (m.role === 'draft') return draftCard(m, st);
     if (m.role === 'tool') return h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`);
-    return h('div', { class: cls }, m.text);
+    return h('div', { class: cls }, m.text, vision.thumbs(m.images));
   });
+  nodes.push(...vision.proposalCards(st));
   for (const cs of st.pending) nodes.push(changeSetCard(cs));
   if (st.busy) nodes.push(h('div', { class: 'msg system' }, 'The agent is working…'));
   el.replaceChildren(...nodes);
@@ -396,9 +405,10 @@ async function showPreview(id) {
     const g = await api(`changeset/${id}/preview`);
     S.previewing = id;
     vp.setGhost(g);
+    $('empty').hidden = true;
     const bar = $('ghost-bar');
     bar.hidden = false;
-    bar.replaceChildren(h('span', {}, `Preview · ${g.changeset.intent || id}: +${g.added.length} / −${g.removed.length} bodies`),
+    bar.replaceChildren(h('span', {}, `Preview · ${g.changeset.intent || id}: +${g.added.length} / −${g.removed.length} bodies${(g.sketches ?? []).length ? ` · ${g.sketches.length} sketch outline(s)` : ''}`),
       h('button', { class: 'primary', onclick: () => lifecycle('commit', id) }, 'Commit'),
       h('button', { onclick: () => lifecycle('reject', id) }, 'Reject'),
       h('button', { onclick: clearPreview }, 'Hide'));
@@ -409,6 +419,7 @@ async function showPreview(id) {
 function clearPreview() {
   S.previewing = null;
   vp.setGhost(null);
+  $('empty').hidden = vp.bodies.size > 0 || (vp.sketches?.children.length ?? 0) > 0;
   $('ghost-bar').hidden = true;
   if (S.state) renderChat(S.state);
 }
@@ -452,7 +463,11 @@ $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = $('prompt').value.trim();
   if (!text) return;
-  try { await api('prompt', { text, thinking: $('thinking').checked }); $('prompt').value = ''; } catch (err) { toast(err.message, 'bad'); }
+  try {
+    await api('prompt', { text, thinking: $('thinking').checked, images: vision.attachmentIds() });
+    $('prompt').value = '';
+    vision.clearAttachments();
+  } catch (err) { toast(err.message, 'bad'); }
 });
 try { $('thinking').checked = localStorage.getItem('thinking') !== 'off'; } catch {}
 $('thinking').addEventListener('change', () => { try { localStorage.setItem('thinking', $('thinking').checked ? 'on' : 'off'); } catch {} });

@@ -1,0 +1,103 @@
+{
+  "source": "scripted",
+  "responses": [
+    {
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "tu_1",
+          "name": "analyze_image",
+          "input": {
+            "image_id": "img_a00efae71dc66dab",
+            "image_size": [
+              400,
+              300
+            ],
+            "confidence": 0.86,
+            "description": "Rectangular plate with two circular holes",
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "rectangle",
+                "x": 50,
+                "y": 50,
+                "w": 320,
+                "h": 200,
+                "confidence": 0.95
+              },
+              {
+                "id": "e2",
+                "kind": "circle",
+                "cx": 130,
+                "cy": 150,
+                "r": 12,
+                "confidence": 0.9
+              },
+              {
+                "id": "e3",
+                "kind": "circle",
+                "cx": 290,
+                "cy": 150,
+                "r": 12,
+                "confidence": 0.9
+              }
+            ],
+            "profiles": [
+              {
+                "id": "p1",
+                "outer": [
+                  "e1"
+                ],
+                "holes": [
+                  [
+                    "e2"
+                  ],
+                  [
+                    "e3"
+                  ]
+                ]
+              }
+            ],
+            "relationships": [
+              {
+                "kind": "equal",
+                "entities": [
+                  "e2",
+                  "e3"
+                ],
+                "confidence": 0.9
+              }
+            ],
+            "dimensions": [
+              {
+                "id": "overall_width",
+                "kind": "length",
+                "binds": "e1.w",
+                "source": "missing",
+                "confidence": 0,
+                "label": "overall width"
+              },
+              {
+                "id": "thickness",
+                "kind": "depth",
+                "source": "missing",
+                "confidence": 0,
+                "label": "thickness"
+              }
+            ]
+          }
+        }
+      ],
+      "stop_reason": "tool_use"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "I see a rectangular plate with two circular holes. What should the overall width and the thickness be?"
+        }
+      ],
+      "stop_reason": "end_turn"
+    }
+  ]
+}

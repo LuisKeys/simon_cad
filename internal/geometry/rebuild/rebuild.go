@@ -45,7 +45,9 @@ type NodeResult struct {
 type Model struct {
 	Order  []string
 	Nodes  map[string]*NodeResult
-	Leaves []string // body-producing nodes nothing else consumes, in order
+	Leaves []string // solid-producing nodes nothing else consumes, in order
+	// Sketches are sketch nodes nothing consumes (drawn as outlines, never as geometry).
+	Sketches []string
 }
 
 // Stats counts cache behaviour; used to verify incremental rebuilds.
@@ -161,7 +163,11 @@ func (e *Engine) Rebuild(g *cadir.Graph) (*Model, error) {
 	for _, id := range m.Order {
 		r := m.Nodes[id]
 		if r.Status == cadir.StatusOK && r.Body != nil && !consumed[id] {
-			m.Leaves = append(m.Leaves, id)
+			if r.Body.Sketch {
+				m.Sketches = append(m.Sketches, id)
+			} else {
+				m.Leaves = append(m.Leaves, id)
+			}
 		}
 	}
 
@@ -271,12 +277,18 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 		fail("%v", err)
 		return
 	}
-	if props.Solids == 0 {
+	isSketch := feat.Kind == features.KindSketch
+	if isSketch && props.Faces == 0 {
+		shape.Release()
+		fail("%s produced no faces (empty result)", n.Type)
+		return
+	}
+	if !isSketch && props.Solids == 0 {
 		shape.Release()
 		fail("%s produced no solid (empty result)", n.Type)
 		return
 	}
-	body := &Body{Shape: shape, Props: props}
+	body := &Body{Shape: shape, Props: props, Sketch: isSketch}
 	e.cache[res.Key] = &entry{body: body, gen: e.gen}
 	res.Status, res.Body = cadir.StatusOK, body
 }

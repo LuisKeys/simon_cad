@@ -13,7 +13,7 @@ are exact. Do not edit by hand.
 **Pipeline per call:** unknown-tool check → strict JSON decode → JSON-schema validation (unknown
 arguments are rejected) → semantic validation → *edit* tools return a plan of commands that becomes a
 ChangeSet; *query* tools return data directly. Errors are written to be actionable (they are fed
-back to the model). All tools currently belong to the `geometry` capability.
+back to the model). Tools belong to the `geometry` capability, or to `vision` (image interpretation).
 
 Common optional arguments on feature-creating tools: `id` (lowercase letters / digits / underscores;
 generated from `name` or the type if omitted), `name` (human-readable), `intent` (the engineering

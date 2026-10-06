@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/accelone/simoncad/internal/vision"
 )
 
 // Server exposes a Service over HTTP on the loopback interface. It is the development and
@@ -133,18 +135,60 @@ func (s *Server) routes() {
 	})
 	m.HandleFunc("/api/prompt", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Text     string `json:"text"`
-			Thinking *bool  `json:"thinking"` // omitted = on
+			Text     string   `json:"text"`
+			Thinking *bool    `json:"thinking"` // omitted = on
+			Images   []string `json:"images"`   // ids returned by /api/image
 		}
 		if err := decode(r, &in); err != nil {
 			fail(w, err)
 			return
 		}
-		if err := s.Svc.Prompt(in.Text, in.Thinking == nil || *in.Thinking); err != nil {
+		if err := s.Svc.PromptWith(in.Text, in.Thinking == nil || *in.Thinking, in.Images); err != nil {
 			fail(w, err)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+	})
+	m.HandleFunc("/api/image", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST the raw image bytes", http.StatusMethodNotAllowed)
+			return
+		}
+		// Raw body (not JSON): the 4 MB JSON limit does not apply, images have their own.
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, vision.MaxImageBytes+1))
+		if err != nil {
+			fail(w, fmt.Errorf("image is larger than %d MB or unreadable", vision.MaxImageBytes>>20))
+			return
+		}
+		info, err := s.Svc.UploadImage(b)
+		reply(w, info, err)
+	})
+	m.HandleFunc("/api/image/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/image/"), "/")
+		if len(parts) == 2 && parts[1] == "retain" && r.Method == http.MethodPost {
+			var in struct {
+				Keep bool `json:"keep"`
+			}
+			if err := decode(r, &in); err != nil {
+				fail(w, err)
+				return
+			}
+			reply(w, map[string]any{"ok": true}, s.Svc.RetainImage(parts[0], in.Keep))
+			return
+		}
+		if len(parts) != 1 {
+			http.NotFound(w, r)
+			return
+		}
+		data, mt, ok := s.Svc.ImageData(parts[0])
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", mt)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		_, _ = w.Write(data)
 	})
 	m.HandleFunc("/api/draft/keep", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"ok": true}, s.Svc.KeepDraft())

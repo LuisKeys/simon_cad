@@ -15,6 +15,7 @@ import (
 	"github.com/accelone/simoncad/internal/commands"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/history"
+	"github.com/accelone/simoncad/internal/vision"
 )
 
 // Env is what tools may read. It is implemented by the app composition root.
@@ -27,6 +28,10 @@ type Env interface {
 	NextChangeSetID() string
 	SelectionRefs() []string
 	Checkpoints() *history.Log
+	// Vision holds image interpretations (proposals); Images the uploaded source images.
+	// Neither is CAD state: a proposal never changes the model.
+	Vision() *vision.Store
+	Images() *vision.ImageStore
 	// Export writes the current model ("step" or "stl") and returns a summary.
 	Export(format, path string, deflection float64) (map[string]any, error)
 }
@@ -55,6 +60,9 @@ type Plan struct {
 	Explanation string
 	// Warnings are recorded on the ChangeSet (and stop it from auto-committing).
 	Warnings []string
+	// RequireApproval keeps the ChangeSet proposed (never auto-committed) whatever the policy,
+	// so the user always sees the preview first. Used for interpreted, possibly ambiguous input.
+	RequireApproval bool
 }
 
 // Tool is one registered capability-tagged operation.

@@ -14,6 +14,12 @@ func Default() *Registry {
 	for _, t := range geometryTools() {
 		r.Register(t)
 	}
+	for _, t := range sketchTools() {
+		r.Register(t)
+	}
+	for _, t := range visionTools() {
+		r.Register(t)
+	}
 	for _, t := range editTools() {
 		r.Register(t)
 	}

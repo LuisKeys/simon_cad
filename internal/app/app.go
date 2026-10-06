@@ -22,6 +22,7 @@ import (
 	"github.com/accelone/simoncad/internal/persistence"
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
+	"github.com/accelone/simoncad/internal/vision"
 )
 
 // Policy decides whether a valid ChangeSet commits immediately.
@@ -53,6 +54,10 @@ type App struct {
 	Bus    *events.Bus
 	Reg    *tools.Registry
 	AH     persistence.AgentHistory
+	// Vision keeps image interpretations (proposals); Images the uploaded source images.
+	// Neither is CAD state.
+	Vision *vision.Store
+	Images *vision.ImageStore
 
 	// Raw preserved files not interpreted in Phase 1.
 	components, constraints, materials json.RawMessage
@@ -71,7 +76,8 @@ func newApp(clock func() time.Time) *App {
 	}
 	k := api.New()
 	a := &App{K: k, Engine: rebuild.New(k), Graph: cadir.NewGraph(), Hist: &history.Log{}, Bus: events.NewBus(),
-		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI}}
+		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI},
+		Vision: vision.NewStore(), Images: vision.NewImageStore()}
 	a.Bus.Now = clock
 	a.Mgr = commands.NewManager(a.Graph, a, a.Bus)
 	a.Mgr.Now = clock
@@ -96,6 +102,16 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 	a.Meta, a.AH = p.Meta, p.History
 	a.components, a.constraints, a.materials = p.Components, p.Constraints, p.Materials
 	*a.Graph = *p.Graph
+	if len(a.AH.Interpretations) > 0 {
+		if err := json.Unmarshal(a.AH.Interpretations, a.Vision); err != nil {
+			return nil, fmt.Errorf("agent-history.json interpretations: %w", err)
+		}
+	}
+	for _, im := range p.Images { // retained source images; the geometry never needs them
+		if put, err := a.Images.Put(im.Data); err == nil {
+			_ = a.Images.Retain(put.ID, true)
+		}
+	}
 	a.Mgr.Restore(a.AH.ChangeSets)
 	a.Hist.Checkpoints = a.AH.Checkpoints
 	a.Bus.Load(p.Events)
@@ -137,9 +153,25 @@ func (a *App) Save(dir string) error {
 	if _, err := a.Model(); err != nil { // refresh derived status before writing
 		return err
 	}
+	a.AH.Interpretations = nil
+	if len(a.Vision.List()) > 0 {
+		b, err := json.Marshal(a.Vision)
+		if err != nil {
+			return err
+		}
+		a.AH.Interpretations = b
+	}
+	var imgs []persistence.Image
+	for _, im := range a.Images.All() {
+		if !im.Retained {
+			continue
+		}
+		ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[im.MediaType]
+		imgs = append(imgs, persistence.Image{ID: im.ID, Ext: ext, Data: im.Data})
+	}
 	return persistence.Save(dir, &persistence.Project{
 		Meta: a.Meta, Graph: a.Graph, History: a.AH, Events: a.Bus.Events(),
-		Components: a.components, Constraints: a.constraints, Materials: a.materials,
+		Components: a.components, Constraints: a.constraints, Materials: a.materials, Images: imgs,
 	})
 }
 
@@ -229,6 +261,8 @@ func (e toolEnv) Now() time.Time                 { return e.a.Clock() }
 func (e toolEnv) NextChangeSetID() string        { return fmt.Sprintf("cs_%04d", len(e.a.Mgr.Log)+1) }
 func (e toolEnv) SelectionRefs() []string        { return append([]string(nil), e.a.selection...) }
 func (e toolEnv) Checkpoints() *history.Log      { return e.a.Hist }
+func (e toolEnv) Vision() *vision.Store          { return e.a.Vision }
+func (e toolEnv) Images() *vision.ImageStore     { return e.a.Images }
 func (e toolEnv) Provenance() cadir.Provenance {
 	return cadir.Provenance{CreatedBy: e.a.actor.CreatedBy, Capability: e.a.actor.Capability,
 		ToolCallID: e.a.callID, Model: e.a.actor.Model}
@@ -325,6 +359,18 @@ func (a *App) RecordPrompt(text string) string {
 	a.promptID = p.ID
 	a.Bus.Publish(events.UserIntentReceived, map[string]any{"id": p.ID, "text": text, "selection": p.Selection})
 	return p.ID
+}
+
+// RecordPromptImages notes which uploaded images were attached to a prompt.
+func (a *App) RecordPromptImages(promptID string, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	for i := range a.AH.Prompts {
+		if a.AH.Prompts[i].ID == promptID {
+			a.AH.Prompts[i].Images = append([]string(nil), ids...)
+		}
+	}
 }
 
 // SetPromptSummary stores the agent's final explanation on the current prompt.
@@ -446,6 +492,9 @@ func (a *App) ApplyTool(name string, args []byte, policy Policy) Outcome {
 		return out
 	}
 	out.OK = true
+	if res.Plan.RequireApproval {
+		policy = PolicyPreview
+	}
 	commit := policy == PolicyCommit || policy == PolicyAuto && cs.AutoCommitEligible()
 	if commit {
 		if err := a.commit(cs); err != nil {
@@ -462,8 +511,22 @@ func (a *App) commit(cs *commands.ChangeSet) error {
 		return err
 	}
 	a.trackForCheckpoint(cs)
+	a.noteInterpretations(cs)
 	_, err := a.refresh()
 	return err
+}
+
+// noteInterpretations records which nodes an image interpretation produced.
+func (a *App) noteInterpretations(cs *commands.ChangeSet) {
+	byInt := map[string][]string{}
+	for _, id := range cs.Affected {
+		if n := a.Graph.Get(id); n != nil && n.Provenance.InterpretationID != "" {
+			byInt[n.Provenance.InterpretationID] = append(byInt[n.Provenance.InterpretationID], id)
+		}
+	}
+	for id, nodes := range byInt {
+		a.Vision.MarkUsed(id, nodes)
+	}
 }
 
 // Commit approves a proposed ChangeSet.

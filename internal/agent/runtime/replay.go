@@ -47,6 +47,14 @@ func NewRecorder(p Provider) *Recorder {
 
 func (r *Recorder) Name() string { return r.Inner.Name() }
 
+// SupportsImages delegates to the wrapped provider (true if it does not say otherwise).
+func (r *Recorder) SupportsImages() bool {
+	if c, ok := r.Inner.(ImageCapable); ok {
+		return c.SupportsImages()
+	}
+	return true
+}
+
 func (r *Recorder) Complete(ctx context.Context, req Request) (*Response, error) {
 	resp, err := r.Inner.Complete(ctx, req)
 	if err == nil {

@@ -83,6 +83,15 @@ type Delta struct {
 	// Appearance overrides per body id, filled by the caller from the CAD-IR. It is
 	// independent of mesh keys: changing it never changes Keys/Changed.
 	Appearance map[string]*cadir.Appearance `json:"appearance,omitempty"`
+	// Sketches are the outlines of sketch nodes no feature consumes yet. They are tiny, so
+	// they are always sent whole rather than keyed.
+	Sketches []*SketchLines `json:"sketches"`
+}
+
+// SketchLines is one sketch drawn as line segments (xyz pairs, 6 floats per segment).
+type SketchLines struct {
+	ID    string    `json:"id"`
+	Lines []float32 `json:"lines"`
 }
 
 // Stats reports work done, for budgets and tests.
@@ -172,10 +181,43 @@ func build(id, key string, bounds selectors.Bounds, mesh *api.Mesh) *BodyMesh {
 	return m
 }
 
+// Sketch tessellates a sketch node into outline segments.
+func (r *Renderer) Sketch(id string, res *rebuild.NodeResult) (*SketchLines, error) {
+	if res == nil || res.Body == nil {
+		return nil, fmt.Errorf("sketch %q has no geometry", id)
+	}
+	mesh, err := res.Body.Shape.Tessellate(deflectionFor(res.Body.Bounds()))
+	if err != nil {
+		return nil, err
+	}
+	out := &SketchLines{ID: id, Lines: []float32{}}
+	for _, e := range mesh.Edges {
+		for i := 0; i+1 < e.PtCount; i++ {
+			a, b := (e.PtStart+i)*3, (e.PtStart+i+1)*3
+			out.Lines = append(out.Lines, mesh.EdgePoints[a:a+3]...)
+			out.Lines = append(out.Lines, mesh.EdgePoints[b:b+3]...)
+		}
+	}
+	return out, nil
+}
+
+// Sketches renders every unconsumed sketch of the model.
+func (r *Renderer) Sketches(m *rebuild.Model) ([]*SketchLines, error) {
+	out := []*SketchLines{}
+	for _, id := range m.Sketches {
+		sl, err := r.Sketch(id, m.Nodes[id])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sl)
+	}
+	return out, nil
+}
+
 // Scene meshes every visible body of the model (its leaves) and reports only what the
 // client, which holds `known` (id → key), is missing.
 func (r *Renderer) Scene(m *rebuild.Model, known map[string]string) (*Delta, error) {
-	d := &Delta{Keys: map[string]string{}, Order: []string{}, Changed: []*BodyMesh{}, Removed: []string{}}
+	d := &Delta{Keys: map[string]string{}, Order: []string{}, Changed: []*BodyMesh{}, Removed: []string{}, Sketches: []*SketchLines{}}
 	for _, id := range m.Leaves {
 		bm, hit, err := r.Body(id, m.Nodes[id])
 		if err != nil {
@@ -199,6 +241,10 @@ func (r *Renderer) Scene(m *rebuild.Model, known map[string]string) (*Delta, err
 		}
 	}
 	sort.Strings(d.Removed)
+	var err error
+	if d.Sketches, err = r.Sketches(m); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 

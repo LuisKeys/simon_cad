@@ -16,6 +16,7 @@ import (
 	"time"
 
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
+	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/app"
 	"github.com/accelone/simoncad/internal/cadir"
@@ -24,6 +25,7 @@ import (
 	"github.com/accelone/simoncad/internal/rendering"
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
+	"github.com/accelone/simoncad/internal/vision"
 )
 
 // ErrBusy is returned for edits attempted while the agent is working.
@@ -64,13 +66,14 @@ type Service struct {
 
 // ChatMessage is one entry of the conversation panel.
 type ChatMessage struct {
-	Seq       int    `json:"seq"`
-	Role      string `json:"role"` // user | agent | tool | system
-	Text      string `json:"text"`
-	Tool      string `json:"tool,omitempty"`
-	OK        bool   `json:"ok,omitempty"`
-	ChangeSet string `json:"changeset,omitempty"`
-	Time      string `json:"time"`
+	Seq       int      `json:"seq"`
+	Role      string   `json:"role"` // user | agent | tool | system
+	Text      string   `json:"text"`
+	Tool      string   `json:"tool,omitempty"`
+	OK        bool     `json:"ok,omitempty"`
+	ChangeSet string   `json:"changeset,omitempty"`
+	Images    []string `json:"images,omitempty"` // ids of images attached to a user message
+	Time      string   `json:"time"`
 }
 
 func NewService(a *app.App, path string) *Service {
@@ -106,7 +109,11 @@ func (s *Service) Close() {
 }
 
 func (s *Service) say(role, text, tool string, ok bool, cs string) ChatMessage {
-	m := ChatMessage{Seq: len(s.chat) + 1, Role: role, Text: text, Tool: tool, OK: ok, ChangeSet: cs,
+	return s.sayWith(role, text, tool, ok, cs, nil)
+}
+
+func (s *Service) sayWith(role, text, tool string, ok bool, cs string, images []string) ChatMessage {
+	m := ChatMessage{Seq: len(s.chat) + 1, Role: role, Text: text, Tool: tool, OK: ok, ChangeSet: cs, Images: images,
 		Time: s.Clock().UTC().Format(time.RFC3339)}
 	s.chat = append(s.chat, m)
 	s.hub.Publish(Notice{Kind: "chat", Chat: &m})
@@ -327,6 +334,8 @@ type Ghost struct {
 	Added     []*rendering.BodyMesh `json:"added"`
 	Removed   []string              `json:"removed"`
 	Triangles int                   `json:"triangles"`
+	// Sketches are outlines of sketch nodes the ChangeSet would add or change.
+	Sketches []*rendering.SketchLines `json:"sketches"`
 }
 
 // Preview rebuilds the model a proposed ChangeSet would produce and diffs its bodies
@@ -346,7 +355,21 @@ func (s *Service) Preview(csID string) (*Ghost, error) {
 	for _, id := range live.Leaves {
 		liveKeys[id] = live.Nodes[id].Key
 	}
-	g := &Ghost{ChangeSet: app.CardOf(cs), Added: []*rendering.BodyMesh{}, Removed: []string{}}
+	g := &Ghost{ChangeSet: app.CardOf(cs), Added: []*rendering.BodyMesh{}, Removed: []string{}, Sketches: []*rendering.SketchLines{}}
+	liveSketch := map[string]string{}
+	for _, id := range live.Sketches {
+		liveSketch[id] = live.Nodes[id].Key
+	}
+	for _, id := range cand.Sketches {
+		if liveSketch[id] == cand.Nodes[id].Key {
+			continue
+		}
+		sl, err := s.rend.Sketch(id, cand.Nodes[id])
+		if err != nil {
+			return nil, err
+		}
+		g.Sketches = append(g.Sketches, sl)
+	}
 	candKeys := map[string]bool{}
 	for _, id := range cand.Leaves {
 		candKeys[id+"|"+cand.Nodes[id].Key] = true
@@ -459,24 +482,42 @@ func (s *Service) ClearChat() error {
 // Prompt starts one agent turn on a goroutine. Progress arrives on the Hub as chat
 // messages; the turn ends with a "agent_done" notice.
 func (s *Service) Prompt(text string, thinking bool) error {
+	return s.PromptWith(text, thinking, nil)
+}
+
+// PromptWith is Prompt with uploaded images (ids from UploadImage) attached to the request.
+func (s *Service) PromptWith(text string, thinking bool, images []string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return fmt.Errorf("empty prompt")
+	}
+	if len(images) > maxPromptImages {
+		return fmt.Errorf("attach at most %d images to one request", maxPromptImages)
 	}
 	s.mu.Lock()
 	if err := s.guard(); err != nil {
 		s.mu.Unlock()
 		return err
 	}
+	for _, id := range images {
+		if _, ok := s.app.Images.Get(id); !ok {
+			s.mu.Unlock()
+			return fmt.Errorf("image %q was not uploaded", id)
+		}
+	}
 	prov, err := s.NewProvider()
 	if err != nil {
 		s.mu.Unlock()
 		return err
 	}
+	if c, ok := prov.(runtime.ImageCapable); ok && len(images) > 0 && !c.SupportsImages() {
+		s.mu.Unlock()
+		return fmt.Errorf("provider %s does not support image input; set SIMONCAD_PROVIDER to claude or openai", prov.Name())
+	}
 	s.keepDraft() // a new request implicitly accepts the previous batch
 	s.busy = true
 	prior := s.history()
-	s.say("user", text, "", true, "")
+	s.sayWith("user", text, "", true, "", append([]string(nil), images...))
 	s.hub.Publish(Notice{Kind: "state"})
 	level := s.level
 	s.mu.Unlock()
@@ -491,7 +532,7 @@ func (s *Service) Prompt(text string, thinking bool) error {
 		// The lock is held for the turn, except while waiting on the model (see unlocking).
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New()}, History: prior, NoThinking: !thinking}
+		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New(), vis.New()}, History: prior, NoThinking: !thinking, ImageIDs: images}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
 			if o.ChangeSet != nil {
@@ -529,6 +570,85 @@ func (s *Service) Prompt(text string, thinking bool) error {
 		s.changed()
 	}()
 	return nil
+}
+
+// maxPromptImages bounds the images of one request (a proposal is built from one drawing).
+const maxPromptImages = 4
+
+// ---- images ----------------------------------------------------------------------------
+
+// ImageInfo describes an uploaded image.
+type ImageInfo struct {
+	ID        string `json:"id"`
+	MediaType string `json:"media_type"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Retained  bool   `json:"retained"`
+}
+
+func imageInfo(im *vision.Image) ImageInfo {
+	return ImageInfo{ID: im.ID, MediaType: im.MediaType, Width: im.Width, Height: im.Height, Retained: im.Retained}
+}
+
+// UploadImage stores a PNG, JPEG or WebP image for this session. It does not touch the model;
+// the image is only saved with the project if it is explicitly retained.
+func (s *Service) UploadImage(data []byte) (ImageInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	im, err := s.app.Images.Put(data)
+	if err != nil {
+		return ImageInfo{}, err
+	}
+	return imageInfo(im), nil
+}
+
+// ImageData returns an uploaded image's bytes and media type.
+func (s *Service) ImageData(id string) ([]byte, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	im, ok := s.app.Images.Get(id)
+	if !ok {
+		return nil, "", false
+	}
+	return im.Data, im.MediaType, true
+}
+
+// RetainImage chooses whether an image is stored inside the project (assets/images/).
+func (s *Service) RetainImage(id string, keep bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.app.Images.Retain(id, keep); err != nil {
+		return err
+	}
+	s.dirty = true
+	s.hub.Publish(Notice{Kind: "state"})
+	return nil
+}
+
+// ProposalView is an image interpretation as the panels show it.
+type ProposalView struct {
+	ID       string           `json:"id"`
+	ImageID  string           `json:"image_id"`
+	ImageW   int              `json:"image_w"`
+	ImageH   int              `json:"image_h"`
+	Revision int              `json:"revision"`
+	Ready    bool             `json:"ready"`
+	Used     []string         `json:"used,omitempty"`
+	Proposal *vision.Proposal `json:"proposal"`
+	Report   *vision.Report   `json:"report"`
+}
+
+func (s *Service) proposals() []ProposalView {
+	out := []ProposalView{}
+	for _, it := range s.app.Vision.List() {
+		v := ProposalView{ID: it.ID, ImageID: it.Proposal.ImageID, Revision: it.Revision, Used: it.Used, Proposal: it.Proposal, Report: it.Report()}
+		v.Ready = v.Report.Ready
+		if im, ok := s.app.Images.Get(it.Proposal.ImageID); ok {
+			v.ImageW, v.ImageH = im.Width, im.Height
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 // maxHistory bounds how many prior chat messages are replayed to the model each turn.
@@ -849,8 +969,8 @@ func (s *Service) PlaybackFrame(i int, known map[string]string) (*Frame, error) 
 	if err != nil {
 		return nil, err
 	}
-	d := &rendering.Delta{Order: []string{}, Keys: map[string]string{}, Changed: []*rendering.BodyMesh{}, Removed: []string{}}
-	if len(m.Leaves) > 0 {
+	d := &rendering.Delta{Order: []string{}, Keys: map[string]string{}, Changed: []*rendering.BodyMesh{}, Removed: []string{}, Sketches: []*rendering.SketchLines{}}
+	if len(m.Leaves) > 0 || len(m.Sketches) > 0 {
 		if d, err = s.rend.Scene(m, known); err != nil {
 			return nil, err
 		}
@@ -999,6 +1119,8 @@ type State struct {
 	Frames      int              `json:"frames"`
 	Draft       []string         `json:"draft"`
 	Provider    string           `json:"provider"`
+	Images      []ImageInfo      `json:"images"`
+	Proposals   []ProposalView   `json:"proposals"`
 }
 
 // State snapshots the project for the panels.
@@ -1018,6 +1140,10 @@ func (s *Service) State() (*State, error) {
 		Tree: []TreeNode{}, Pending: []ChangeSetCard{}, Recent: []ChangeSetCard{}, Checkpoints: s.checkpoints(),
 		Chat: append([]ChatMessage{}, s.chat...), Selection: s.selectionView(), CanUndo: s.app.CanUndo(),
 		Draft: append([]string{}, s.draft...), CanRedo: s.app.CanRedo(), Volume: m.Volume(), Failed: nz(m.Failed()), Frames: len(s.app.Committed())}
+	st.Images, st.Proposals = []ImageInfo{}, s.proposals()
+	for _, im := range s.app.Images.All() {
+		st.Images = append(st.Images, imageInfo(im))
+	}
 	if p, err := runtime.ProviderNameFromEnv(); err == nil {
 		st.Provider = p
 	}

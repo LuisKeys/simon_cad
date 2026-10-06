@@ -18,6 +18,18 @@ export async function api(path, body) {
   return data;
 }
 
+// Uploads raw image bytes (PNG/JPEG/WebP); resolves to {id, width, height, media_type, retained}.
+export async function uploadImage(blob) {
+  const res = await fetch('/api/image', { method: 'POST', headers: { 'X-Simon-Token': token }, body: blob });
+  let data = null;
+  try { data = await res.json(); } catch { /* empty body */ }
+  if (!res.ok) throw new Error(data?.error ?? `image upload failed (HTTP ${res.status})`);
+  return data;
+}
+
+// <img src> cannot send headers, so the token travels in the query string for images.
+export const imageUrl = (id) => `/api/image/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
+
 // Server-sent notices; reconnects on its own (EventSource), and callers refetch state.
 export function subscribe(onNotice) {
   const es = new EventSource('/api/events?token=' + encodeURIComponent(token));
@@ -44,3 +56,19 @@ export function h(tag, attrs, ...kids) {
 }
 
 export const mm3 = (v) => `${(v ?? 0).toFixed(1)} mm³`;
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** svg builds SVG elements like h builds HTML ones (no innerHTML; text via createTextNode). */
+export function svg(tag, attrs, ...kids) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs ?? {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === 'class') el.setAttribute('class', v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid === undefined || kid === null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}

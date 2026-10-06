@@ -102,6 +102,8 @@ type Descriptor struct {
 	Centroid    [3]float64  `json:"centroid"`
 	BBox        Bounds      `json:"bbox"`
 	Area        float64     `json:"area,omitempty"`
+	// Index is the kernel index of the resolved face/edge/vertex (not part of the wire format).
+	Index int `json:"-"`
 }
 
 // Sides maps side names to (axis, sign).

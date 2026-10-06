@@ -3,8 +3,10 @@ package tools
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
+	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
 )
 
@@ -17,13 +19,14 @@ var knownParams = map[string][]string{
 	"sphere":           {"radius", "x", "y", "z"},
 	"torus":            {"major_radius", "minor_radius", "axis", "x", "y", "z"},
 	"hole":             {"diameter", "depth", "kind", "cb_diameter", "cb_depth", "cs_diameter", "cs_angle_deg", "positions"},
-	"extrude":          {"mode", "plane", "offset", "depth", "symmetric", "through", "x", "y", "w", "h", "r", "x1", "y1", "x2", "y2", "width", "points"},
+	"extrude":          {"mode", "plane", "offset", "depth", "symmetric", "through", "reverse", "x", "y", "w", "h", "r", "x1", "y1", "x2", "y2", "width", "points"},
 	"linear_pattern":   {"count", "dx", "dy", "dz"},
 	"circular_pattern": {"count", "cx", "cy", "cz", "axis", "total_angle_deg"},
 	"fillet":           {"radius"},
 	"chamfer":          {"distance"},
 	"transform":        {"dx", "dy", "dz", "angle_deg", "ax", "ay", "az", "ox", "oy", "oz"},
 	"mirror":           {"plane", "offset"},
+	"sketch":           {"plane", "offset"}, // plus its dim_* dimension parameters
 	"union":            {},
 	"subtract":         {},
 	"intersect":        {},
@@ -45,6 +48,34 @@ func isKnown(typ, name string) bool {
 	return false
 }
 
+// editable reports whether a parameter of an existing node may be edited. A sketch also
+// exposes the dimensions its entities refer to (dim_*), which must already exist.
+func editable(n *cadir.Node, name string) bool {
+	if isKnown(n.Type, name) {
+		return true
+	}
+	if n.Type == "sketch" && strings.HasPrefix(name, "dim_") {
+		_, ok := n.Parameters[name].(float64)
+		return ok
+	}
+	return false
+}
+
+func editableList(n *cadir.Node) string {
+	list := append([]string(nil), knownParams[n.Type]...)
+	if n.Type == "sketch" {
+		var dims []string
+		for k := range n.Parameters {
+			if strings.HasPrefix(k, "dim_") {
+				dims = append(dims, k)
+			}
+		}
+		sort.Strings(dims)
+		list = append(list, dims...)
+	}
+	return strings.Join(list, ", ")
+}
+
 func editTools() []*Tool {
 	return []*Tool{
 		{
@@ -62,8 +93,8 @@ func editTools() []*Tool {
 					return nil, err
 				}
 				name := a.Str("parameter")
-				if !isKnown(n.Type, name) {
-					return nil, fmt.Errorf("%s features have no editable parameter %q (editable: %s)", n.Type, name, strings.Join(knownParams[n.Type], ", "))
+				if !editable(n, name) {
+					return nil, fmt.Errorf("%s features have no editable parameter %q (editable: %s)", n.Type, name, editableList(n))
 				}
 				val := a["value"]
 				switch v := val.(type) {
@@ -71,7 +102,7 @@ func editTools() []*Tool {
 					if !finite(v) {
 						return nil, fmt.Errorf("value must be finite")
 					}
-					if (strictlyPositive[name] || n.Type == "box" && (name == "dx" || name == "dy" || name == "dz")) && v <= 0 {
+					if (strictlyPositive[name] || strings.HasPrefix(name, "dim_") || n.Type == "box" && (name == "dx" || name == "dy" || name == "dz")) && v <= 0 {
 						return nil, fmt.Errorf("%s must be greater than 0", name)
 					}
 					if name == "count" && (v < 2 || v != math.Trunc(v)) {
@@ -114,8 +145,8 @@ func editTools() []*Tool {
 					return &Plan{Intent: intentOr(a, "Clear expression"), Explanation: fmt.Sprintf("Clears the expression on %s.%s.", n.ID, name),
 						Commands: []commands.Command{&commands.SetExpression{ID: n.ID, Name: name, Delete: true}}}, nil
 				}
-				if !isKnown(n.Type, name) {
-					return nil, fmt.Errorf("%s features have no editable parameter %q (editable: %s)", n.Type, name, strings.Join(knownParams[n.Type], ", "))
+				if !editable(n, name) {
+					return nil, fmt.Errorf("%s features have no editable parameter %q (editable: %s)", n.Type, name, editableList(n))
 				}
 				return &Plan{Intent: intentOr(a, "Drive "+n.ID+"."+name+" by expression"),
 					Explanation: fmt.Sprintf("Drives %s.%s by %q.", n.ID, name, a.Str("expression")),

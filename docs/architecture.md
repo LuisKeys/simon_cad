@@ -172,6 +172,31 @@ feature names a `target` (a node whose body it modifies) and produces a new body
   oriented onto the face normal; positions are world coordinates where the component along the
   normal is ignored.
 
+### Sketches and image-derived geometry
+
+`sketch` is a CAD-IR node type for planar 2D geometry; it produces faces, not a solid
+(`Feature.Kind = KindSketch`, `Body.Sketch`), so it never counts as model geometry
+(`Model.Leaves`) and a boolean/pattern on a sketch fails as a normal feature failure. Parameters:
+`plane` (XY/XZ/YZ) + `offset`, or `references.face` (any planar face; origin at its centroid, u along
+its longest straight edge); `entities` (line, arc, circle, rectangle, polygon, slot, in mm);
+`regions` (outer loop + holes). Numbers inside entities may be `"@name"` / `"@name/2"` — the sketch's
+own numeric parameter — so dimensions stay editable (`modify_parameter`) after commit.
+`extrude` takes `sketch` (+ optional `region`) instead of an inline `profile`; a cut from a sketch on
+a face goes into the material.
+
+**Image-to-CAD (Phase 2, Vision capability).** An uploaded PNG/JPEG/WebP is attached to the user
+message. The model records a *proposal* with `analyze_image` (structured JSON in pixel space:
+entities, profiles, relationships, dimensions with confidence, operations). `internal/vision` is pure
+Go: it validates the proposal (closure, containment, operation order, ambiguity), resolves the scale
+**only** from a human-supplied dimension or an explicit scale (never from pixel size), and converts to
+sketch parameters. Corrections (`update_sketch_proposal`, `confirm_detected_dimension`,
+`set_sketch_scale`) change the proposal, never the model. `create_from_image` expands a ready
+proposal into ordinary features — `sketch → extrude (add/cut) → union/subtract/intersect` — as one
+ChangeSet that is **always left proposed** (`Plan.RequireApproval`) for preview and commit. Nodes
+carry `created_by: agent`, `capability: vision`, `source_image_id`, `interpretation_id`, tool call and
+ChangeSet ids. Geometry rebuilds from the CAD-IR alone; `geometry`/`cadir` never import `vision` or
+`agent` (tested). Source images are saved under `assets/images/` only when explicitly retained.
+
 ## 7. Commands and ChangeSets
 
 Commands are small, serializable and **exactly invertible**:
@@ -213,7 +238,7 @@ face/edge/vertex by kernel `index`.
 
 ## 10. Agent runtime
 
-One agent runtime with pluggable **capabilities** (only *geometry* exists). A capability supplies:
+One agent runtime with pluggable **capabilities** (*geometry* and *vision*). A capability supplies:
 a system prompt, a tool subset and a deterministic context builder. This avoids premature
 multi-agent orchestration; a capability can later be promoted to an independent agent without
 changing tools, ChangeSets or the CAD-IR.
@@ -224,8 +249,9 @@ refuse anything outside the capability's tool set, otherwise `app.ApplyTool` →
 `tool_result` (success data or an actionable error) → repeat until the model answers in text, or the
 step limit (12) is hit. Validation errors are fed back so the model can correct itself.
 
-**Providers** (`SIMONCAD_PROVIDER`): `claude` (Anthropic Messages API), `openai` and `ollama` (Chat
-Completions wire format; Ollama through its `/v1` endpoint). A `Recorder` captures live responses and a
+**Providers** (`SIMONCAD_PROVIDER`): `claude` (Anthropic Messages API), `openai` (Responses API) and
+`ollama` (Chat Completions wire format through its `/v1` endpoint). Image input (`Block{type:"image"}`)
+is supported by `claude` and `openai`; Ollama refuses with a clear error before the turn starts. A `Recorder` captures live responses and a
 `Replay` provider plays them back, which is how CI runs agent evals without a network.
 
 **Eval harness:** `testdata/agent/*.json` maps a prompt (plus optional setup and selection) to
@@ -235,8 +261,8 @@ object match, `len`, `set`, `oneof`, `contains`, `approx`, `any`).
 ## 11. Persistence
 
 A project is a `.scadproj` directory of canonical JSON — see [project-format.md](project-format.md).
-Saving writes atomically (temp file + rename). Loading validates the schema version (migration hook
-in place, no migrations yet) and the graph. Saving the same state twice yields identical bytes;
+Saving writes atomically (temp file + rename). Loading validates the schema version (v1 → v2 only added optional content, so v1 projects load
+unchanged) and the graph. Saving the same state twice yields identical bytes;
 `save → load → rebuild → save` is byte-identical.
 
 ## 12. Native layer and threading

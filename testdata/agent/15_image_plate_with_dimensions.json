@@ -1,0 +1,172 @@
+{
+  "name": "15_image_plate_with_dimensions",
+  "notes": "Dimensions arrive from the user; geometry is proposed (never auto-committed). Scripted recording; re-capture with: simoncad-cli eval --live --record testdata/agent",
+  "images": [
+    "images/plate_sketch.png"
+  ],
+  "prompt": "80 mm wide, 5 mm thick.",
+  "setup": [
+    {
+      "tool": "analyze_image",
+      "args": {
+        "image_id": "img_a00efae71dc66dab",
+        "image_size": [
+          400,
+          300
+        ],
+        "confidence": 0.86,
+        "description": "Rectangular plate with two circular holes",
+        "entities": [
+          {
+            "id": "e1",
+            "kind": "rectangle",
+            "x": 50,
+            "y": 50,
+            "w": 320,
+            "h": 200,
+            "confidence": 0.95
+          },
+          {
+            "id": "e2",
+            "kind": "circle",
+            "cx": 130,
+            "cy": 150,
+            "r": 12,
+            "confidence": 0.9
+          },
+          {
+            "id": "e3",
+            "kind": "circle",
+            "cx": 290,
+            "cy": 150,
+            "r": 12,
+            "confidence": 0.9
+          }
+        ],
+        "profiles": [
+          {
+            "id": "p1",
+            "outer": [
+              "e1"
+            ],
+            "holes": [
+              [
+                "e2"
+              ],
+              [
+                "e3"
+              ]
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "kind": "equal",
+            "entities": [
+              "e2",
+              "e3"
+            ],
+            "confidence": 0.9
+          }
+        ],
+        "dimensions": [
+          {
+            "id": "overall_width",
+            "kind": "length",
+            "binds": "e1.w",
+            "source": "missing",
+            "confidence": 0,
+            "label": "overall width"
+          },
+          {
+            "id": "thickness",
+            "kind": "depth",
+            "source": "missing",
+            "confidence": 0,
+            "label": "thickness"
+          }
+        ]
+      }
+    }
+  ],
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "confirm_detected_dimension",
+            "input": {
+              "dimension": "overall_width",
+              "value": 80
+            }
+          },
+          {
+            "type": "tool_use",
+            "id": "tu_2",
+            "name": "confirm_detected_dimension",
+            "input": {
+              "dimension": "thickness",
+              "value": 5
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_3",
+            "name": "create_from_image",
+            "input": {
+              "id": "plate",
+              "intent": "Plate with two holes from the sketch"
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "I prepared the plate (80 x 50 x 5 mm with two 6 mm holes). Review the preview and commit when it looks right."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "confirm_detected_dimension",
+        "args": {
+          "dimension": "overall_width",
+          "value": 80
+        }
+      },
+      {
+        "name": "confirm_detected_dimension",
+        "args": {
+          "dimension": "thickness",
+          "value": 5
+        }
+      },
+      {
+        "name": "create_from_image",
+        "args": {
+          "id": "plate"
+        }
+      }
+    ],
+    "pending": 1,
+    "model": {
+      "features": 0,
+      "volume_mm3": 0
+    }
+  }
+}

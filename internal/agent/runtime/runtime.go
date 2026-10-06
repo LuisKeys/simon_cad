@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -30,6 +31,8 @@ type Runtime struct {
 	// History is the prior conversation (plain user/assistant text, oldest first). It is
 	// prepended to the turn; the live model context is only attached to the newest request.
 	History []Message
+	// ImageIDs are uploaded images (App.Images) attached to this turn's user message.
+	ImageIDs []string
 	// OnStep, if set, observes each tool call (for CLI progress output).
 	OnStep func(name string, args json.RawMessage, o app.Outcome)
 }
@@ -80,7 +83,21 @@ func (rt *Runtime) Run(ctx context.Context, a *app.App, intent string, policy ap
 		capNames[i] = c.Name()
 	}
 	a.SetActor(app.Actor{CreatedBy: "agent", Capability: strings.Join(capNames, ","), Model: rt.Provider.Name()})
+	var images []Block
+	var attached []string
+	for _, id := range rt.ImageIDs {
+		im, ok := a.Images.Get(id)
+		if !ok {
+			return &Result{}, fmt.Errorf("image %q is not available (upload it first)", id)
+		}
+		if c, ok := rt.Provider.(ImageCapable); ok && !c.SupportsImages() {
+			return &Result{}, fmt.Errorf("provider %s does not support image input; switch SIMONCAD_PROVIDER to claude or openai", rt.Provider.Name())
+		}
+		images = append(images, Block{Type: "image", Source: &ImageSource{Type: "base64", MediaType: im.MediaType, Data: base64.StdEncoding.EncodeToString(im.Data)}})
+		attached = append(attached, fmt.Sprintf("Attached image id=%s (%dx%d px)", im.ID, im.Width, im.Height))
+	}
 	res := &Result{PromptID: a.RecordPrompt(intent)}
+	a.RecordPromptImages(res.PromptID, rt.ImageIDs)
 	allowed, defs := rt.toolset(a)
 
 	var sb strings.Builder
@@ -92,10 +109,13 @@ func (rt *Runtime) Run(ctx context.Context, a *app.App, intent string, policy ap
 		sb.WriteString(ctxText)
 		sb.WriteString("\n")
 	}
+	for _, line := range attached {
+		sb.WriteString(line + "\n")
+	}
 	sb.WriteString("## User request\n")
 	sb.WriteString(intent)
 	msgs := append(append([]Message(nil), rt.History...),
-		Message{Role: "user", Content: []Block{{Type: "text", Text: sb.String()}}})
+		Message{Role: "user", Content: append(images, Block{Type: "text", Text: sb.String()})})
 
 	for step := 0; step < rt.MaxSteps; step++ {
 		resp, err := rt.Provider.Complete(ctx, Request{System: rt.systemPrompt(), Messages: msgs, Tools: defs, NoThinking: rt.NoThinking})

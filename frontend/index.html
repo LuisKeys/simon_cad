@@ -87,6 +87,12 @@
     </section>
     <form id="composer" class="composer" autocomplete="off">
       <div id="chips" class="chips"></div>
+      <div id="attachments" class="chips" aria-label="Attached images"></div>
+      <div class="row tools">
+        <button id="btn-attach" type="button" title="Attach an image (or drop / paste one anywhere)">📎 Attach</button>
+        <button id="btn-from-image" type="button" title="Create editable geometry from a sketch, scan or drawing">Create from Image</button>
+        <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+      </div>
       <label class="think" title="Off = instant answers, no extended thinking"><input type="checkbox" id="thinking" checked> Thinking mode</label>
       <div class="row">
         <textarea id="prompt" rows="8" placeholder="Describe what you want…  (Enter to send, Shift+Enter for a new line)"></textarea>
@@ -124,6 +130,9 @@
     <div class="row"><button type="submit" class="danger" id="confirm-ok">Delete</button><button type="button" id="confirm-cancel">Cancel</button></div>
   </form>
 </div>
+
+<div id="interp" class="overlay" hidden></div>
+<div id="drop-hint" class="drop-hint" hidden><div>Drop an image to attach it<br><small>PNG, JPEG or WebP · sketches, scans, drawings</small></div></div>
 
 <ul id="ctxmenu" class="ctxmenu" role="menu" hidden></ul>
 <div id="toast" class="toast" hidden></div>

@@ -61,6 +61,22 @@ occ_status occ_torus(double major_radius, double minor_radius, occ_handle* out);
  * extruded along +Z by height. */
 occ_status occ_extrude_polygon(const double* xy, int32_t n, double height, occ_handle* out);
 
+/* Sketch geometry. A segment is a 2D curve in the sketch plane (z=0):
+ *   kind 0 line   a = x1,y1,x2,y2
+ *   kind 1 arc    a = x1,y1, xm,ym (a point on the arc), x2,y2
+ *   kind 2 circle a = cx,cy,r      (a full circle is a loop on its own)
+ * Loop 0 is the outer boundary, the following loops are holes; segments of a loop must chain
+ * end to start. The face is returned in the XY plane with a +Z normal. */
+typedef struct { int32_t kind; double a[6]; } occ_seg2d;
+occ_status occ_make_face(const occ_seg2d* segs, const int32_t* loop_sizes, int32_t n_loops, occ_handle* out);
+/* Sweeps any shape along the vector (dx,dy,dz); a face becomes a solid. */
+occ_status occ_prism(occ_handle s, double dx, double dy, double dz, occ_handle* out);
+/* Moves a shape built in the local XY/+Z frame onto the frame (origin o, normal z, x direction x). */
+occ_status occ_place(occ_handle s, const double o[3], const double z[3], const double x[3], occ_handle* out);
+/* Placement frame of a planar face (index as in occ_tessellate): out = origin(3), outward
+ * normal(3), x direction(3) = longest straight edge, sign-normalised. */
+occ_status occ_face_frame(occ_handle s, int32_t face_index, double out[9]);
+
 /* Booleans (inputs are not consumed) */
 occ_status occ_boolean_union(occ_handle a, occ_handle b, occ_handle* out);
 occ_status occ_boolean_subtract(occ_handle a, occ_handle b, occ_handle* out);

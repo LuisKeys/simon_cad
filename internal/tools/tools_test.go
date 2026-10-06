@@ -55,7 +55,7 @@ func TestRegistryInvariants(t *testing.T) {
 			t.Errorf("tool %s must be exactly one of mutating/query", n)
 		}
 	}
-	for _, want := range []string{"create_box", "create_cylinder", "create_cone", "create_sphere", "create_torus", "add_hole", "extrude_profile", "linear_pattern", "circular_pattern",
+	for _, want := range []string{"create_box", "create_cylinder", "create_cone", "create_sphere", "create_torus", "add_hole", "extrude_profile", "create_sketch", "extrude_sketch", "linear_pattern", "circular_pattern",
 		"boolean", "mirror", "fillet", "chamfer", "transform", "modify_parameter", "measure_distance", "get_model_summary", "export_step", "export_stl",
 		"set_color", "set_opacity", "set_visibility", "reset_appearance", "get_appearance"} {
 		if _, ok := r.Get(want); !ok {

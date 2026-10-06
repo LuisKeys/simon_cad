@@ -54,6 +54,8 @@ func (p Params) Positive(name string) (float64, error) {
 type Body struct {
 	Shape *api.Shape
 	Props api.Props
+	// Sketch marks a non-solid body (planar faces); it never counts as model geometry.
+	Sketch bool
 
 	topoOnce sync.Once
 	topo     *selectors.Topology
@@ -144,12 +146,20 @@ func (c *Ctx) body(id string) (*Body, error) {
 	if !ok || b == nil {
 		return nil, fmt.Errorf("node %q has no geometry", id)
 	}
+	if b.Sketch {
+		return nil, fmt.Errorf("node %q is a sketch, not a solid", id)
+	}
 	return b, nil
 }
 
+// KindSketch marks features whose result is planar faces rather than a solid.
+const KindSketch = "sketch"
+
 // Feature describes one buildable node type.
 type Feature struct {
-	Type  string
+	Type string
+	// Kind is "" for solid-producing features and KindSketch for planar, non-solid ones.
+	Kind  string
 	Build func(*Ctx) (*api.Shape, error)
 	// Tool is set for features that apply a tool shape to a target (hole, extrude). Patterns
 	// reuse it. subtract=false means union.

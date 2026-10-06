@@ -14,7 +14,8 @@
 | `make demo` | M1 demo (`scripts/demo_m1.sh`) |
 | `make docs` | Regenerate `docs/tools.md` from the live registry |
 | `make ui` | Build and run the desktop UI (`ARGS="--project p.scadproj"`) |
-| `make e2e` | Headless-Chrome run of the M2 flow (needs Chrome; `npm install` in `e2e/` once) |
+| `make test-js` | Node tests of the pure frontend helpers (`frontend/*.test.mjs`) |
+| `make e2e` | Headless-Chrome runs: `e2e/m2.mjs` (M2 flow) and `e2e/image.mjs` (Image-to-CAD); needs Chrome, `npm install` in `e2e/` once |
 
 Notes:
 - `go test ./...` skips `third_party/` because it contains its own `go.mod`.
@@ -41,6 +42,9 @@ Notes:
 | Dogfood | `app/dogfood_test.go` | Servo bracket via tools equals the hand-built kernel part; elbow clevis matches its analytic volume; selective fillet |
 | Rendering | `rendering` | Pick ID ↔ selector bijection, delta scenes, no native mesh leaks |
 | UI | `ui` | M2 flow through the service, preview/commit/undo, playback, HTTP guards, **no mutation path around the tool registry** |
+| Sketches | `geometry/api`, `geometry/rebuild`, `app` | Faces from line/arc/circle loops, holes, prisms, placement on planar (incl. tilted) faces, `@param` edits, sketch-only models |
+| Vision | `vision`, `app/vision_test.go`, `tools` | Proposal validation, scale rules, confidence/confirmation, ambiguity, booleans (union/subtract/intersect/chains), cut through an existing body, undo/redo and save/load without a model |
+| Images | `agent/runtime`, `ui` | Image blocks on the wire (Claude, OpenAI), Ollama refusal, upload limits/types, preview → commit through the UI |
 | Browser e2e | `e2e/m2.mjs` (`make e2e`) | Palette → click face → prompt → preview → commit → undo in real Chrome, no console errors |
 
 ## Agent evals

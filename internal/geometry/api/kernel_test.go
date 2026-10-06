@@ -165,3 +165,149 @@ func TestBoxIntersectBoxVolume(t *testing.T) {
 		t.Fatalf("%d shapes leaked", n)
 	}
 }
+
+func rectSegs(x, y, w, h float64) []Seg2D {
+	return []Seg2D{
+		{Kind: 0, A: [6]float64{x, y, x + w, y}},
+		{Kind: 0, A: [6]float64{x + w, y, x + w, y + h}},
+		{Kind: 0, A: [6]float64{x + w, y + h, x, y + h}},
+		{Kind: 0, A: [6]float64{x, y + h, x, y}},
+	}
+}
+
+func circSeg(cx, cy, r float64) Seg2D { return Seg2D{Kind: 2, A: [6]float64{cx, cy, r}} }
+
+func TestSketchFaceAndPrism(t *testing.T) {
+	k := New()
+	defer k.Close()
+
+	// plain rectangle
+	f, err := k.MakeFace(rectSegs(0, 0, 80, 50), []int{4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := f.Props()
+	if math.Abs(p.Area-4000) > 1e-6 {
+		t.Fatalf("face area %v want 4000", p.Area)
+	}
+
+	// rectangle with two circular holes -> area wh - 2*pi*r^2, prism volume * depth
+	segs := append(rectSegs(0, 0, 80, 50), circSeg(20, 25, 3), circSeg(60, 25, 3))
+	f, err = k.MakeFace(segs, []int{4, 1, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ = f.Props()
+	want := 4000 - 2*math.Pi*9
+	if math.Abs(p.Area-want) > 1e-6 {
+		t.Fatalf("holed face area %v want %v", p.Area, want)
+	}
+	solid, err := f.Prism(0, 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ = solid.Props()
+	if math.Abs(p.Volume-want*5) > 1e-5 {
+		t.Fatalf("prism volume %v want %v", p.Volume, want*5)
+	}
+	if ok, _ := solid.IsValid(); !ok {
+		t.Fatal("prism invalid")
+	}
+
+	// half-disc: line + arc through the top point, area pi r^2 / 2
+	half := []Seg2D{
+		{Kind: 0, A: [6]float64{-10, 0, 10, 0}},
+		{Kind: 1, A: [6]float64{10, 0, 0, 10, -10, 0}},
+	}
+	f, err = k.MakeFace(half, []int{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ = f.Props()
+	if math.Abs(p.Area-math.Pi*100/2) > 1e-4 {
+		t.Fatalf("half disc area %v", p.Area)
+	}
+
+	// open loop and disconnected segments fail
+	if _, err := k.MakeFace(rectSegs(0, 0, 10, 10)[:3], []int{3}); err == nil {
+		t.Error("open loop must fail")
+	}
+	// hole outside the outer loop fails
+	bad := append(rectSegs(0, 0, 10, 10), circSeg(50, 50, 2))
+	if _, err := k.MakeFace(bad, []int{4, 1}); err == nil {
+		t.Error("hole outside outer loop must fail")
+	}
+	// zero-length prism fails
+	if _, err := f.Prism(0, 0, 0); err == nil {
+		t.Error("zero prism must fail")
+	}
+}
+
+func TestPlaceAndFaceFrame(t *testing.T) {
+	k := New()
+	defer k.Close()
+
+	f, err := k.MakeFace(rectSegs(0, 0, 10, 4), []int{4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// local XY -> plane with normal +X at x=7; local x axis -> world +Y
+	pl, err := f.Place([3]float64{7, 0, 0}, [3]float64{1, 0, 0}, [3]float64{0, 1, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := pl.Props()
+	if math.Abs(p.MinX-7) > 1e-9 || math.Abs(p.MaxX-7) > 1e-9 ||
+		math.Abs(p.MaxY-10) > 1e-9 || math.Abs(p.MaxZ-4) > 1e-9 {
+		t.Fatalf("bad placement bounds %+v", p)
+	}
+
+	// frame of the +Z face of a 30x10x5 box: longest edge is along X
+	box, _ := k.Box(30, 10, 5)
+	mesh, err := box.Tessellate(0.1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for i, fc := range mesh.Faces {
+		if fc.Normal[2] > 0.9 {
+			fr, err := box.FaceFrame(i)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if math.Abs(fr.Normal[2]-1) > 1e-9 || math.Abs(fr.X[0]-1) > 1e-9 || math.Abs(fr.Origin[2]-5) > 1e-9 {
+				t.Fatalf("bad frame %+v", fr)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no +Z face")
+	}
+	// rotated box: frame normal follows the rotation
+	rot, _ := box.Rotate(0, 0, 0, 0, 1, 0, math.Pi/2)
+	mesh, _ = rot.Tessellate(0.1)
+	for i, fc := range mesh.Faces {
+		if fc.Normal[0] > 0.9 {
+			fr, err := rot.FaceFrame(i)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if math.Abs(fr.Normal[0]-1) > 1e-9 {
+				t.Fatalf("rotated frame %+v", fr)
+			}
+		}
+	}
+	if _, err := box.FaceFrame(99); err == nil {
+		t.Error("out-of-range face must fail")
+	}
+	cyl, _ := k.Cylinder(3, 10)
+	cm, _ := cyl.Tessellate(0.1)
+	for i, fc := range cm.Faces {
+		if fc.Surface == 2 { // cylinder side is not planar
+			if _, err := cyl.FaceFrame(i); err == nil {
+				t.Error("non-planar face must fail")
+			}
+		}
+	}
+}

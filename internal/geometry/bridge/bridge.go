@@ -201,6 +201,53 @@ func ExtrudePolygon(xy []float64, h float64) (Handle, error) {
 	return Handle(out), err
 }
 
+// Seg2D mirrors occ_seg2d: kind 0 line (x1,y1,x2,y2), 1 arc (x1,y1,xm,ym,x2,y2), 2 circle (cx,cy,r).
+type Seg2D struct {
+	Kind int32
+	A    [6]float64
+}
+
+// MakeFace builds a planar face (XY plane, +Z normal) from loops of segments; loop 0 is the outer boundary.
+func MakeFace(segs []Seg2D, loopSizes []int32) (Handle, error) {
+	if len(segs) == 0 || len(loopSizes) == 0 {
+		return 0, fmt.Errorf("%w: sketch needs at least one loop", ErrKernel)
+	}
+	cs := make([]C.occ_seg2d, len(segs))
+	for i, sg := range segs {
+		cs[i].kind = C.int32_t(sg.Kind)
+		for j := 0; j < 6; j++ {
+			cs[i].a[j] = C.double(sg.A[j])
+		}
+	}
+	var out C.occ_handle
+	err := check("make_face", C.occ_make_face(&cs[0], (*C.int32_t)(unsafe.Pointer(&loopSizes[0])), C.int32_t(len(loopSizes)), &out))
+	return Handle(out), err
+}
+
+// Prism sweeps a shape along (dx,dy,dz).
+func Prism(s Handle, dx, dy, dz float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("prism", C.occ_prism(C.occ_handle(s), C.double(dx), C.double(dy), C.double(dz), &out))
+	return Handle(out), err
+}
+
+// Place moves a shape from the local XY/+Z frame onto the frame (origin o, normal z, x direction x).
+func Place(s Handle, o, z, x [3]float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("place", C.occ_place(C.occ_handle(s), (*C.double)(&o[0]), (*C.double)(&z[0]), (*C.double)(&x[0]), &out))
+	return Handle(out), err
+}
+
+// FaceFrame returns origin, outward normal and x direction of a planar face.
+func FaceFrame(s Handle, face int) (origin, normal, xdir [3]float64, err error) {
+	var buf [9]C.double
+	err = check("face_frame", C.occ_face_frame(C.occ_handle(s), C.int32_t(face), &buf[0]))
+	for i := 0; i < 3; i++ {
+		origin[i], normal[i], xdir[i] = float64(buf[i]), float64(buf[3+i]), float64(buf[6+i])
+	}
+	return
+}
+
 func Mirror(s Handle, ox, oy, oz, nx, ny, nz float64) (Handle, error) {
 	var out C.occ_handle
 	err := check("mirror", C.occ_mirror(C.occ_handle(s), C.double(ox), C.double(oy), C.double(oz),

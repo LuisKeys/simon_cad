@@ -43,6 +43,9 @@ type Provenance struct {
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	ChangeSet  string `json:"changeset_id,omitempty"`
 	Model      string `json:"model,omitempty"`
+	// Vision-derived geometry records where it came from; the geometry itself never needs these to rebuild.
+	SourceImageID    string `json:"source_image_id,omitempty"`
+	InterpretationID string `json:"interpretation_id,omitempty"`
 }
 
 type Metadata struct {

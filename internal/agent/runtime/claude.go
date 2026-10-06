@@ -72,7 +72,26 @@ type apiError struct {
 	} `json:"error"`
 }
 
+func (c *Claude) SupportsImages() bool { return true }
+
+// maxImageBytes is the Messages API limit for one image.
+const maxImageBytes = 5 << 20
+
+func checkImageSizes(msgs []Message) error {
+	for _, m := range msgs {
+		for _, b := range m.Content {
+			if b.Type == "image" && b.Source != nil && len(b.Source.Data)*3/4 > maxImageBytes {
+				return fmt.Errorf("an attached image is larger than %d MB; downscale it first", maxImageBytes>>20)
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
+	if err := checkImageSizes(req.Messages); err != nil {
+		return nil, err
+	}
 	model := req.Model
 	if model == "" {
 		model = c.Model

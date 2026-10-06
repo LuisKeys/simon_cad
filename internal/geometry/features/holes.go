@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/selectors"
 )
@@ -97,15 +98,20 @@ func orient(a *arena, tool *api.Shape, normal, origin [3]float64) (*api.Shape, e
 
 // faceFor resolves the placement face: references.face, else +Z of the target.
 func faceFor(c *Ctx) (selectors.Descriptor, *Body, error) {
+	return faceOf(c, c.Node, c.P)
+}
+
+// faceOf is faceFor for an arbitrary node (a sketch placed on a face reads its own reference).
+func faceOf(c *Ctx, n *cadir.Node, p Params) (selectors.Descriptor, *Body, error) {
 	var sel selectors.Selector
-	if raw := c.Node.References["face"]; raw != "" {
+	if raw := n.References["face"]; raw != "" {
 		s, err := selectors.Parse(raw)
 		if err != nil {
 			return selectors.Descriptor{}, nil, err
 		}
 		sel = s
 	} else {
-		sel = selectors.Selector{Kind: "face", Args: map[string]string{"feature": c.P.Str("target"), "side": "+Z"}}
+		sel = selectors.Selector{Kind: "face", Args: map[string]string{"feature": p.Str("target"), "side": "+Z"}}
 	}
 	b, err := c.body(sel.Feature())
 	if err != nil {
@@ -302,6 +308,21 @@ func extrudeTool(c *Ctx) (*api.Shape, bool, error) {
 		if c.P.Bool("symmetric") {
 			w0 = offset - depth/2
 		}
+	}
+
+	if sk := c.P.Str("sketch"); sk != "" {
+		// A cut from a sketch placed on a face goes into the material unless reversed.
+		reverse := c.P.Bool("reverse")
+		if mode == "cut" {
+			if n := c.NodeOf(sk); n != nil && n.References["face"] != "" {
+				reverse = !reverse
+			}
+		}
+		solid, err := sketchPrism(c, sk, c.P.Str("region"), w0, depth, reverse)
+		if err != nil {
+			return nil, false, err
+		}
+		return solid, mode == "cut", nil
 	}
 
 	a := &arena{}

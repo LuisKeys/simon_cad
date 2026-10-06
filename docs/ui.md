@@ -120,6 +120,24 @@ backlog item "round only the outer edges after pocketing".
 - **Live LLM** use in the UI is unverified (no key was available); the UI path is covered with the
   same recorded-provider mechanism the evals use.
 
+## Image to CAD
+
+Attach a sketch, scan, drawing or photo of paper/whiteboard (PNG, JPEG, WebP) with the **Attach** /
+**Create from Image** buttons, by dropping it anywhere on the window, or by pasting it from the
+clipboard. Large images are downscaled in the browser (≤ 2048 px) before upload; the upload endpoint
+(`POST /api/image`, raw body, 20 MB) sniffs the content, not the name.
+
+The agent's interpretation opens in the **Image interpretation** panel: the source image with an SVG
+overlay of the detected geometry (solid = outline, dashed = hole, boxes = dimensions that were read),
+confidence bands (≥ 85 % / ≥ 60 % / uncertain), the questions that are still open (usually just the
+overall width and the thickness), detected dimensions with an editable value and a *confirm*
+checkbox for low-confidence readings, a boolean-intent choice when overlapping shapes are ambiguous,
+a placement selector (plane XY/XZ/YZ or the **selected planar face**) and "keep the source image in
+the project". **Create & preview** calls `confirm_detected_dimension` / `set_sketch_scale` /
+`update_sketch_proposal` / `create_from_image` through `/api/tool`, then shows the ordinary ghost
+preview with Commit / Reject. **Correct with the agent…** re-attaches the image to the composer.
+Nothing in the panel can change the model except through those tool calls.
+
 ## Appearance
 
 Expanding a feature in the design tree shows an **Appearance** group: color picker, hex / `rgb(r,g,b)`

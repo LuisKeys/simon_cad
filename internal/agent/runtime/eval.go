@@ -24,6 +24,9 @@ type Case struct {
 	Recorded  Recording   `json:"recorded"`
 	Expect    Expectation `json:"expect"`
 	Notes     string      `json:"notes,omitempty"`
+	// Images are paths (relative to the case file) of images attached to the prompt.
+	Images []string `json:"images,omitempty"`
+	dir    string
 }
 
 type SetupCall struct {
@@ -71,12 +74,17 @@ func LoadCases(dir string) ([]Case, error) {
 		if err := json.Unmarshal(b, &c); err != nil {
 			return nil, fmt.Errorf("%s: %w", f, err)
 		}
+		c.dir = filepath.Dir(f)
 		out = append(out, c)
 	}
 	return out, nil
 }
 
-var queryTools = map[string]bool{"get_model_summary": true, "measure_distance": true}
+// isQuery reports whether a tool is read-only (it never produces a ChangeSet).
+func isQuery(a *app.App, name string) bool {
+	t, ok := a.Reg.Get(name)
+	return ok && !t.Mutating()
+}
 
 // RunCase executes one case in a fresh in-memory project. Pass a nil provider for recorded mode.
 func RunCase(ctx context.Context, c Case, caps []Capability, live Provider) CaseReport {
@@ -86,6 +94,20 @@ func RunCase(ctx context.Context, c Case, caps []Capability, live Provider) Case
 	a := app.New("eval", func() time.Time { return fixed })
 	defer a.Close()
 
+	var imageIDs []string
+	for _, path := range c.Images {
+		data, err := os.ReadFile(filepath.Join(c.dir, path))
+		if err != nil {
+			fail("image %s: %v", path, err)
+			return rep
+		}
+		im, err := a.Images.Put(data)
+		if err != nil {
+			fail("image %s: %v", path, err)
+			return rep
+		}
+		imageIDs = append(imageIDs, im.ID)
+	}
 	for _, s := range c.Setup {
 		if o := a.ApplyTool(s.Tool, s.Args, app.PolicyCommit); !o.OK {
 			fail("setup %s failed: %s", s.Tool, o.Error)
@@ -100,7 +122,7 @@ func RunCase(ctx context.Context, c Case, caps []Capability, live Provider) Case
 	if p == nil {
 		p = &Replay{Rec: c.Recorded}
 	}
-	rt := &Runtime{Provider: p, Caps: caps}
+	rt := &Runtime{Provider: p, Caps: caps, ImageIDs: imageIDs}
 	res, err := rt.Run(ctx, a, c.Prompt, app.PolicyAuto)
 	if err != nil {
 		fail("run: %v", err)
@@ -124,7 +146,7 @@ func RunCase(ctx context.Context, c Case, caps []Capability, live Provider) Case
 	}
 	for _, m := range res.Transcript {
 		for _, b := range m.Content {
-			if b.Type != "tool_use" || failedIDs[b.ID] || (queryTools[b.Name] && !listed[b.Name]) {
+			if b.Type != "tool_use" || failedIDs[b.ID] || (isQuery(a, b.Name) && !listed[b.Name]) {
 				continue
 			}
 			var args map[string]any

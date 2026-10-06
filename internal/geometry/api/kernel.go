@@ -193,6 +193,43 @@ func (s *Shape) Rotate(ox, oy, oz, ax, ay, az, angle float64) (*Shape, error) {
 	})
 }
 
+// Seg2D is one 2D sketch curve: Kind 0 line (x1,y1,x2,y2), 1 arc through a middle point
+// (x1,y1,xm,ym,x2,y2), 2 circle (cx,cy,r).
+type Seg2D = bridge.Seg2D
+
+// MakeFace builds a planar face in the XY plane from loops of segments (loop 0 outer, the rest holes).
+func (k *Kernel) MakeFace(segs []Seg2D, loopSizes []int) (*Shape, error) {
+	ls := toInt32(loopSizes)
+	cp := append([]Seg2D(nil), segs...)
+	return k.wrap(func() (bridge.Handle, error) { return bridge.MakeFace(cp, ls) })
+}
+
+// Prism sweeps the shape (typically a face) along (dx,dy,dz).
+func (s *Shape) Prism(dx, dy, dz float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.Prism(h, dx, dy, dz) })
+}
+
+// Place moves a shape built in the local XY/+Z frame onto the frame (origin, normal z, x direction).
+func (s *Shape) Place(origin, z, x [3]float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.Place(h, origin, z, x) })
+}
+
+// Frame is a right-handed placement frame on a planar face.
+type Frame struct{ Origin, Normal, X [3]float64 }
+
+// FaceFrame returns the placement frame of the planar face with the kernel index (as in Tessellate).
+func (s *Shape) FaceFrame(face int) (Frame, error) {
+	if s.h == 0 {
+		return Frame{}, ErrReleased
+	}
+	var (
+		f   Frame
+		err error
+	)
+	s.k.run(func() { f.Origin, f.Normal, f.X, err = bridge.FaceFrame(s.h, face) })
+	return f, err
+}
+
 func (s *Shape) IsValid() (bool, error) {
 	if s.h == 0 {
 		return false, ErrReleased

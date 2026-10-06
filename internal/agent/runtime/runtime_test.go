@@ -10,11 +10,12 @@ import (
 	"time"
 
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
+	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/app"
 )
 
-func caps() []runtime.Capability { return []runtime.Capability{geo.New()} }
+func caps() []runtime.Capability { return []runtime.Capability{geo.New(), vis.New()} }
 
 // Recorded evals run in CI with no network.
 func TestRecordedEvals(t *testing.T) {

@@ -61,6 +61,41 @@ int main() {
     CHECK(occ_live_handle_count() == 0);
   }
 
+  // Sketch: rectangle with a circular hole, prism volume, placement, face frame.
+  {
+    occ_seg2d segs[5] = {};
+    segs[0].kind = 0; segs[0].a[0] = 0;  segs[0].a[1] = 0;  segs[0].a[2] = 10; segs[0].a[3] = 0;
+    segs[1].kind = 0; segs[1].a[0] = 10; segs[1].a[1] = 0;  segs[1].a[2] = 10; segs[1].a[3] = 10;
+    segs[2].kind = 0; segs[2].a[0] = 10; segs[2].a[1] = 10; segs[2].a[2] = 0;  segs[2].a[3] = 10;
+    segs[3].kind = 0; segs[3].a[0] = 0;  segs[3].a[1] = 10; segs[3].a[2] = 0;  segs[3].a[3] = 0;
+    segs[4].kind = 2; segs[4].a[0] = 5;  segs[4].a[1] = 5;  segs[4].a[2] = 2;
+    const int32_t loops[2] = {4, 1};
+    occ_handle face = 0, solid = 0, placed = 0;
+    occ_props q;
+    CHECK(occ_make_face(segs, loops, 2, &face) == OCC_OK);
+    CHECK(occ_mass_props(face, &q) == OCC_OK);
+    CHECK(std::fabs(q.area - (100 - M_PI * 4)) < 1e-6);
+    CHECK(occ_prism(face, 0, 0, 3, &solid) == OCC_OK);
+    CHECK(occ_mass_props(solid, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 3 * (100 - M_PI * 4)) < 1e-5);
+    const double o[3] = {0, 0, 0}, z[3] = {0, 1, 0}, x[3] = {1, 0, 0};
+    CHECK(occ_place(solid, o, z, x, &placed) == OCC_OK);
+    CHECK(occ_mass_props(placed, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 3 * (100 - M_PI * 4)) < 1e-5);
+    double fr[9];
+    occ_handle box3 = 0;
+    CHECK(occ_box(30, 10, 5, &box3) == OCC_OK);
+    int planar = 0;
+    for (int i = 0; i < 6; i++) {
+      if (occ_face_frame(box3, i, fr) == OCC_OK) planar++;
+    }
+    CHECK(planar == 6);
+    CHECK(occ_face_frame(box3, 6, fr) == OCC_ERR_INVALID_ARG);
+    CHECK(occ_make_face(segs, loops, 0, &face) == OCC_ERR_INVALID_ARG);
+    occ_release(face); occ_release(solid); occ_release(placed); occ_release(box3);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
   // Tessellation: a box has 6 planar faces, 12 edges, 8 vertices; winding agrees with normals.
   {
     occ_handle box2 = 0;

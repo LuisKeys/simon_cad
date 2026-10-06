@@ -86,7 +86,13 @@ func toOpenAIMessages(system string, msgs []Message) []oaMessage {
 	return out
 }
 
+// SupportsImages is true for the OpenAI Responses API; the Ollama chat path is text only.
+func (o *OpenAI) SupportsImages() bool { return o.Flavor == "openai" }
+
 func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
+	if HasImages(req.Messages) && !o.SupportsImages() {
+		return nil, fmt.Errorf("provider %s does not support image input", o.Flavor)
+	}
 	model := req.Model
 	if model == "" {
 		model = o.Model
@@ -205,10 +211,16 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 	for _, m := range req.Messages {
 		var texts []string
 		var items []any
+		var parts []any // input_text / input_image parts, used when the message has images
 		for _, b := range m.Content {
 			switch b.Type {
 			case "text":
 				texts = append(texts, b.Text)
+				parts = append(parts, map[string]any{"type": "input_text", "text": b.Text})
+			case "image":
+				if b.Source != nil {
+					parts = append(parts, map[string]any{"type": "input_image", "image_url": "data:" + b.Source.MediaType + ";base64," + b.Source.Data})
+				}
 			case "reasoning":
 				items = append(items, json.RawMessage(b.Input))
 			case "tool_use":
@@ -222,7 +234,9 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 			}
 		}
 		input = append(input, items...)
-		if len(texts) > 0 {
+		if len(parts) > len(texts) { // at least one image: send content parts
+			input = append(input, map[string]any{"role": m.Role, "content": parts})
+		} else if len(texts) > 0 {
 			input = append(input, map[string]any{"role": m.Role, "content": strings.Join(texts, "\n")})
 		}
 	}

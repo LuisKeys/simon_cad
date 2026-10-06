@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -152,3 +153,6 @@ func withMeta(p props) props {
 	p["intent"] = text("The engineering intent in natural language, e.g. 'Mount plate for the shoulder servo'.")
 	return p
 }
+
+func jsonMarshal(v any) ([]byte, error)   { return json.Marshal(v) }
+func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
+	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
 	"github.com/accelone/simoncad/internal/agent/runtime"
 )
 
@@ -26,7 +27,7 @@ func runEval(args []string) error {
 	if len(cases) == 0 {
 		return fmt.Errorf("no eval cases in %s", *dir)
 	}
-	caps := []runtime.Capability{geo.New()}
+	caps := []runtime.Capability{geo.New(), vis.New()}
 	var liveProv runtime.Provider
 	if *live {
 		if liveProv, err = runtime.NewProviderFromEnv(); err != nil {

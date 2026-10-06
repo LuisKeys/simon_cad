@@ -1,0 +1,114 @@
+{
+  "name": "17_image_cut_through_selection",
+  "notes": "Image-derived shape placed on the selected face and cut through the part. Scripted recording; re-capture with: simoncad-cli eval --live --record testdata/agent",
+  "images": [
+    "images/plate_sketch.png"
+  ],
+  "prompt": "Cut this shape through the selected part.",
+  "setup": [
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "block",
+        "dx": 100,
+        "dy": 60,
+        "dz": 20
+      }
+    },
+    {
+      "tool": "analyze_image",
+      "args": {
+        "image_id": "img_a00efae71dc66dab",
+        "image_size": [
+          400,
+          300
+        ],
+        "confidence": 0.86,
+        "description": "Rectangular plate with two circular holes",
+        "entities": [
+          {
+            "id": "e2",
+            "kind": "circle",
+            "cx": 130,
+            "cy": 150,
+            "r": 12,
+            "confidence": 0.9
+          }
+        ],
+        "profiles": [
+          {
+            "id": "p1",
+            "outer": [
+              "e2"
+            ]
+          }
+        ],
+        "relationships": [],
+        "dimensions": [
+          {
+            "id": "d",
+            "kind": "diameter",
+            "binds": "e2.diameter",
+            "value": 6,
+            "source": "printed",
+            "confidence": 0.95
+          }
+        ],
+        "operations": [
+          {
+            "id": "o1",
+            "kind": "cut",
+            "profile": "p1",
+            "target": "selection",
+            "through": true
+          }
+        ]
+      }
+    }
+  ],
+  "selection": [
+    "face(feature=block,side=+Z)"
+  ],
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "create_from_image",
+            "input": {
+              "face": "selection",
+              "id": "cutout"
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "I prepared the through-cut on the selected face; check the preview before committing."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "create_from_image",
+        "args": {
+          "face": "selection"
+        }
+      }
+    ],
+    "pending": 1,
+    "model": {
+      "features": 1
+    }
+  }
+}

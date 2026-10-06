@@ -11,6 +11,7 @@ import (
 	"time"
 
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
+	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/app"
 )
@@ -55,7 +56,7 @@ func runAgentTurn(a *app.App, intent string, f *agentFlags, pol app.Policy, quie
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	rt := &runtime.Runtime{Provider: prov, Caps: []runtime.Capability{geo.New()}}
+	rt := &runtime.Runtime{Provider: prov, Caps: []runtime.Capability{geo.New(), vis.New()}}
 	if !quiet && !jsonOut {
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			fmt.Printf("  → %s %s\n", name, strings.TrimSpace(string(args)))

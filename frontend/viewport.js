@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
 
-const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xffb347, ghost: 0x35d0c8, removed: 0xef6a6a };
+const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xffb347, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
 const PICK_PX = 7;
 const MAX_VERTEX_PICK = 4000;
 
@@ -76,13 +76,14 @@ export class Viewport {
     for (const id of delta.removed ?? []) this._dropBody(id);
     for (const d of delta.changed ?? []) { this._dropBody(d.id); this._addBody(d); }
     this.known = { ...(delta.keys ?? {}) };
+    this._setSketches(delta.sketches ?? []);
     // Appearance comes straight from the CAD-IR and is applied to existing meshes:
     // it never needs new geometry, so an appearance-only change arrives with no bodies.
     this.appearance = delta.appearance ?? {};
     for (const b of this.bodies.values()) this._applyAppearance(b);
     this.stats = { bodies: this.bodies.size, triangles: delta.stats?.triangles ?? 0 };
     this._updateSectionRange();
-    if (!hadBodies && this.bodies.size > 0) this.fit();
+    if (!hadBodies && (this.bodies.size > 0 || (delta.sketches ?? []).length > 0)) this.fit();
     this.dirty();
   }
 
@@ -142,6 +143,26 @@ export class Viewport {
     this.dirty();
   }
 
+  /** Sketch outlines: planar 2D geometry that is not (yet) material. */
+  _setSketches(list) {
+    if (!this.sketches) { this.sketches = new THREE.Group(); this.scene.add(this.sketches); }
+    this._clearGroup(this.sketches);
+    for (const s of list) this.sketches.add(this._lineSet(s.lines, COLORS.sketch));
+  }
+
+  _clearGroup(group) {
+    for (const c of [...group.children]) {
+      group.remove(c);
+      c.traverse?.((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+    }
+  }
+
+  _lineSet(lines, color) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(lines ?? []), 3));
+    return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color }));
+  }
+
   /** The preview overlay: proposed bodies in translucent cyan, replaced bodies faded. */
   setGhost(ghost) {
     for (const c of [...this.ghost.children]) {
@@ -175,6 +196,7 @@ export class Viewport {
         g.add(m, new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: COLORS.ghost })));
         this.ghost.add(g);
       }
+      for (const sk of ghost.sketches ?? []) this.ghost.add(this._lineSet(sk.lines, COLORS.ghost));
     }
     this.dirty();
   }
@@ -182,6 +204,7 @@ export class Viewport {
   bounds() {
     const box = new THREE.Box3();
     for (const b of this.bodies.values()) if (b.group.visible) box.expandByObject(b.group);
+    if (this.sketches && this.sketches.children.length) box.expandByObject(this.sketches);
     return box;
   }
 

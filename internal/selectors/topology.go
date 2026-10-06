@@ -122,7 +122,9 @@ func ResolveTopo(sel Selector, t *Topology) (Descriptor, error) {
 			if err != nil {
 				return Descriptor{}, err
 			}
-			return t.Faces[i].descriptor(sel), nil
+			d := t.Faces[i].descriptor(sel)
+			d.Index = i
+			return d, nil
 		}
 		side, ok := sel.Args["side"]
 		if !ok {
@@ -154,7 +156,9 @@ func ResolveTopo(sel Selector, t *Topology) (Descriptor, error) {
 		if best < 0 {
 			return Descriptor{}, fmt.Errorf("selector %s: no %s face in the plane %c=%g", sel.String(), sideName(axis, sign), "xyz"[axis], at)
 		}
-		return t.Faces[best].descriptor(sel), nil
+		d := t.Faces[best].descriptor(sel)
+		d.Index = best
+		return d, nil
 	case "edge", "edges":
 		i, err := indexArg(sel, len(t.Edges), "edge")
 		if err != nil {
@@ -163,7 +167,7 @@ func ResolveTopo(sel Selector, t *Topology) (Descriptor, error) {
 		e := t.Edges[i]
 		c := e.BBox.Center()
 		return Descriptor{Selector: sel.String(), Kind: sel.Kind, FeatureID: sel.Feature(), SurfaceType: e.Curve,
-			Centroid: c, BBox: e.BBox, Area: e.Length}, nil
+			Centroid: c, BBox: e.BBox, Area: e.Length, Index: i}, nil
 	case "vertex":
 		i, err := indexArg(sel, len(t.Vertices), "vertex")
 		if err != nil {
@@ -171,7 +175,7 @@ func ResolveTopo(sel Selector, t *Topology) (Descriptor, error) {
 		}
 		p := t.Vertices[i]
 		return Descriptor{Selector: sel.String(), Kind: "vertex", FeatureID: sel.Feature(), Centroid: p,
-			BBox: Bounds{Min: p, Max: p}}, nil
+			BBox: Bounds{Min: p, Max: p}, Index: i}, nil
 	}
 	return Descriptor{}, fmt.Errorf("selector kind %q is not resolvable", sel.Kind)
 }

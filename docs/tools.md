@@ -7,7 +7,7 @@ are exact. Do not edit by hand.
 **Pipeline per call:** unknown-tool check → strict JSON decode → JSON-schema validation (unknown
 arguments are rejected) → semantic validation → *edit* tools return a plan of commands that becomes a
 ChangeSet; *query* tools return data directly. Errors are written to be actionable (they are fed
-back to the model). All tools currently belong to the `geometry` capability.
+back to the model). Tools belong to the `geometry` capability, or to `vision` (image interpretation).
 
 Common optional arguments on feature-creating tools: `id` (lowercase letters / digits / underscores;
 generated from `name` or the type if omitted), `name` (human-readable), `intent` (the engineering
@@ -17,25 +17,6 @@ Invoke directly with: `simoncad-cli tool <project> <tool> '<json>'`.
 
 
 ## Edit tools (produce a ChangeSet)
-
-### `check_delete`
-
-Dry run of `delete_objects`: which features would be deleted, which selected faces/edges/vertices resolve to which owning feature, and which other features depend on the targets. Changes nothing. Same arguments as `delete_objects` (without `intent`).
-
-### `delete_objects`
-
-Delete the selection (or the listed features) as **one** undoable ChangeSet of `RemoveFeature` commands, dependents first. Never auto-commits (destructive), at any level.
-
-- Faces, edges and vertices are never edited: the call is rejected naming the owning feature, so the user can choose to delete it (`resolve_owner=true`) or modify it instead.
-- If other features depend on the targets the call fails and lists them; `cascade=true` deletes them too and records a ChangeSet warning.
-- Deleting a feature that consumed others (e.g. a union) frees its inputs as standalone bodies; the ChangeSet warns about it.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `features` | string[] | no | Feature ids; omit to use the current selection |
-| `resolve_owner` | boolean | no | Delete the owners of selected faces/edges/vertices |
-| `cascade` | boolean | no | Also delete features that depend on the targets |
-| `intent` | string | no | Why |
 
 ### `add_hole`
 
@@ -128,6 +109,43 @@ Create a cylinder (shaft, boss, standoff, pin). The base circle is centered at (
 | `y` | number |  | Base center Y (mm) |
 | `z` | number |  | Base center Z (mm) |
 
+### `create_from_image`
+
+Turn a ready interpretation into editable parametric geometry: a sketch, then extrude / cut / boolean features in order (normal CAD-IR features, no image object). Refuses and lists what is missing or unconfirmed until the interpretation is ready. `extrusion_depth` (mm) is the user's explicit thickness for operations that lack one. The ChangeSet is always left proposed for preview and commit.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
+| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `mode` | solid \| sketch |  | solid builds the geometry; sketch stops at the sketch (solid \| sketch) |
+| `offset` | number |  | Override the plane offset (mm) |
+| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
+
+### `create_sketch`
+
+Create a planar 2D sketch (no solid yet). Entities (mm, plane coordinates u,v): line{p1,p2}, arc{p1,mid,p2}, circle{cx,cy,r}, rectangle{x,y,w,h}, polygon{points}, slot{x1,y1,x2,y2,width}. `regions` group closed loops into faces (outer loop + holes); if omitted every closed entity (circle/rectangle/polygon/slot) is its own region. Place it on plane XY (normal +Z, u=X,v=Y), YZ (normal +X, u=Y,v=Z) or XZ (normal +Y, u=Z,v=X) with `offset`, or on a planar `face` (origin at the face centroid, u along its longest straight edge). Turn regions into material with extrude_sketch.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `entities` | array of object | yes | Sketch entities |
+| `face` | string |  | Planar face selector to draw on, e.g. face(feature=plate,side=+Z); overrides plane |
+| `offset` | number |  | Offset along the sketch normal (mm) |
+| `plane` | XY \| XZ \| YZ |  | Sketch plane (XY \| XZ \| YZ) |
+| `regions` | array of object |  | Closed regions (outer loop + holes) |
+
+### `create_sketch_from_image`
+
+Create only the planar sketch (no solid) from a ready interpretation, as a normal editable sketch feature. The result stays proposed until the user commits it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
+| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `offset` | number |  | Override the plane offset (mm) |
+| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
+
 ### `create_sphere`
 
 Create a sphere (ball, dome when cut, rounded end). Centered at (x,y,z), default the origin.
@@ -151,6 +169,28 @@ Create a torus (ring, O-ring seat, donut). Centered at (x,y,z); `major_radius` i
 | `x` | number |  | Center X (mm) |
 | `y` | number |  | Center Y (mm) |
 | `z` | number |  | Center Z (mm) |
+
+### `delete_objects`
+
+Delete the selected objects ('delete this', 'remove the selected part', 'delete these objects') or the listed features, as ONE ChangeSet that can be undone. Faces, edges and vertices cannot be deleted: they belong to a feature, so the call is rejected and names the owning feature — ask the user whether to delete that feature (resolve_owner=true) or modify it instead. If other features depend on the targets the call fails and lists them; retry with cascade=true only when the user accepts deleting them too. Deleting a feature that is an input of another (e.g. a box inside a union) is refused unless cascaded.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `cascade` | boolean |  | true also deletes every feature that depends on the targets; without it the call fails when dependents exist |
+| `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
+| `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
+
+### `extrude_detected_profile`
+
+Extrude / cut / combine the profiles of an interpretation whose sketch already exists (created by create_sketch_from_image). Same operations and rules as create_from_image, without creating the sketch again.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
+| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `offset` | number |  | Override the plane offset (mm) |
+| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
 
 ### `extrude_profile`
 
@@ -177,6 +217,21 @@ Sketch a planar profile and extrude it, adding material (mode=add, optionally me
 | `y` | number |  | v of rectangle min corner / circle center |
 | `y1` | number |  | slot start v |
 | `y2` | number |  | slot end v |
+
+### `extrude_sketch`
+
+Extrude regions of an existing sketch. mode=add makes a solid (merged into `target` if given); mode=cut removes material from `target` (a cut from a sketch drawn on a face goes into the material). `region` picks one region (default: all). Use through=true for a cut through everything, or symmetric=true to extrude half the depth each way.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `depth` | number > 0 |  | Extrusion depth (mm); not needed for through cuts |
+| `mode` | add \| cut |  | add or cut (add \| cut) |
+| `region` | string |  | Region id (default: all regions) |
+| `reverse` | boolean |  | Extrude the opposite way |
+| `sketch` | string | yes | Sketch feature id |
+| `symmetric` | boolean |  | Extrude half the depth each way about the sketch plane |
+| `target` | string |  | Feature to add to / cut from |
+| `through` | boolean |  | Cut through the entire target |
 
 ### `fillet`
 
@@ -321,6 +376,43 @@ Move and/or rotate a feature: rotation by angle_deg about the axis (ax,ay,az) th
 
 ## Query tools (no model change)
 
+### `analyze_image`
+
+Record what you see in an attached image as a structured sketch proposal (this does NOT change the model). Use image pixel coordinates (x right, y DOWN). Group primitives into closed `profiles` (outer loop + holes). Put every dimension you can read in `dimensions` with its value in mm and a confidence; add dimensions you still need as source=missing (overall width/height, thickness as kind=depth). Never invent a value or infer real size from pixels. The result says what is missing; ask the user only for that.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `confidence` | number ≥ 0 | yes | Overall confidence 0..1 |
+| `description` | string |  | One short sentence describing what you see (display only; not geometry) |
+| `dimensions` | array of object |  | Dimensions: ones written on the drawing (with value in mm) and ones that are still missing (no value, source=missing) |
+| `entities` | array of object | yes | Detected primitives in image pixels (x right, y DOWN) |
+| `image_id` | string | yes | Id of the attached image |
+| `image_size` | array of number > 0 | yes | [width,height] of the image in pixels |
+| `operations` | array of object |  | How profiles combine into solids, in order (optional; default: extrude every profile by the depth dimension) |
+| `placement` | object |  |  |
+| `profiles` | array of object | yes | Closed regions: an outer loop of entity ids plus inner loops (holes/cutouts) |
+| `relationships` | array of object |  | Detected relations |
+
+### `check_delete`
+
+Dry run of delete_objects: reports which features would be deleted, which selected faces/edges/vertices resolve to which owning feature, and which other features depend on the targets. Changes nothing.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `cascade` | boolean |  | true also deletes every feature that depends on the targets; without it the call fails when dependents exist |
+| `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
+| `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
+
+### `confirm_detected_dimension`
+
+Record the user's answer about a dimension: confirm the detected value, or give the corrected value in mm (then it is trusted). Use this for 'it is 80 mm wide', 'yes that 12 is right', 'make this dimension 40 mm'.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `dimension` | string | yes | Dimension id |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `value` | number > 0 |  | Value in mm; omit to confirm the detected value |
+
 ### `export_step`
 
 Export the current model to a STEP file at `path` (does not change the model).
@@ -352,6 +444,14 @@ Describe the current model: every feature (id, type, key parameters, status), bo
 
 _No arguments._
 
+### `get_sketch_proposal`
+
+Read an interpretation's current proposal and its validation report (missing / unconfirmed dimensions, ambiguities, errors).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+
 ### `measure_distance`
 
 Measure between two things. Each of `from`/`to` is a selector like face(feature=plate,side=+Z) / body(feature=plate) or a bare feature id (= its body). For two parallel faces the result is the perpendicular gap; otherwise the distance between centroids. Also returns the minimum gap between the bounding boxes.
@@ -360,3 +460,24 @@ Measure between two things. Each of `from`/`to` is a selector like face(feature=
 |---|---|---|---|
 | `from` | string | yes | Selector or feature id |
 | `to` | string | yes | Selector or feature id |
+
+### `set_sketch_scale`
+
+Set the real scale of the drawing explicitly, either as mm_per_px, or as a length measured in the image (`pixels`) that equals `mm`. Prefer confirm_detected_dimension when a dimension exists. clear=true removes an explicit scale.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `clear` | boolean |  | Remove the explicit scale |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `mm` | number > 0 |  | The real length of that distance (mm) |
+| `mm_per_px` | number > 0 |  | Millimetres per image pixel |
+| `pixels` | number > 0 |  | A length measured in the image (px) |
+
+### `update_sketch_proposal`
+
+Correct the proposal (not the model). Each edit: op + id + value. Ops: set_entity, remove_entity, set_profile, remove_profile, set_dimension, remove_dimension, set_operation, remove_operation, set_relationship (id = index or new), remove_relationship (id = index), set_placement. set_* merges `value` onto the item (a null field removes it) or creates it. Examples: 'that circle is a hole' = set_profile outer profile holes + remove_profile for the circle's own profile; 'left edge vertical' = set_relationship new {kind:vertical,entities:[...],confidence:1}.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `edits` | array of object | yes | Corrections applied in order, all or nothing |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |

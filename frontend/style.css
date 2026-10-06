@@ -141,3 +141,49 @@ section.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .ctxmenu li.danger { color: var(--bad); }
 .ctxmenu li[aria-disabled=true] { opacity: .5; cursor: default; }
 .ctxmenu kbd { color: var(--muted, inherit); }
+
+/* ---- Image-to-CAD ---------------------------------------------------------------------- */
+.composer .row.tools { gap: 6px; flex-wrap: wrap; }
+.composer .row.tools button { font-size: 12px; padding: 2px 8px; }
+.chip.attach { border-color: var(--line); color: inherit; padding-left: 2px; }
+.chip.attach img { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; background: #fff; }
+.thumbs { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.thumb { max-width: 96px; max-height: 72px; border-radius: 4px; border: 1px solid var(--line); background: #fff; }
+.drop-hint { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; text-align: center;
+  background: rgba(0,0,0,.6); border: 3px dashed var(--accent); color: var(--text); font-size: 18px; pointer-events: none; }
+.drop-hint small { color: var(--muted); }
+
+.badge { display: inline-block; font-size: 11px; padding: 0 7px; border-radius: 10px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.badge.ok { color: var(--ok); border-color: var(--ok); } .badge.warn { color: var(--warn); border-color: var(--warn); } .badge.bad { color: var(--bad); border-color: var(--bad); }
+.interp-card .title { gap: 8px; flex-wrap: wrap; }
+
+.dialog.wide { width: min(1100px, calc(100vw - 24px)); max-height: 86vh; }
+#interp { padding-top: 5vh; }
+.interp-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.interp-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--gutter); overflow: auto; min-height: 0; }
+.interp-img { position: relative; line-height: 0; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); }
+.interp-img img { width: 100%; height: auto; display: block; }
+.interp-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.legend { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; margin-top: 6px; }
+.interp-right { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.interp-right h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.interp-svg .ov { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.interp-svg .ov.ok { stroke: #159a62; } .interp-svg .ov.warn { stroke: #d98a00; } .interp-svg .ov.bad { stroke: #d33; }
+.interp-svg .ov.hole { stroke-dasharray: 8 5; }
+.interp-svg .ov.unused { opacity: .55; }
+.interp-svg .ovd { fill: rgba(40,110,255,.08); stroke: #2b6cff; stroke-dasharray: 4 3; } .interp-svg .ovd.warn { stroke: #d98a00; }
+.interp-svg .ov-label { fill: #111; stroke: none; paint-order: stroke; font-family: system-ui, sans-serif; }
+.questions { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px; }
+.q { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+input.num { width: 7em; }
+table.dims { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.dims th { text-align: left; color: var(--muted); font-weight: 600; padding: 2px 4px; }
+table.dims td { padding: 2px 4px; border-top: 1px solid var(--line); }
+.ok-mark { color: var(--ok); }
+fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
+.warn-box { border: 1px solid var(--warn); border-radius: var(--radius); padding: 6px 8px; font-size: 12px; }
+.warn-box.bad { border-color: var(--bad); }
+.warn-box ul, .warns { margin: 4px 0; padding-left: 18px; }
+.warns { list-style: none; padding: 0; } .warns .warn { color: var(--warn); font-size: 12px; }
+.interp-right .actions { flex-wrap: wrap; margin-top: auto; }
+@media (max-width: 800px) { .interp-body { grid-template-columns: minmax(0, 1fr); } }

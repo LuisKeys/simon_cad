@@ -13,6 +13,7 @@ my_part.scadproj/
   agent-history.json   prompts, tool calls, ChangeSets, checkpoints
   events.jsonl         append-only event recorder, one JSON object per line
   thumbnails/          reserved (.gitkeep)
+  assets/images/       source images, only if explicitly retained (<id>.png|jpg|webp)
 ```
 
 An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/servo_bracket.scadproj).
@@ -23,7 +24,8 @@ An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/se
   `save → load → rebuild → save` is byte-identical (tested).
 - **Atomic writes:** each file is written to a temp file and renamed.
 - **Versioned:** `project.json.schema_version` is checked on load. Newer than the build supports
-  → refusal; older → `persistence.migrate` (a hook with no migrations yet, v1 is the first version).
+  → refusal; older → `persistence.migrate`. v2 (current) adds `assets/images/` and
+  `agent-history.json.interpretations`; both are optional, so v1 projects load as they are.
 - **Self-verifying:** `simoncad-cli replay` re-derives the model from the recorded ChangeSets and
   checks it equals `model.json`.
 
@@ -72,6 +74,12 @@ traceable here.
 `tool_calls[].status`: `rejected` = failed schema/semantic validation before any ChangeSet existed;
 `invalid` = a ChangeSet was proposed but failed validation (e.g. the rebuild would fail) and was
 discarded.
+
+`interpretations` (optional) holds the image proposals of the vision capability (entities in pixel
+space, dimensions with confidence, operations, revision). They explain image-derived features but are
+never needed to rebuild: nodes keep `provenance.source_image_id` / `interpretation_id` as plain
+references, and the geometry is fully described by `model.json`. Images are written to
+`assets/images/` only when the user retains them.
 
 Commands inside a ChangeSet are `{ "type": "AddFeature" | "RemoveFeature" | "SetParameter" |
 "SetExpression" | "Reorder" | "Suppress" | "Rename" | "RestoreSnapshot", "data": { … } }`;

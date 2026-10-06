@@ -63,27 +63,23 @@ try {
   assert.match(await page.locator('.chip').first().getAttribute('title'), /^face\(feature=plate,side=\+Z\)$/);
   assert.equal(await page.evaluate(() => window.simonViewport.selGroup.children.length), 1, 'selected face is highlighted');
 
-  // 3. Ask the agent; it sees the selection and proposes a ChangeSet (nothing applied yet).
+  // 3. Ask the agent; it sees the selection. At the Review level its step is applied as a
+  //    draft the user keeps or discards.
   await page.fill('#prompt', 'Add four M3 holes here');
   await page.keyboard.press('Enter');
-  const cs = page.locator('.cs').first();
-  await cs.waitFor();
-  assert.match(await cs.innerText(), /Four M3 clearance holes/);
-  assert.equal(await page.locator('.node').count(), 1, 'the model is untouched until commit');
-
-  // 4. Preview shows the ghost; the live model still has no holes.
-  await cs.getByRole('button', { name: 'Preview' }).click();
-  await page.waitForFunction(() => window.simonViewport.ghost.children.length === 1);
-  await page.screenshot({ path: join(shots, '2-preview.png') });
-
-  // 5. Commit, then undo with the keyboard.
-  await page.locator('#ghost-bar').getByRole('button', { name: 'Commit' }).click();
+  const draft = page.locator('.cs').filter({ hasText: /applied as a draft/ }).first();
+  await draft.waitFor();
   await page.waitForFunction(() => document.querySelectorAll('.node').length === 2);
-  assert.equal(await page.evaluate(() => window.simonViewport.ghost.children.length), 0, 'ghost cleared after commit');
   await page.waitForFunction(() => [...window.simonViewport.bodies.values()][0]?.data.faces.some((f) => f.surface === 'cylinder'));
+  await page.screenshot({ path: join(shots, '2-draft.png') });
+
+  // 4. Keep the draft: it becomes a semantic checkpoint.
+  await draft.getByRole('button', { name: 'Keep' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.cp').length >= 2);
   await page.screenshot({ path: join(shots, '3-committed.png') });
   assert.ok((await page.locator('.cp').count()) >= 2, 'semantic timeline has the checkpoints');
 
+  // 5. Undo with the keyboard.
   await page.locator('#viewport').click({ position: { x: 5, y: 5 } }); // focus away from inputs
   await page.keyboard.press('Control+z');
   await page.waitForFunction(() => document.querySelectorAll('.node').length === 1);
