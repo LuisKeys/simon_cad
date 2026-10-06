@@ -117,6 +117,15 @@
   </form>
 </div>
 
+<div id="confirm" class="overlay" hidden>
+  <form class="dialog small" id="confirm-form" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <div id="confirm-title"></div>
+    <div id="confirm-body" class="muted"></div>
+    <div class="row"><button type="submit" class="danger" id="confirm-ok">Delete</button><button type="button" id="confirm-cancel">Cancel</button></div>
+  </form>
+</div>
+
+<ul id="ctxmenu" class="ctxmenu" role="menu" hidden></ul>
 <div id="toast" class="toast" hidden></div>
 <script type="module" src="app.js"></script>
 </body>

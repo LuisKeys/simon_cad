@@ -18,6 +18,25 @@ Invoke directly with: `simoncad-cli tool <project> <tool> '<json>'`.
 
 ## Edit tools (produce a ChangeSet)
 
+### `check_delete`
+
+Dry run of `delete_objects`: which features would be deleted, which selected faces/edges/vertices resolve to which owning feature, and which other features depend on the targets. Changes nothing. Same arguments as `delete_objects` (without `intent`).
+
+### `delete_objects`
+
+Delete the selection (or the listed features) as **one** undoable ChangeSet of `RemoveFeature` commands, dependents first. Never auto-commits (destructive), at any level.
+
+- Faces, edges and vertices are never edited: the call is rejected naming the owning feature, so the user can choose to delete it (`resolve_owner=true`) or modify it instead.
+- If other features depend on the targets the call fails and lists them; `cascade=true` deletes them too and records a ChangeSet warning.
+- Deleting a feature that consumed others (e.g. a union) frees its inputs as standalone bodies; the ChangeSet warns about it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | string[] | no | Feature ids; omit to use the current selection |
+| `resolve_owner` | boolean | no | Delete the owners of selected faces/edges/vertices |
+| `cascade` | boolean | no | Also delete features that depend on the targets |
+| `intent` | string | no | Why |
+
 ### `add_hole`
 
 Drill one or more holes into a feature's face. `positions` are world coordinates [x,y] (or [x,y,z]); the coordinate along the face normal is ignored. Omit positions for one hole at the face center. The face defaults to the top (+Z) of `target`; pass `face` as a selector such as face(feature=plate,side=-X) to drill elsewhere. Omit depth for a through hole. Use kind=counterbore (cb_diameter, cb_depth) or countersink (cs_diameter, optional cs_angle_deg).

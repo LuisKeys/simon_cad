@@ -53,6 +53,8 @@ type Plan struct {
 	Commands    []commands.Command
 	Intent      string
 	Explanation string
+	// Warnings are recorded on the ChangeSet (and stop it from auto-committing).
+	Warnings []string
 }
 
 // Tool is one registered capability-tagged operation.

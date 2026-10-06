@@ -612,6 +612,66 @@ func (s *Service) finishTool(name string, o app.Outcome) Outcome {
 	return out
 }
 
+// DeleteRequest is a UI delete (Delete/Backspace, context menu). Features empty = the
+// current selection. ResolveOwner and Cascade are the user's answers to the two questions
+// Delete may come back with.
+type DeleteRequest struct {
+	Features     []string `json:"features,omitempty"`
+	ResolveOwner bool     `json:"resolve_owner,omitempty"`
+	Cascade      bool     `json:"cascade,omitempty"`
+}
+
+// DeleteResult is an Outcome, or a question for the user. NeedsConfirm is "owner" (faces,
+// edges or vertices were selected: topology cannot be deleted, offer the owning feature) or
+// "dependents" (other features depend on the targets); nothing has changed in either case.
+type DeleteResult struct {
+	Outcome
+	NeedsConfirm string                `json:"needs_confirm,omitempty"`
+	Analysis     *tools.DeleteAnalysis `json:"analysis,omitempty"`
+}
+
+// Delete removes the selected objects as one ChangeSet through delete_objects. It first asks
+// check_delete what would happen, so the user is warned before anything is committed.
+func (s *Service) Delete(req DeleteRequest) (DeleteResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return DeleteResult{}, err
+	}
+	s.app.SetActor(app.Actor{CreatedBy: "user"})
+	args := map[string]any{}
+	if len(req.Features) > 0 {
+		args["features"] = req.Features
+	}
+	if req.ResolveOwner {
+		args["resolve_owner"] = true
+	}
+	raw, _ := json.Marshal(args)
+	chk := s.app.ApplyTool("check_delete", raw, app.PolicyPreview)
+	if !chk.OK {
+		return DeleteResult{Outcome: Outcome{Error: chk.Error}}, nil
+	}
+	an, _ := chk.Data.(*tools.DeleteAnalysis)
+	if an == nil {
+		return DeleteResult{}, fmt.Errorf("check_delete returned no analysis")
+	}
+	switch {
+	case len(an.SubEntities) > 0 && !req.ResolveOwner:
+		return DeleteResult{NeedsConfirm: "owner", Analysis: an}, nil
+	case len(an.Dependents) > 0 && !req.Cascade:
+		return DeleteResult{NeedsConfirm: "dependents", Analysis: an}, nil
+	}
+	if req.Cascade {
+		args["cascade"] = true
+	}
+	ids := append(append([]string(nil), an.Targets...), an.Dependents...)
+	args["intent"] = "Delete " + strings.Join(ids, ", ")
+	raw, _ = json.Marshal(args)
+	// A deliberate delete is committed at once (it stays undoable); the ChangeSet keeps the
+	// dependency warnings for the record.
+	return DeleteResult{Outcome: s.finishTool("delete_objects", s.app.ApplyTool("delete_objects", raw, app.PolicyCommit)), Analysis: an}, nil
+}
+
 // SetParameter is an inline design-tree edit: modify_parameter, as a user ChangeSet. Single
 // parameter edits are low-risk, so they commit immediately regardless of the level.
 func (s *Service) SetParameter(feature, parameter string, value any) (Outcome, error) {

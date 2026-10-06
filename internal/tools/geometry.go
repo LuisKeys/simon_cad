@@ -17,6 +17,9 @@ func Default() *Registry {
 	for _, t := range editTools() {
 		r.Register(t)
 	}
+	for _, t := range deleteTools() {
+		r.Register(t)
+	}
 	for _, t := range appearanceTools() {
 		r.Register(t)
 	}

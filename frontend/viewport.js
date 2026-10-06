@@ -341,7 +341,19 @@ export class Viewport {
   _bindPointer() {
     let down = null;
     const c = this.canvas;
-    c.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+    let rdown = null;
+    c.addEventListener('pointerdown', (e) => {
+      down = { x: e.clientX, y: e.clientY, t: performance.now() };
+      if (e.button === 2) rdown = { x: e.clientX, y: e.clientY };
+    });
+    // Right-click without a drag opens the context menu; a right-drag is a pan.
+    c.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const moved = rdown ? Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y) : 0;
+      rdown = null;
+      if (moved > 4 || this.measure.on) return;
+      this.hooks.onContext?.(this.pick(e), { x: e.clientX, y: e.clientY });
+    });
     c.addEventListener('pointerup', (e) => {
       if (!down) return;
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
@@ -464,19 +476,21 @@ export class Viewport {
     const scene = new THREE.Scene();
     const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
     cam.up.set(0, 0, 1);
-    const face = (txt) => {
+    const face = (txt, rot) => {
       const cv = document.createElement('canvas'); cv.width = cv.height = 128;
       const g = cv.getContext('2d');
       g.fillStyle = '#1f1f1f'; g.fillRect(0, 0, 128, 128);
       g.strokeStyle = '#ff7a00'; g.lineWidth = 6; g.strokeRect(3, 3, 122, 122);
       g.fillStyle = '#e4e8ee'; g.font = 'bold 26px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(txt, 64, 66);
+      g.translate(64, 64); g.rotate(rot); g.fillText(txt, 0, 2);
       const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
       return new THREE.MeshBasicMaterial({ map: t });
     };
     // BoxGeometry material order: +X, -X, +Y, -Y, +Z, -Z
     const names = ['RIGHT', 'LEFT', 'BACK', 'FRONT', 'TOP', 'BOTTOM'];
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 1.6), names.map(face));
+    // BoxGeometry UVs assume Y-up; rotate each label so its up is world +Z (TOP/BOTTOM: +Y)
+    const rots = [-Math.PI / 2, Math.PI / 2, Math.PI, 0, 0, Math.PI];
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 1.6), names.map((n, i) => face(n, rots[i])));
     mesh.userData.dirs = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
     scene.add(mesh);
     Object.assign(this.cube, { r, scene, cam, mesh });

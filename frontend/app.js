@@ -18,6 +18,16 @@ const vp = new Viewport($('gl'), $('cube'), {
       applySelection(sel);
     } catch (e) { toast(e.message, 'bad'); }
   },
+  onContext: async (p, at) => {
+    try {
+      // Right-clicking an object that is not part of the selection selects it first.
+      if (p && !(S.selection?.selectors ?? []).some((x) => featureOf(x) === p.body)) {
+        applySelection(await api('pick', { body: p.body, kind: p.kind, index: p.index ?? -1, triangle: p.triangle ?? -1, mode: 'replace' }));
+      } else if (!p) applySelection(await api('select', { selectors: [] }));
+    } catch (e) { toast(e.message, 'bad'); return; }
+    const n = S.selection?.selectors?.length ?? 0;
+    showMenu(at, [{ label: n > 1 ? `Delete ${n} selected` : 'Delete', key: 'Del', danger: true, disabled: n === 0, run: () => deleteObjects() }]);
+  },
   onHover: (p) => {
     $('hud').textContent = p ? `${p.kind} ${p.kind === 'body' ? p.body : '#' + p.index} on ${p.body}` : hudStats();
   },
@@ -114,6 +124,10 @@ function renderTree(st) {
   el.replaceChildren(...st.tree.map((n) => {
     const open = S.openNode === n.id;
     const row = h('div', { class: 'row', role: 'treeitem', 'aria-expanded': String(open), tabindex: '0',
+      oncontextmenu: (e) => {
+        e.preventDefault();
+        showMenu({ x: e.clientX, y: e.clientY }, [{ label: `Delete ${n.name}`, key: 'Del', danger: true, run: () => deleteObjects({ features: [n.id] }) }]);
+      },
       onclick: () => { S.openNode = open ? null : n.id; renderTree(S.state); },
       onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } } },
       h('span', { class: `dot ${n.status === 'ok' && !n.suppressed ? '' : n.suppressed ? 'suppressed' : n.status}`, title: n.suppressed ? 'suppressed' : n.status }),
@@ -152,6 +166,73 @@ function paramEditor(n) {
     rows.push(h('label', { for: id }, k), input);
   }
   return h('div', { class: 'params' }, ...rows);
+}
+
+// ---- delete ------------------------------------------------------------------------------
+// Delete is a ChangeSet like any other (delete_objects → RemoveFeature commands, one set for
+// the whole selection, undoable). The server first reports what would happen; the UI only
+// asks the two questions it may come back with. B-Rep faces/edges/vertices are never edited:
+// they resolve to their owning feature, which is offered instead.
+
+function confirmBox({ title, body, ok = 'Delete' }) {
+  return new Promise((resolve) => {
+    const d = $('confirm');
+    $('confirm-title').textContent = title;
+    $('confirm-body').textContent = body;
+    $('confirm-ok').textContent = ok;
+    d.hidden = false;
+    $('confirm-cancel').focus();
+    const close = (v) => { d.hidden = true; $('confirm-form').onsubmit = null; $('confirm-cancel').onclick = null; resolve(v); };
+    $('confirm-form').onsubmit = (e) => { e.preventDefault(); close(true); };
+    $('confirm-cancel').onclick = () => close(false);
+  });
+}
+
+async function deleteObjects(req = {}) {
+  if (S.state?.busy) return;
+  try {
+    for (let round = 0; round < 3; round++) {
+      const r = await api('delete', req);
+      if (r.needs_confirm === 'owner') {
+        const owners = [...new Set(r.analysis.sub_entities.map((s) => s.owner))];
+        const what = [...new Set(r.analysis.sub_entities.map((s) => s.kind))].join('/');
+        const yes = await confirmBox({ title: `A ${what} cannot be deleted directly`,
+          body: `Faces, edges and vertices are derived from features. ${owners.length > 1 ? 'They belong' : 'It belongs'} to ${owners.join(', ')}. Delete ${owners.length > 1 ? 'those features' : 'that feature'} instead? (To change the shape, edit its parameters in the design tree.)`,
+          ok: `Delete ${owners.join(', ')}` });
+        if (!yes) return;
+        req = { ...req, resolve_owner: true };
+        continue;
+      }
+      if (r.needs_confirm === 'dependents') {
+        const yes = await confirmBox({ title: 'Other features depend on this',
+          body: `${r.analysis.dependents.join(', ')} depend${r.analysis.dependents.length > 1 ? '' : 's'} on ${r.analysis.targets.join(', ')}. Delete ${r.analysis.dependents.length > 1 ? 'them' : 'it'} too, in the same undoable change?`,
+          ok: 'Delete all' });
+        if (!yes) return;
+        req = { ...req, cascade: true };
+        continue;
+      }
+      if (!r.ok) toast(r.error, 'bad');
+      else toast(`Deleted ${r.changeset.removed.join(', ')} · Ctrl+Z to undo`, 'ok');
+      break;
+    }
+  } catch (e) { toast(e.message, 'bad'); }
+  scheduleRefresh();
+}
+
+// A small context menu shared by the viewport and the design tree.
+function showMenu(at, items) {
+  const m = $('ctxmenu');
+  const close = () => { m.hidden = true; document.removeEventListener('pointerdown', away, true); };
+  const away = (e) => { if (!m.contains(e.target)) close(); };
+  m.replaceChildren(...items.map((it) => h('li', { role: 'menuitem', tabindex: '-1', class: it.danger ? 'danger' : '', 'aria-disabled': String(!!it.disabled),
+    onclick: () => { if (it.disabled) return; close(); it.run(); },
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.target.click(); } else if (e.key === 'Escape') close(); } },
+    h('span', {}, it.label), it.key ? h('kbd', {}, it.key) : null)));
+  m.hidden = false;
+  m.style.left = Math.min(at.x, innerWidth - m.offsetWidth - 8) + 'px';
+  m.style.top = Math.min(at.y, innerHeight - m.offsetHeight - 8) + 'px';
+  document.addEventListener('pointerdown', away, true);
+  m.firstElementChild?.focus();
 }
 
 // ---- appearance (color / opacity / visibility) -----------------------------------------
@@ -570,9 +651,15 @@ $('palette').addEventListener('mousedown', (e) => { if (e.target === $('palette'
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
-  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('palette').hidden ? openPalette() : closePalette(); }
+  const overlay = !$('palette').hidden || !$('dialog').hidden || !$('confirm').hidden;
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !mod && !overlay && !S.playing && S.selection?.selectors?.length) {
+    e.preventDefault(); // Backspace must not navigate back
+    deleteObjects();
+  } else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('palette').hidden ? openPalette() : closePalette(); }
   else if (e.key === 'Escape') {
-    if (!$('palette').hidden) closePalette();
+    if (!$('ctxmenu').hidden) $('ctxmenu').hidden = true;
+    else if (!$('confirm').hidden) $('confirm-cancel').click();
+    else if (!$('palette').hidden) closePalette();
     else if (!$('dialog').hidden) $('dialog-cancel').click();
     else if (vp.measure.on) $('btn-measure').click();
     else if (S.selection?.selectors?.length) api('select', { selectors: [] }).then(applySelection).catch(() => {});

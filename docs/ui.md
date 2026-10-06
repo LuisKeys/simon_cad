@@ -128,3 +128,12 @@ visibility. When several bodies are selected in the viewport, the Selection pane
 for all of them (differing values read "mixed"). Every edit calls `set_color` / `set_opacity` /
 `set_visibility` / `reset_appearance` through the tool registry, and the viewport updates from
 `scene.appearance` without re-tessellating. Hidden bodies are not pickable and are excluded from Fit.
+
+## Delete
+
+`Delete` / `Backspace` (outside text fields) or the **Delete** context-menu item (right-click an object in the
+viewport, or a row of the design tree) deletes the selection through `POST /api/delete` → `check_delete` →
+`delete_objects`, committed as one ChangeSet that `Ctrl+Z` undoes. The UI only asks two questions, both before
+anything changes: *a face/edge/vertex cannot be deleted — delete its owning feature instead?* and *these features
+depend on it — delete them too?*. The agent does the same for "delete this" / "remove the selected part" /
+"delete these objects"; at the Review level its delete is a draft you can discard.

@@ -177,6 +177,15 @@ func (s *Server) routes() {
 		o, err := s.Svc.CallTool(in.Name, in.Args)
 		reply(w, o, err)
 	})
+	m.HandleFunc("/api/delete", func(w http.ResponseWriter, r *http.Request) {
+		var in DeleteRequest
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		o, err := s.Svc.Delete(in)
+		reply(w, o, err)
+	})
 	m.HandleFunc("/api/param", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Feature, Parameter string

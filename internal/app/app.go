@@ -433,6 +433,7 @@ func (a *App) ApplyTool(name string, args []byte, policy Policy) Outcome {
 		return out
 	}
 	cs.Provenance.ToolCallID = a.callID
+	cs.Warnings = append(cs.Warnings, res.Plan.Warnings...)
 	out.ChangeSet, out.Message = cs, cs.Explanation
 	if !cs.Valid() {
 		for _, v := range cs.Validation {

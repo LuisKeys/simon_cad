@@ -288,3 +288,107 @@ func TestAppearanceNeedsNoApprovalInReview(t *testing.T) {
 		t.Fatalf("pending=%d draft=%d checkpoints %d->%d", len(st.Pending), len(st.Draft), before, len(s.app.Hist.Checkpoints))
 	}
 }
+
+func TestDeleteSelectionThroughService(t *testing.T) {
+	s := newSvc(t)
+	for i, call := range []struct{ tool, args string }{
+		{"create_box", `{"id":"b","dx":20,"dy":20,"dz":5}`},
+		{"create_box", `{"id":"c","dx":5,"dy":5,"dz":5}`},
+		{"add_hole", `{"target":"b","diameter":3}`},
+	} {
+		o, _ := s.CallTool(call.tool, json.RawMessage(call.args))
+		if !o.OK {
+			t.Fatalf("step %d: %s", i, o.Error)
+		}
+		if !o.Committed {
+			if _, err := s.Commit(o.ChangeSet.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// Faces/edges are never deleted: the service asks whether to delete the owning feature.
+	s.Pick(PickRequest{Body: "hole", Kind: "face", Index: 0, Triangle: -1})
+	r, err := s.Delete(DeleteRequest{})
+	if err != nil || r.NeedsConfirm != "owner" || r.Analysis.SubEntities[0].Owner != "hole" {
+		t.Fatalf("want owner question, got %+v err=%v", r, err)
+	}
+	if st, _ := s.State(); len(st.Tree) != 3 {
+		t.Fatal("a question must not change the model")
+	}
+
+	// A feature other features depend on warns first.
+	r, err = s.Delete(DeleteRequest{Features: []string{"b"}})
+	if err != nil || r.NeedsConfirm != "dependents" || len(r.Analysis.Dependents) != 1 {
+		t.Fatalf("want dependents question, got %+v err=%v", r, err)
+	}
+	// Confirming deletes target + dependents in ONE ChangeSet, committed and undoable.
+	r, err = s.Delete(DeleteRequest{Features: []string{"b"}, Cascade: true})
+	if err != nil || !r.OK || !r.Committed || len(r.ChangeSet.Removed) != 2 {
+		t.Fatalf("cascade delete: %+v err=%v", r, err)
+	}
+	st, _ := s.State()
+	if len(st.Tree) != 1 || st.Tree[0].ID != "c" || !st.CanUndo {
+		t.Fatalf("tree after delete: %+v", st.Tree)
+	}
+	if _, err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 3 {
+		t.Fatalf("undo: %d nodes", len(st.Tree))
+	}
+	if _, err := s.Redo(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A selected body deletes straight away and the selection is cleared.
+	s.Pick(PickRequest{Body: "c", Kind: "body", Index: -1, Triangle: -1})
+	r, err = s.Delete(DeleteRequest{})
+	if err != nil || !r.OK || !r.Committed {
+		t.Fatalf("selection delete: %+v err=%v", r, err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 0 || len(st.Selection.Selectors) != 0 {
+		t.Fatalf("after delete: tree=%d sel=%v", len(st.Tree), st.Selection.Selectors)
+	}
+}
+
+// "delete these objects" from the agent: delete_objects over the selection, one ChangeSet,
+// and discarding the draft undoes it.
+func TestAgentDeletesSelectedObjects(t *testing.T) {
+	s := newSvc(t)
+	s.SetLevel(LevelAuto)
+	s.CallTool("create_box", json.RawMessage(`{"id":"a","dx":10,"dy":10,"dz":5}`))
+	s.CallTool("create_box", json.RawMessage(`{"id":"b","dx":10,"dy":10,"dz":5}`))
+	s.Pick(PickRequest{Body: "a", Kind: "body", Index: -1, Triangle: -1})
+	s.Pick(PickRequest{Body: "b", Kind: "body", Index: -1, Triangle: -1, Mode: "add"})
+
+	// At the Auto level a delete is never low-risk: it waits for approval.
+	s.NewProvider = scripted(t, `delete_objects {"intent":"Remove the selected parts"}`)
+	if err := s.Prompt("delete these objects", false); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	if st, _ := s.State(); len(st.Tree) != 2 || len(st.Pending) != 1 {
+		t.Fatalf("auto level must leave the delete pending: tree=%d pending=%d", len(st.Tree), len(st.Pending))
+	}
+	if err := s.Reject(s.app.Pending()[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	s.SetLevel(LevelReview)
+	s.NewProvider = scripted(t, `delete_objects {"intent":"Remove the selected parts"}`)
+	if err := s.Prompt("delete these objects", false); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	st, _ := s.State()
+	if len(st.Tree) != 0 || len(st.Draft) != 1 {
+		t.Fatalf("agent delete should apply one draft ChangeSet: tree=%d draft=%v pending=%d", len(st.Tree), st.Draft, len(st.Pending))
+	}
+	if err := s.DiscardDraft(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 2 {
+		t.Fatalf("discard must restore both objects, tree=%d", len(st.Tree))
+	}
+}
