@@ -82,11 +82,12 @@
 
   <aside id="right">
     <section class="grow">
-      <h2>Conversation</h2>
+      <h2>Conversation <button id="btn-clear" type="button" class="linkbtn" title="Clear the conversation">Clear</button></h2>
       <div id="chat" class="chat" aria-live="polite"></div>
     </section>
     <form id="composer" class="composer" autocomplete="off">
       <div id="chips" class="chips"></div>
+      <label class="think" title="Off = instant answers, no extended thinking"><input type="checkbox" id="thinking" checked> Thinking mode</label>
       <div class="row">
         <textarea id="prompt" rows="8" placeholder="Describe what you want…  (Enter to send, Shift+Enter for a new line)"></textarea>
         <button id="send" type="submit" class="primary">Send</button>

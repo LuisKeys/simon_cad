@@ -95,6 +95,7 @@ subscribe((n) => {
 function render(st) {
   $('project').replaceChildren(...[h('span', {}, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, ' ●') : null].filter(Boolean));
   $('btn-undo').disabled = !st.can_undo || st.busy;
+  $('btn-clear').disabled = st.busy || st.chat.length === 0;
   $('btn-redo').disabled = !st.can_redo || st.busy;
   $('level').value = st.level;
   $('btn-play').disabled = st.frames === 0 || S.playing;
@@ -190,6 +191,7 @@ function renderChat(st) {
   const nodes = st.chat.map((m) => {
     chatSeen.add(m.seq);
     const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
+    if (m.role === 'draft') return draftCard(m, st);
     if (m.role === 'tool') return h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`);
     return h('div', { class: cls }, m.text);
   });
@@ -197,6 +199,16 @@ function renderChat(st) {
   if (st.busy) nodes.push(h('div', { class: 'msg system' }, 'The agent is working…'));
   el.replaceChildren(...nodes);
   if (stick) el.scrollTop = el.scrollHeight;
+}
+
+function draftCard(m, st) {
+  const open = (st.draft || []).length > 0 && m.seq === Math.max(...st.chat.filter((x) => x.role === 'draft').map((x) => x.seq));
+  const act = (path) => async () => { try { await api(path, {}); } catch (err) { toast(err.message, 'bad'); } };
+  return h('div', { class: 'cs' },
+    h('div', { class: 'title' }, h('span', {}, m.text)),
+    open ? h('div', { class: 'actions' },
+      h('button', { class: 'primary', disabled: st.busy, onclick: act('draft/keep') }, 'Keep'),
+      h('button', { disabled: st.busy, onclick: act('draft/discard') }, 'Discard')) : null);
 }
 
 function changeSetCard(cs) {
@@ -294,7 +306,12 @@ $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = $('prompt').value.trim();
   if (!text) return;
-  try { await api('prompt', { text }); $('prompt').value = ''; } catch (err) { toast(err.message, 'bad'); }
+  try { await api('prompt', { text, thinking: $('thinking').checked }); $('prompt').value = ''; } catch (err) { toast(err.message, 'bad'); }
+});
+try { $('thinking').checked = localStorage.getItem('thinking') !== 'off'; } catch {}
+$('thinking').addEventListener('change', () => { try { localStorage.setItem('thinking', $('thinking').checked ? 'on' : 'off'); } catch {} });
+$('btn-clear').addEventListener('click', async () => {
+  try { await api('chat/clear', {}); chatSeen.clear(); } catch (err) { toast(err.message, 'bad'); }
 });
 $('prompt').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }

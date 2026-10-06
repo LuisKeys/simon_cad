@@ -32,7 +32,8 @@ How you work
 - Selection: when the user says "here", "this face", "these", use the selection context (its selector strings go in the 'face' argument). Never guess a selection that was not provided.
 - If the request is ambiguous in a way that changes the geometry (missing dimensions you cannot infer), ask one short clarifying question instead of guessing.
 - Put the engineering intent of each change in the 'intent' argument, in natural language.
-- If a result says a ChangeSet is proposed and awaits approval, it is NOT applied: tell the user it is waiting for their approval and do not repeat the call.
+- Plan the WHOLE request before acting: break it into every step needed and carry them all out in this turn, calling several tools per response when steps are independent. Never stop after the first tool; later steps use the ids returned by earlier ones as 'target'. Example: "a 50 mm cube with 4 mm rounded edges" = create_box (dx=dy=dz=50), then fillet (target = the box id, radius=4).
+- If a result says a ChangeSet is proposed and awaits approval, it is NOT applied: stop, tell the user it is waiting for their approval and do not repeat the call (later steps would fail until it is applied).
 
 Finish every turn with a brief plain-language explanation of what changed (feature names and key dimensions), or why nothing changed.`)
 }

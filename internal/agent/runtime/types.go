@@ -18,6 +18,10 @@ type Block struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+	// Extended-thinking blocks (Claude); they must be replayed unchanged within a tool loop.
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"` // redacted_thinking payload
 }
 
 type Message struct {
@@ -37,6 +41,8 @@ type Request struct {
 	Messages  []Message
 	Tools     []ToolDef
 	MaxTokens int
+	// NoThinking asks for an instant answer; the zero value keeps thinking on.
+	NoThinking bool
 }
 
 type Usage struct {

@@ -55,6 +55,9 @@ type Service struct {
 	hub  *Hub
 
 	busy bool
+	// draft holds the ChangeSets an agent turn committed at the Review level; the user keeps
+	// or discards them as one batch.
+	draft []string
 }
 
 // ChatMessage is one entry of the conversation panel.
@@ -82,7 +85,7 @@ func (s *Service) attach(a *app.App, path string) {
 	if s.app != nil {
 		s.app.Close()
 	}
-	s.app, s.path, s.dirty, s.sel, s.chat = a, path, false, nil, nil
+	s.app, s.path, s.dirty, s.sel, s.chat, s.draft = a, path, false, nil, nil, nil
 	a.SetActor(app.Actor{CreatedBy: "user"})
 	a.Bus.Subscribe(func(ev events.Event) { s.hub.Publish(Notice{Kind: "event", Type: ev.Type, Seq: ev.Seq}) })
 	for _, p := range a.AH.Prompts { // reopen: rebuild the conversation from the project record
@@ -364,9 +367,83 @@ func (u unlocking) Complete(ctx context.Context, r runtime.Request) (*runtime.Re
 	return u.Provider.Complete(ctx, r)
 }
 
+// keepDraft accepts the open draft batch and records its checkpoint. Caller holds mu.
+func (s *Service) keepDraft() {
+	if len(s.draft) == 0 {
+		return
+	}
+	s.draft = nil
+	s.app.Checkpoint(s.lastIntent(), false)
+}
+
+func (s *Service) lastIntent() string {
+	if p := s.app.AH.Prompts; len(p) > 0 {
+		return p[len(p)-1].Text
+	}
+	return "Agent changes"
+}
+
+// KeepDraft accepts the agent's draft batch.
+func (s *Service) KeepDraft() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if len(s.draft) == 0 {
+		return fmt.Errorf("no draft to keep")
+	}
+	s.keepDraft()
+	s.say("system", "Draft kept.", "", true, "")
+	s.hub.Publish(Notice{Kind: "state"})
+	return nil
+}
+
+// DiscardDraft undoes the agent's draft batch, newest step first.
+func (s *Service) DiscardDraft() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if len(s.draft) == 0 {
+		return fmt.Errorf("no draft to discard")
+	}
+	for i := len(s.draft) - 1; i >= 0; i-- {
+		cs, err := s.app.Undo()
+		if err != nil {
+			s.draft = nil
+			s.changed()
+			return err
+		}
+		if cs.ID != s.draft[i] {
+			s.draft = nil
+			s.changed()
+			return fmt.Errorf("the model changed after the draft; use Undo instead")
+		}
+	}
+	s.draft = nil
+	s.say("system", "Draft discarded.", "", true, "")
+	s.changed()
+	return nil
+}
+
+// ClearChat empties the conversation (and so the history replayed to the model). The
+// model itself is untouched.
+func (s *Service) ClearChat() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
+	}
+	s.chat = nil
+	s.hub.Publish(Notice{Kind: "state"})
+	return nil
+}
+
 // Prompt starts one agent turn on a goroutine. Progress arrives on the Hub as chat
 // messages; the turn ends with a "agent_done" notice.
-func (s *Service) Prompt(text string) error {
+func (s *Service) Prompt(text string, thinking bool) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return fmt.Errorf("empty prompt")
@@ -381,6 +458,7 @@ func (s *Service) Prompt(text string) error {
 		s.mu.Unlock()
 		return err
 	}
+	s.keepDraft() // a new request implicitly accepts the previous batch
 	s.busy = true
 	prior := s.history()
 	s.say("user", text, "", true, "")
@@ -398,7 +476,7 @@ func (s *Service) Prompt(text string) error {
 		// The lock is held for the turn, except while waiting on the model (see unlocking).
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New()}, History: prior}
+		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New()}, History: prior, NoThinking: !thinking}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
 			if o.ChangeSet != nil {
@@ -409,9 +487,14 @@ func (s *Service) Prompt(text string) error {
 				msg = o.Error
 			}
 			s.say("tool", msg, name, o.OK, cs)
+			if o.Committed && level == LevelReview {
+				s.draft = append(s.draft, cs)
+			}
 			s.hub.Publish(Notice{Kind: "state"})
 		}
-		pol := app.PolicyPreview
+		// Review applies each step as a draft so later steps can build on earlier ones; the
+		// user then keeps or discards the whole batch.
+		pol := app.PolicyCommit
 		if level == LevelAuto {
 			pol = app.PolicyAuto
 		}
@@ -422,7 +505,9 @@ func (s *Service) Prompt(text string) error {
 		case res.Final != "":
 			s.say("agent", res.Final, "", true, "")
 		}
-		if cp := s.app.Checkpoint(text, false); cp != nil {
+		if len(s.draft) > 0 {
+			s.say("draft", fmt.Sprintf("%d step(s) applied as a draft — keep or discard them.", len(s.draft)), "", true, "")
+		} else if cp := s.app.Checkpoint(text, false); cp != nil {
 			s.hub.Publish(Notice{Kind: "state"})
 		}
 		s.app.SetActor(app.Actor{CreatedBy: "user"})
@@ -563,6 +648,7 @@ func (s *Service) Undo() (ChangeSetCard, error) {
 	if err := s.guard(); err != nil {
 		return ChangeSetCard{}, err
 	}
+	s.keepDraft()
 	cs, err := s.app.Undo()
 	if err != nil {
 		return ChangeSetCard{}, err
@@ -831,6 +917,7 @@ type State struct {
 	Volume      float64          `json:"volume_mm3"`
 	Failed      []string         `json:"failed"`
 	Frames      int              `json:"frames"`
+	Draft       []string         `json:"draft"`
 	Provider    string           `json:"provider"`
 }
 
@@ -850,7 +937,7 @@ func (s *Service) State() (*State, error) {
 	st := &State{Name: s.app.Meta.Name, Path: s.path, Dirty: s.dirty, Units: g.Units, Level: s.level, Busy: s.busy,
 		Tree: []TreeNode{}, Pending: []ChangeSetCard{}, Recent: []ChangeSetCard{}, Checkpoints: s.checkpoints(),
 		Chat: append([]ChatMessage{}, s.chat...), Selection: s.selectionView(), CanUndo: s.app.CanUndo(),
-		CanRedo: s.app.CanRedo(), Volume: m.Volume(), Failed: nz(m.Failed()), Frames: len(s.app.Committed())}
+		Draft: append([]string{}, s.draft...), CanRedo: s.app.CanRedo(), Volume: m.Volume(), Failed: nz(m.Failed()), Frames: len(s.app.Committed())}
 	if p, err := runtime.ProviderNameFromEnv(); err == nil {
 		st.Provider = p
 	}

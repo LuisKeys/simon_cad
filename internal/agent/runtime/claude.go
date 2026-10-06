@@ -49,12 +49,21 @@ type apiTool struct {
 }
 
 type apiRequest struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	System    string    `json:"system,omitempty"`
-	Messages  []Message `json:"messages"`
-	Tools     []apiTool `json:"tools,omitempty"`
+	Model     string       `json:"model"`
+	MaxTokens int          `json:"max_tokens"`
+	System    string       `json:"system,omitempty"`
+	Messages  []Message    `json:"messages"`
+	Tools     []apiTool    `json:"tools,omitempty"`
+	Thinking  *apiThinking `json:"thinking,omitempty"`
 }
+
+type apiThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
+}
+
+// thinkingBudget is the extended-thinking token budget used when thinking is on.
+const thinkingBudget = 4096
 
 type apiError struct {
 	Error struct {
@@ -73,6 +82,12 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 		max = 4096
 	}
 	body := apiRequest{Model: model, MaxTokens: max, System: req.System, Messages: req.Messages}
+	if !req.NoThinking {
+		body.Thinking = &apiThinking{Type: "enabled", BudgetTokens: thinkingBudget}
+		if body.MaxTokens <= thinkingBudget {
+			body.MaxTokens = thinkingBudget + max
+		}
+	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, apiTool(t))
 	}

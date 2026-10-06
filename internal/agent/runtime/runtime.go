@@ -25,6 +25,8 @@ type Runtime struct {
 	Provider Provider
 	Caps     []Capability
 	MaxSteps int
+	// NoThinking disables model thinking/reasoning (instant answers). Default: thinking on.
+	NoThinking bool
 	// History is the prior conversation (plain user/assistant text, oldest first). It is
 	// prepended to the turn; the live model context is only attached to the newest request.
 	History []Message
@@ -71,7 +73,7 @@ func (rt *Runtime) toolset(a *app.App) (map[string]bool, []ToolDef) {
 // never mutates state.
 func (rt *Runtime) Run(ctx context.Context, a *app.App, intent string, policy app.Policy) (*Result, error) {
 	if rt.MaxSteps == 0 {
-		rt.MaxSteps = 12
+		rt.MaxSteps = 20
 	}
 	capNames := make([]string, len(rt.Caps))
 	for i, c := range rt.Caps {
@@ -96,7 +98,7 @@ func (rt *Runtime) Run(ctx context.Context, a *app.App, intent string, policy ap
 		Message{Role: "user", Content: []Block{{Type: "text", Text: sb.String()}}})
 
 	for step := 0; step < rt.MaxSteps; step++ {
-		resp, err := rt.Provider.Complete(ctx, Request{System: rt.systemPrompt(), Messages: msgs, Tools: defs})
+		resp, err := rt.Provider.Complete(ctx, Request{System: rt.systemPrompt(), Messages: msgs, Tools: defs, NoThinking: rt.NoThinking})
 		if err != nil {
 			return res, err
 		}

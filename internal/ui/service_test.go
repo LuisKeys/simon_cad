@@ -94,50 +94,32 @@ func TestM2SelectPromptPreviewCommitUndo(t *testing.T) {
 	}
 
 	s.NewProvider = scripted(t, `add_hole {"face":"face(feature=plate,side=+Z)","diameter":3.2,"positions":[[10,10],[90,10],[10,50],[90,50]],"intent":"Four M3 clearance holes"}`)
-	if err := s.Prompt("Add four M3 holes here"); err != nil {
+	if err := s.Prompt("Add four M3 holes here", true); err != nil {
 		t.Fatal(err)
 	}
 	waitIdle(t, s)
 	st, _ = s.State()
-	if len(st.Pending) != 1 || st.Pending[0].Intent != "Four M3 clearance holes" || len(st.Tree) != 1 {
-		t.Fatalf("agent should leave one proposed ChangeSet; pending=%+v tree=%d", st.Pending, len(st.Tree))
+	if len(st.Pending) != 0 || len(st.Draft) != 1 || len(st.Tree) != 2 {
+		t.Fatalf("review turn should apply one draft step; pending=%+v draft=%v tree=%d", st.Pending, st.Draft, len(st.Tree))
 	}
-	if st.Chat[len(st.Chat)-1].Text != "Done." {
+	if st.Chat[len(st.Chat)-1].Role != "draft" {
 		t.Fatalf("chat %+v", st.Chat)
 	}
-	csID := st.Pending[0].ID
-
-	// Preview: the ghost replaces the plate, the live model is untouched.
-	vol := st.Volume
-	g, err := s.Preview(csID)
-	if err != nil {
+	if err := s.KeepDraft(); err != nil {
 		t.Fatal(err)
 	}
-	if len(g.Added) != 1 || g.Added[0].ID != "hole" || len(g.Removed) != 1 || g.Removed[0] != "plate" {
-		t.Fatalf("ghost %+v", g)
-	}
-	if g.ChangeSet.VolumeAfter >= g.ChangeSet.VolumeBefore {
-		t.Fatalf("holes must remove material: %+v", g.ChangeSet)
-	}
-	if st2, _ := s.State(); st2.Volume != vol || len(st2.Tree) != 1 {
-		t.Fatal("preview changed the live model")
-	}
-
-	c, err := s.Commit(csID)
-	if err != nil || c.State != "committed" {
-		t.Fatalf("commit: %v %+v", err, c)
-	}
 	st, _ = s.State()
-	if len(st.Tree) != 2 || st.Volume >= vol || !st.CanUndo || len(st.Selection.Selectors) != 0 {
-		t.Fatalf("after commit: tree=%d vol=%v sel=%v", len(st.Tree), st.Volume, st.Selection.Selectors)
+	if len(st.Draft) != 0 || len(st.Selection.Selectors) != 0 {
+		t.Fatalf("after keep: draft=%v sel=%v", st.Draft, st.Selection.Selectors)
 	}
-	if last := st.Checkpoints[len(st.Checkpoints)-1]; last.Label != "Four M3 clearance holes" || !last.Current {
+	if last := st.Checkpoints[len(st.Checkpoints)-1]; last.Label != "Add four M3 holes here" || !last.Current {
 		t.Fatalf("semantic checkpoint %+v", last)
 	}
+	vol := st.Volume
 	if _, err := s.Undo(); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ = s.State(); len(st.Tree) != 1 || st.Volume != vol || !st.CanRedo {
+	if st, _ = s.State(); len(st.Tree) != 1 || st.Volume <= vol || !st.CanRedo {
 		t.Fatalf("undo: tree=%d vol=%v", len(st.Tree), st.Volume)
 	}
 	// Provenance: everything traces to validated tool calls.
@@ -154,7 +136,7 @@ func TestEditsRejectedWhileAgentWorks(t *testing.T) {
 	if _, err := s.CallTool("create_box", json.RawMessage(`{"dx":1,"dy":1,"dz":1}`)); err != ErrBusy {
 		t.Fatalf("got %v", err)
 	}
-	if err := s.Prompt("hello"); err != ErrBusy {
+	if err := s.Prompt("hello", true); err != ErrBusy {
 		t.Fatalf("got %v", err)
 	}
 	if _, err := s.State(); err != nil {
@@ -263,5 +245,26 @@ func TestPaletteListsEveryToolAndIntentVerb(t *testing.T) {
 		if !tools[n] {
 			t.Fatalf("tool %s missing from palette", n)
 		}
+	}
+}
+
+func TestReviewTurnRunsSeveralStepsAndDiscards(t *testing.T) {
+	s := newSvc(t)
+	s.NewProvider = scripted(t,
+		`create_box {"id":"cube","dx":50,"dy":50,"dz":50}`,
+		`fillet {"target":"cube","radius":4}`)
+	if err := s.Prompt("rounded cube", true); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	st, _ := s.State()
+	if len(st.Draft) != 2 || len(st.Tree) != 2 || len(st.Pending) != 0 {
+		t.Fatalf("draft=%v tree=%d pending=%d", st.Draft, len(st.Tree), len(st.Pending))
+	}
+	if err := s.DiscardDraft(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 0 || len(st.Draft) != 0 {
+		t.Fatalf("after discard: tree=%d draft=%v", len(st.Tree), st.Draft)
 	}
 }

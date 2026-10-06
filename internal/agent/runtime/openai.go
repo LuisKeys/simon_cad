@@ -231,7 +231,9 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 	if req.System != "" {
 		body["instructions"] = req.System
 	}
-	if o.ReasoningEffort != "" {
+	if req.NoThinking {
+		body["reasoning"] = map[string]any{"effort": "none"}
+	} else if o.ReasoningEffort != "" {
 		body["reasoning"] = map[string]any{"effort": o.ReasoningEffort}
 	}
 	if len(req.Tools) > 0 {

@@ -133,17 +133,27 @@ func (s *Server) routes() {
 	})
 	m.HandleFunc("/api/prompt", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Text string `json:"text"`
+			Text     string `json:"text"`
+			Thinking *bool  `json:"thinking"` // omitted = on
 		}
 		if err := decode(r, &in); err != nil {
 			fail(w, err)
 			return
 		}
-		if err := s.Svc.Prompt(in.Text); err != nil {
+		if err := s.Svc.Prompt(in.Text, in.Thinking == nil || *in.Thinking); err != nil {
 			fail(w, err)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+	})
+	m.HandleFunc("/api/draft/keep", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"ok": true}, s.Svc.KeepDraft())
+	})
+	m.HandleFunc("/api/draft/discard", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"ok": true}, s.Svc.DiscardDraft())
+	})
+	m.HandleFunc("/api/chat/clear", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"ok": true}, s.Svc.ClearChat())
 	})
 	m.HandleFunc("/api/level", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
