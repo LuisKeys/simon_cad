@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/accelone/simoncad/internal/commands"
+	"github.com/accelone/simoncad/internal/geometry/features"
 	"github.com/accelone/simoncad/internal/selectors"
 )
 
@@ -212,6 +213,9 @@ func deleteTools() []*Tool {
 					// A consumed input reappears as a body once its consumer is gone.
 					var freed []string
 					for _, id := range ids {
+						if !features.Consumes(g.Get(id).Type) {
+							continue // a copy never hid its source
+						}
 						for _, d := range g.Get(id).Dependencies {
 							if g.Get(d) != nil && !contains(ids, d) && !contains(freed, d) {
 								freed = append(freed, d)

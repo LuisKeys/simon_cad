@@ -57,7 +57,9 @@ version ⇒ same geometry).
 }
 ```
 Optional fields appear only when set: `expressions`, `references`, `constraints`,
-`manufacturing`, `component`, `selection_refs`, `suppressed`, `errors`. `status` and `errors` are
+`manufacturing`, `component`, `selection_refs`, `suppressed`, `appearance`, `group`, `errors`.
+`group` is a design-tree group label (organization only, like `appearance` never an input to
+geometry); older projects simply have none. `status` and `errors` are
 **derived** by rebuild and refreshed on every save; they are excluded from the content hash.
 
 ## `agent-history.json`
@@ -83,7 +85,9 @@ references, and the geometry is fully described by `model.json`. Images are writ
 `assets/images/` only when the user retains them.
 
 Commands inside a ChangeSet are `{ "type": "AddFeature" | "RemoveFeature" | "SetParameter" |
-"SetExpression" | "Reorder" | "Suppress" | "Rename" | "RestoreSnapshot", "data": { … } }`;
+"SetExpression" | "Reorder" | "Suppress" | "Rename" | "SetGroup" | "SetColor" | "SetOpacity" |
+"SetVisibility" | "SetMaterial" | "RemoveMaterial" | "SetMaterialScale" | "ResetAppearance" |
+"RestoreSnapshot", "data": { … } }`;
 `rollback` holds the exact inverses in forward order.
 
 ## `events.jsonl`

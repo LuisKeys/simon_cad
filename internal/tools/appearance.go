@@ -94,10 +94,11 @@ func appearanceTool(name, desc string, extra props, required []string,
 	}
 }
 
-// IsAppearanceTool reports whether name is a presentation-only mutation tool.
+// IsAppearanceTool reports whether name is a presentation-only mutation tool (appearance
+// and design-tree grouping).
 func IsAppearanceTool(name string) bool {
 	switch name {
-	case "set_color", "set_opacity", "set_visibility", "reset_appearance", "set_material", "remove_material", "set_material_scale":
+	case "set_color", "set_opacity", "set_visibility", "reset_appearance", "set_material", "remove_material", "set_material_scale", "group", "ungroup":
 		return true
 	}
 	return false

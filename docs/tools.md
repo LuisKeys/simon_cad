@@ -35,6 +35,18 @@ Drill one or more holes into a feature's face. `positions` are world coordinates
 | `positions` | array of array |  | Hole centers in world coordinates |
 | `target` | string |  | Feature id to drill into (required unless face is given) |
 
+### `align`
+
+Align bodies along one or more axes by moving them (each moved body gets a transform feature). mode min/center/max aligns the bodies' bounding-box minimum, center or maximum. to=first (default with 2+ bodies): to the first listed body, which stays put; to=selection: to the bounds of all listed bodies; to=origin (default with 1 body): to the world plane through 0 (e.g. axes=[z], mode=min puts a part on the floor; axes=[x,y], mode=center centers it). `reference` names a body that stays put instead. Omit `features` to use the current selection.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `axes` | array of x \| y \| z | yes | Axes to align along |
+| `features` | array of string |  | Bodies to align; omit to use the current selection |
+| `mode` | min \| center \| max |  | Which side of the bounding boxes to align (min \| center \| max) |
+| `reference` | string |  | Optional body that stays put and is aligned to |
+| `to` | first \| selection \| origin |  | What to align to (first \| selection \| origin) |
+
 ### `boolean`
 
 Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`; op=intersect keeps only the volume shared by both. Both inputs are consumed (they stop appearing as separate bodies).
@@ -180,6 +192,17 @@ Delete the selected objects ('delete this', 'remove the selected part', 'delete 
 | `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
 | `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
 
+### `duplicate`
+
+Duplicate bodies: each copy is a linked copy of its source moved by (dx,dy,dz) mm. The source stays as it is; the copy follows later parameter edits of the source. Pass `features` (several ids → one copy each, in one change) or omit it to copy the current selection. The copy keeps the source's appearance and group.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `dx` | number |  | Offset X (mm) |
+| `dy` | number |  | Offset Y (mm) |
+| `dz` | number |  | Offset Z (mm) |
+| `features` | array of string |  | Feature ids to duplicate; omit to use the current selection |
+
 ### `extrude_detected_profile`
 
 Extrude / cut / combine the profiles of an interpretation whose sketch already exists (created by create_sketch_from_image). Same operations and rules as create_from_image, without creating the sketch again.
@@ -233,6 +256,34 @@ Extrude regions of an existing sketch. mode=add makes a solid (merged into `targ
 | `target` | string |  | Feature to add to / cut from |
 | `through` | boolean |  | Cut through the entire target |
 
+### `face_extrude`
+
+Push/pull a planar face: extrude its exact outline along its outward normal. distance > 0 adds material outward, distance < 0 cuts into the body. Use the selected face's selector as `face`.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `distance` | number | yes | Signed distance (mm): + outward (adds), - inward (cuts) |
+| `face` | string | yes | Face selector, e.g. face(feature=plate,side=+Z) or face(feature=plate,index=4) from the selection |
+
+### `face_inset`
+
+Inset a planar face: shrink its outline by `inset` mm from every edge. With `depth` the inset region is raised (depth > 0, a pad) or sunk (depth < 0, a pocket leaving a rim). Without depth the inset outline is imprinted, splitting the face so the inner face can be selected and extruded on its own.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `depth` | number |  | Signed depth (mm): + raises a pad, - sinks a pocket; omit to only split the face |
+| `face` | string | yes | Face selector, e.g. face(feature=plate,side=+Z) or face(feature=plate,index=4) from the selection |
+| `inset` | number > 0 | yes | Distance from the face's edges (mm) |
+
+### `face_offset`
+
+Offset a face: move it along its normal by `distance` mm, extending or trimming the faces around it. Works on any face: a planar face moves (like push/pull), a cylindrical face changes radius (positive = outward: a hole gets smaller, a boss bigger).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `distance` | number | yes | Signed distance (mm): + outward, - inward |
+| `face` | string | yes | Face selector, e.g. face(feature=plate,side=+Z) or face(feature=plate,index=4) from the selection |
+
 ### `fillet`
 
 Round all edges of a feature with the given radius (mm). Treats every edge of the body unless `edges` lists edge(feature=<target>,index=N) selectors (the user's selected edges), in which case only those.
@@ -242,6 +293,15 @@ Round all edges of a feature with the given radius (mm). Treats every edge of th
 | `edges` | array of string |  | Only these edges: edge(feature=<target>,index=N) selectors from the selection context. Omit for every edge. |
 | `radius` | number > 0 | yes | Size (mm) |
 | `target` | string | yes | Feature to treat |
+
+### `group`
+
+Put features/bodies into a named group in the design tree (organization only; geometry is not rebuilt). Omit `features` to group the current selection. Grouping features that are already in a group moves them; reusing an existing group name adds to that group (also how a group is renamed: regroup all its members under the new name).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+| `name` | string | yes | Group name |
 
 ### `linear_pattern`
 
@@ -316,6 +376,22 @@ Return the model to an earlier semantic checkpoint, given by id (cp_002), number
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `checkpoint` | string | yes | Checkpoint id, number, 'previous', or label text |
+
+### `scale`
+
+Scale a body. Give `factor` for uniform scaling (2 = twice as big, 0.5 = half) or per-axis sx/sy/sz (each defaults to `factor`, else 1). `about` is the fixed point: center (default, the bounding-box center), base (center of the bottom face, keeps a part on the print bed), origin, or point (ox,oy,oz). Non-uniform scaling turns cylinders and other analytic faces into free-form surfaces.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `about` | center \| base \| origin \| point |  | Fixed point of the scaling (center \| base \| origin \| point) |
+| `factor` | number > 0 |  | Uniform scale factor |
+| `ox` | number |  | Fixed point X (about=point) |
+| `oy` | number |  | Fixed point Y (about=point) |
+| `oz` | number |  | Fixed point Z (about=point) |
+| `sx` | number > 0 |  | Scale factor along X |
+| `sy` | number > 0 |  | Scale factor along Y |
+| `sz` | number > 0 |  | Scale factor along Z |
+| `target` | string | yes | Visible body to scale |
 
 ### `set_color`
 
@@ -399,6 +475,15 @@ Move and/or rotate a feature: rotation by angle_deg about the axis (ax,ay,az) th
 | `oy` | number |  | Rotation origin Y |
 | `oz` | number |  | Rotation origin Z |
 | `target` | string | yes | Feature to transform |
+
+### `ungroup`
+
+Remove features from their group (organization only). Give `group` to dissolve a whole group, or `features`; omit both to ungroup the current selection.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+| `group` | string |  | Name of a group to dissolve |
 
 
 ## Query tools (no model change)

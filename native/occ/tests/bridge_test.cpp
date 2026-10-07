@@ -148,6 +148,52 @@ int main() {
     CHECK(occ_live_handle_count() == 0);
   }
 
+  // Scale and face edits on a 10 x 20 x 30 box.
+  {
+    occ_handle bx = 0, sc = 0, nu = 0, face = 0, pr = 0, ins = 0, imp = 0, off = 0, offin = 0, bad = 0;
+    occ_props q;
+    CHECK(occ_box(10, 20, 30, &bx) == OCC_OK);
+    CHECK(occ_scale(bx, 5, 10, 15, 2, 2, 2, &sc) == OCC_OK);
+    CHECK(occ_mass_props(sc, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 6000 * 8) < 1e-6 && std::fabs(q.min_x + 5) < 1e-9 && std::fabs(q.max_z - 45) < 1e-9);
+    CHECK(occ_scale(bx, 0, 0, 0, 1, 2, 0.5, &nu) == OCC_OK);
+    CHECK(occ_mass_props(nu, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 6000) < 1e-6 && std::fabs(q.max_y - 40) < 1e-6 && std::fabs(q.max_z - 15) < 1e-6);
+    CHECK(occ_scale(bx, 0, 0, 0, 1, 0, 1, &bad) == OCC_ERR_INVALID_ARG);
+
+    // Find the +Z face.
+    int top = -1;
+    for (int i = 0; i < 6; i++) {
+      double fr[9];
+      if (occ_face_frame(bx, i, fr) == OCC_OK && fr[5] > 0.5) top = i;
+    }
+    CHECK(top >= 0);
+    CHECK(occ_face_get(bx, top, &face) == OCC_OK);
+    CHECK(occ_prism(face, 0, 0, 5, &pr) == OCC_OK);
+    CHECK(occ_mass_props(pr, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 1000) < 1e-6 && std::fabs(q.min_z - 30) < 1e-9);
+
+    CHECK(occ_face_inset(bx, top, 2, &ins) == OCC_OK);
+    CHECK(occ_mass_props(ins, &q) == OCC_OK);
+    CHECK(std::fabs(q.area - 6 * 16) < 1e-6 && std::fabs(q.min_z - 30) < 1e-9);
+    CHECK(occ_face_inset(bx, top, 6, &bad) != OCC_OK);  // 10 mm wide face: nothing left
+
+    CHECK(occ_face_imprint_inset(bx, top, 2, &imp) == OCC_OK);
+    CHECK(occ_mass_props(imp, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 6000) < 1e-6 && q.face_count == 7 && q.solid_count == 1);
+
+    CHECK(occ_offset_face(bx, top, 5, &off) == OCC_OK);
+    CHECK(occ_mass_props(off, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 7000) < 1e-6 && std::fabs(q.max_z - 35) < 1e-6);
+    CHECK(occ_offset_face(bx, top, -10, &offin) == OCC_OK);
+    CHECK(occ_mass_props(offin, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 4000) < 1e-6);
+    CHECK(occ_offset_face(bx, top, 0, &bad) == OCC_ERR_INVALID_ARG);
+    CHECK(occ_face_get(bx, 6, &bad) == OCC_ERR_INVALID_ARG);
+    for (occ_handle h : {bx, sc, nu, face, pr, ins, imp, off, offin}) occ_release(h);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
   // Churn: handles must return to zero.
   for (int i = 0; i < 2000; ++i) {
     occ_handle a = 0, b = 0, c = 0;

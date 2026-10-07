@@ -57,11 +57,13 @@ docs: build
 ui: build
 	./out/simoncad $(ARGS)
 
-# Browser end-to-end flow: select face -> prompt -> preview -> commit -> undo (needs Chrome).
+# Browser end-to-end flows: M2 (select face -> prompt -> preview -> commit -> undo), image to
+# CAD, materials, and body/face modeling (align, duplicate, scale, group, extrude, inset). Needs Chrome.
 e2e: build
 	node e2e/m2.mjs
 	node e2e/image.mjs
 	node e2e/materials.mjs
+	node e2e/modeling.mjs
 
 # Pure frontend helpers (confidence bands, SVG geometry, ambiguity edits); needs Node >= 18.
 test-js:

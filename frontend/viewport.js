@@ -79,6 +79,15 @@ export class Viewport {
     return [c.x, c.y, c.z];
   }
 
+  /** Size of a body's bounding box in model coordinates, or null. */
+  bodySize(id) {
+    const g = this.bodies.get(id)?.mesh.geometry;
+    if (!g) return null;
+    g.computeBoundingBox();
+    const s = g.boundingBox.getSize(new THREE.Vector3());
+    return [s.x, s.y, s.z];
+  }
+
   resize() {
     const p = this.canvas.parentElement;
     const w = Math.max(1, p.clientWidth), h = Math.max(1, p.clientHeight);

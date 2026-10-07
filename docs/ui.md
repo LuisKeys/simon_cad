@@ -82,8 +82,11 @@ backlog item "round only the outer edges after pocketing".
   The pick filter is the compact `Select: Auto ▾` control (Auto/Body/Face/Edge/Vertex). Actions
   that do not fit move into *More ⋯*; Delete is always last and set apart. Only actions backed by
   a tool are offered (move/rotate = `transform`, union/subtract/intersect = `boolean`,
-  fillet/chamfer, hole, mirror, patterns, material, color, hide, delete). Scale, duplicate,
-  face extrude/inset/offset, group and align have no tool yet and are not shown.
+  fillet/chamfer, hole, mirror, patterns, scale, duplicate, align, group/ungroup,
+  face extrude/inset/offset, material, color, hide, delete). Body actions loop per body where the
+  tool takes one target (move, rotate, scale); duplicate and align send the whole selection as one
+  ChangeSet. Face actions take one face per body (a second face of the same body is picked again on
+  the result).
 - **Top bar:** project-name menu (New / Open), Undo, Redo, Save, Export, Help and an overflow menu
   (command palette, agent level). Panels can be hidden from the bar's outer buttons.
 - **Panels:** the design tree (left) and Simon Agent (right) are resizable (drag the splitter,
@@ -104,7 +107,11 @@ backlog item "round only the outer edges after pocketing".
   `agent` badge. Click selects the object (Shift adds, Ctrl/Cmd toggles) and shows its details
   (intent, errors, appearance, parameters; each parameter edit is a `modify_parameter`
   ChangeSet); double-click or F2 renames (`rename_feature`); the context menu offers hide,
-  rename, suppress and delete. Drag-reordering is not supported.
+  rename, suppress, duplicate, group and delete. Drag-reordering is not supported. Nodes with a
+  `group` are listed under a collapsible group row (placed where its first member is): clicking it
+  selects the group's visible bodies; its eye hides/shows them; its menu renames (regroup under
+  a new name), duplicates or ungroups. Fold state persists in `localStorage`. Shortcuts: Ctrl/Cmd+D
+  duplicate, Ctrl/Cmd+G group, Ctrl/Cmd+Shift+G ungroup.
 - **Palette (Ctrl/Cmd+K):** intent verbs (natural-language openers for the agent until macros arrive
   in Phase 3), every registered tool (with an argument skeleton and the current selection prefilled),
   and commands (undo/redo, save, export, playback, new). Every entry ends in the tool registry.

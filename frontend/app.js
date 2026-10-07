@@ -48,8 +48,11 @@ const vp = new Viewport($('gl'), $('cube'), {
     const n = S.selection?.selectors?.length ?? 0;
     const ids = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
     const hasMat = (S.state?.tree ?? []).some((t) => ids.includes(t.id) && t.appearance?.material_id);
+    const bodySel = (S.selection?.selectors ?? []).every((x) => x.startsWith('body('));
     showMenu(at, [
       ...(ids.length ? [...materialMenu(materialCtx, ids, { hasMaterial: hasMat, openPanel: openMaterialPanel }), { sep: true }] : []),
+      ...(ids.length && bodySel ? [{ label: 'Duplicate…', icon: 'duplicate', key: 'Ctrl+D', run: () => actionEnv.duplicate() },
+        { label: 'Group…', icon: 'group', key: 'Ctrl+G', run: () => actionEnv.group() }, { sep: true }] : []),
       { label: n > 1 ? `Delete ${n} selected` : 'Delete', icon: 'trash', key: 'Del', danger: true, disabled: n === 0, run: () => deleteObjects() }]);
   },
   onHover: (p) => {
@@ -218,7 +221,7 @@ function renderTree(st) {
   if (!st.tree.length) { el.replaceChildren(h('div', { class: 'muted' }, 'No features yet.')); return; }
   const sel = S.selection ?? st.selection;
   const selFeatures = new Set((sel.selectors ?? []).map(featureOf));
-  el.replaceChildren(...st.tree.map((n) => {
+  const nodeEl = (n) => {
     const open = S.openNode === n.id;
     const selected = selFeatures.has(n.id);
     const hiddenApp = n.appearance?.visible === false;
@@ -259,8 +262,84 @@ function renderTree(st) {
         n.visible ? appearanceEditor([n]) : null, paramEditor(n)));
     } else if (n.errors.length) kids.push(h('div', { class: 'detail' }, h('div', { class: 'errors' }, n.errors[0])));
     return h('div', { class: `node${selected ? ' sel' : ''}${n.suppressed || hiddenApp ? ' off' : ''}`, role: 'none', dataset: { type: n.type } }, ...kids);
-  }));
+  };
+  // Grouped features are listed under their group, which sits where its first member is.
+  const out = [];
+  const done = new Set();
+  for (const n of st.tree) {
+    if (!n.group) { out.push(nodeEl(n)); continue; }
+    if (done.has(n.group)) continue;
+    done.add(n.group);
+    const members = st.tree.filter((t) => t.group === n.group);
+    out.push(groupEl(n.group, members, selFeatures, nodeEl));
+  }
+  el.replaceChildren(...out);
   if (S.renaming) el.querySelector('input.rename')?.focus();
+}
+
+// A design-tree group: organization only. Clicking it selects its visible bodies.
+S.collapsed = new Set(getPref('collapsedGroups', []));
+function groupEl(name, members, selFeatures, nodeEl) {
+  const bodies = members.filter((m) => m.visible);
+  const closed = S.collapsed.has(name);
+  const allSel = bodies.length > 0 && bodies.every((m) => selFeatures.has(m.id));
+  const hidden = bodies.length > 0 && bodies.every((m) => m.appearance?.visible === false);
+  const fold = () => {
+    if (closed) S.collapsed.delete(name); else S.collapsed.add(name);
+    setPref('collapsedGroups', [...S.collapsed]);
+    renderTree(S.state);
+  };
+  const select = async (e) => {
+    const mode = e?.shiftKey || e?.ctrlKey || e?.metaKey ? 'add' : 'replace';
+    const cur = mode === 'add' ? (S.selection?.selectors ?? []) : [];
+    try { applySelection(await api('select', { selectors: [...new Set([...cur, ...bodies.map((m) => `body(feature=${m.id})`)])] })); } catch (err) { toast(err.message, 'bad'); }
+  };
+  const row = h('div', { class: 'row grp', role: 'treeitem', 'aria-expanded': String(!closed), 'aria-selected': String(allSel), tabindex: '0',
+    title: `Group “${name}” · ${members.length} feature${members.length === 1 ? '' : 's'}`, dataset: { group: name },
+    onclick: (e) => { if (!justLongPressed(row)) select(e); },
+    oncontextmenu: (e) => { e.preventDefault(); if (!justLongPressed(row)) groupMenu(name, members, { x: e.clientX, y: e.clientY }); },
+    onkeydown: (e) => {
+      if (e.target !== row) return;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(e); }
+      else if (e.key === 'ArrowLeft' && !closed || e.key === 'ArrowRight' && closed) { e.preventDefault(); fold(); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const rows = [...$('tree').querySelectorAll('.row')];
+        rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+      }
+    } },
+  h('button', { type: 'button', class: 'eye fold', 'aria-label': `${closed ? 'Expand' : 'Collapse'} ${name}`, title: closed ? 'Expand' : 'Collapse',
+    onclick: (e) => { e.stopPropagation(); fold(); } }, icon(closed ? 'right' : 'down')),
+  h('span', { class: 'ficon' }, icon('group')),
+  h('span', { class: 'name' }, name),
+  h('span', { class: 'src' }, String(bodies.length || members.length)),
+  bodies.length ? h('button', { type: 'button', class: 'eye', 'aria-pressed': String(!hidden), 'aria-label': `${hidden ? 'Show' : 'Hide'} group ${name}`, title: hidden ? 'Show group' : 'Hide group',
+    onclick: (e) => { e.stopPropagation(); applyAppearance('set_visibility', bodies.map((m) => m.id), { visible: hidden }); } }, icon(hidden ? 'eye-off' : 'eye')) : null,
+  h('button', { type: 'button', class: 'more', 'aria-haspopup': 'menu', 'aria-label': `Actions for group ${name}`,
+    onclick: (e) => { e.stopPropagation(); groupMenu(name, members, { el: e.currentTarget }); } }, icon('more')));
+  onLongPress(row, (pt) => groupMenu(name, members, pt));
+  return h('div', { class: `group${allSel ? ' sel' : ''}${closed ? ' closed' : ''}`, role: 'group', 'aria-label': `Group ${name}` },
+    h('div', { class: `node${allSel ? ' sel' : ''}${hidden ? ' off' : ''}`, role: 'none' }, row),
+    closed ? null : h('div', { class: 'members' }, ...members.map(nodeEl)));
+}
+
+function groupMenu(name, members, at) {
+  const ids = members.map((m) => m.id);
+  const bodies = members.filter((m) => m.visible).map((m) => m.id);
+  showMenu(at, [
+    { label: 'Rename group…', icon: 'pencil', run: async () => {
+      const v = await formDialog({ title: `Rename group “${name}”`, ok: 'Rename', fields: [{ key: 'name', label: 'Name', text: true, value: name }] });
+      if (v?.name?.trim() && v.name.trim() !== name) await callTool('group', { features: ids, name: v.name.trim() }, 'Rename group');
+    } },
+    { label: 'Duplicate group', icon: 'duplicate', disabled: !bodies.length, run: async () => {
+      if (!bodies.length) return;
+      applySelection(await api('select', { selectors: bodies.map((id) => `body(feature=${id})`) }));
+      actionEnv.duplicate();
+    } },
+    { label: 'Ungroup', icon: 'ungroup', run: () => callTool('ungroup', { group: name }, 'Ungroup') },
+    { sep: true },
+    { label: `Delete group contents`, icon: 'trash', danger: true, disabled: !bodies.length, run: () => deleteObjects({ features: bodies }) },
+  ]);
 }
 
 // Click selects the object (and shows its details); Shift adds, Ctrl/Cmd toggles; clicking
@@ -304,8 +383,21 @@ function treeMenu(n, at) {
     { label: 'Rename', icon: 'pencil', key: 'F2', disabled: ids.length > 1, run: () => startRename(n) },
     { label: n.suppressed ? 'Unsuppress' : 'Suppress', icon: 'ban', run: async () => { for (const t of nodes) await callTool('suppress_feature', { feature: t.id, suppressed: !n.suppressed }); } },
     { sep: true },
+    n.visible && { label: 'Duplicate…', icon: 'duplicate', key: 'Ctrl+D', run: () => withSelected(ids, actionEnv.duplicate) },
+    { label: 'Group…', icon: 'group', key: 'Ctrl+G', run: () => withSelected(ids, actionEnv.group) },
+    nodes.some((t) => t.group) && { label: 'Remove from group', icon: 'ungroup', run: () => callTool('ungroup', { features: nodes.filter((t) => t.group).map((t) => t.id) }, 'Ungroup') },
+    { sep: true },
     { label: ids.length > 1 ? `Delete ${ids.length} objects` : `Delete ${n.name}`, icon: 'trash', key: 'Del', danger: true, run: () => deleteObjects({ features: ids }) },
   ]);
+}
+
+// Runs a selection-based action on `ids` (a tree menu may target rows that are not selected).
+async function withSelected(ids, fn) {
+  const cur = new Set(selIds());
+  if (ids.length !== cur.size || ids.some((id) => !cur.has(id))) {
+    try { applySelection(await api('select', { selectors: ids.map((id) => `body(feature=${id})`) })); } catch (e) { toast(e.message, 'bad'); return; }
+  }
+  fn();
 }
 
 function paramEditor(n) {
@@ -730,7 +822,7 @@ function toggleMesh() { vp.setMeshOnly(!vp.meshOnly); renderCtxBar(); }
 let ctxKey = '';
 function renderCtxBar() {
   const box = $('ctx-actions');
-  const sel = selectionContext(S.selection?.selectors ?? []);
+  const sel = selectionContext(S.selection?.selectors ?? [], groupOf);
   const actions = actionsFor(sel);
   // Modes that are switched on stay reachable whatever is selected.
   const keep = [vp.measure?.on && 'measure', vp.section?.axis && 'section', vp.meshOnly && 'view'].filter(Boolean);
@@ -815,6 +907,8 @@ function triggerAction(a, sel, anchor) {
 
 // What the actions can do. Everything that changes the model ends in a tool call.
 const selIds = () => selectionContext(S.selection?.selectors ?? []).features;
+const groupOf = (id) => S.state?.tree?.find((t) => t.id === id)?.group ?? '';
+const nameOf = (ids) => (ids.length > 1 ? `${ids.length} objects` : ids[0]);
 
 async function callTool(name, args, label = name) {
   try {
@@ -834,7 +928,8 @@ function formDialog({ title, fields, ok = 'Apply' }) {
       const id = `fd-${f.key}`;
       const input = f.options
         ? h('select', { id }, ...f.options.map((o) => h('option', { value: o.value ?? o, selected: (o.value ?? o) === f.value }, o.label ?? o)))
-        : h('input', { id, type: 'number', step: 'any', value: String(f.value ?? 0), min: f.min });
+        : f.text ? h('input', { id, type: 'text', value: String(f.value ?? ''), spellcheck: 'false' })
+          : h('input', { id, type: 'number', step: 'any', value: String(f.value ?? 0), min: f.min, title: f.hint });
       return [f, input];
     });
     $('fd-fields').replaceChildren(...inputs.flatMap(([f, i]) => [h('label', { for: i.id }, f.label), i]));
@@ -844,7 +939,7 @@ function formDialog({ title, fields, ok = 'Apply' }) {
     $('fd-form').onsubmit = (e) => {
       e.preventDefault();
       const out = {};
-      for (const [f, i] of inputs) out[f.key] = f.options ? i.value : Number(i.value);
+      for (const [f, i] of inputs) out[f.key] = f.options || f.text ? i.value : Number(i.value);
       close(out);
     };
     $('fd-cancel').onclick = () => close(null);
@@ -899,6 +994,77 @@ const actionEnv = {
       if (mine.length) args.edges = mine;
       await callTool(tool, args, tool === 'fillet' ? 'Fillet' : 'Chamfer');
     }
+  },
+  async scale() {
+    const ids = selIds();
+    if (!ids.length) return;
+    const v = await formDialog({ title: `Scale ${nameOf(ids)}`, ok: 'Scale', fields: [
+      { key: 'f', label: 'Uniform factor', value: 2, min: 0.001 },
+      { key: 'x', label: '× along X', value: 1, min: 0.001 }, { key: 'y', label: '× along Y', value: 1, min: 0.001 }, { key: 'z', label: '× along Z', value: 1, min: 0.001 },
+      { key: 'about', label: 'Fixed point', value: 'center', options: [{ value: 'center', label: 'Centre' }, { value: 'base', label: 'Base (stays on the bed)' }, { value: 'origin', label: 'World origin' }] }] });
+    if (!v) return;
+    const [sx, sy, sz] = [v.f * v.x, v.f * v.y, v.f * v.z];
+    if (![sx, sy, sz].every((s) => s > 0)) { toast('Scale factors must be greater than 0', 'bad'); return; }
+    const factors = sx === sy && sy === sz ? { factor: sx } : { sx, sy, sz };
+    for (const id of ids) await callTool('scale', { target: id, ...factors, about: v.about, intent: `Scale ${id}` }, 'Scale');
+  },
+  async duplicate() {
+    const ids = selIds();
+    if (!ids.length) return;
+    // Default: next to the selection along X, with a 5 mm gap.
+    const w = Math.max(0, ...ids.map((id) => vp.bodySize(id)?.[0] ?? 0));
+    const v = await formDialog({ title: `Duplicate ${nameOf(ids)}: offset (mm)`, ok: 'Duplicate',
+      fields: [{ key: 'dx', label: 'X', value: Math.round((w + 5) * 100) / 100 }, { key: 'dy', label: 'Y', value: 0 }, { key: 'dz', label: 'Z', value: 0 }] });
+    if (!v) return;
+    await callTool('duplicate', { features: ids, dx: v.dx, dy: v.dy, dz: v.dz, intent: `Duplicate ${ids.join(', ')}` }, 'Duplicate');
+  },
+  async align() {
+    const ids = selIds();
+    if (!ids.length) return;
+    const multi = ids.length > 1;
+    const v = await formDialog({ title: `Align ${nameOf(ids)}`, ok: 'Align', fields: [
+      { key: 'axes', label: 'Along', value: multi ? 'x' : 'z', options: [{ value: 'x', label: 'X' }, { value: 'y', label: 'Y' }, { value: 'z', label: 'Z' }, { value: 'x,y', label: 'X and Y' }, { value: 'x,y,z', label: 'X, Y and Z' }] },
+      { key: 'mode', label: 'Match', value: multi ? 'center' : 'min', options: [{ value: 'min', label: 'Minimum side' }, { value: 'center', label: 'Centre' }, { value: 'max', label: 'Maximum side' }] },
+      { key: 'to', label: 'To', value: multi ? 'first' : 'origin', options: [
+        ...(multi ? [{ value: 'first', label: `First selected (${ids[0]})` }, { value: 'selection', label: 'Bounds of the selection' }] : []),
+        { value: 'origin', label: 'World origin (0)' }] }] });
+    if (!v) return;
+    await callTool('align', { features: ids, axes: v.axes.split(','), mode: v.mode, to: v.to }, 'Align');
+  },
+  async group() {
+    const ids = selIds();
+    if (!ids.length) return;
+    const taken = new Set((S.state?.tree ?? []).map((t) => t.group).filter(Boolean));
+    let n = taken.size + 1;
+    while (taken.has(`Group ${n}`)) n++;
+    const v = await formDialog({ title: `Group ${nameOf(ids)}`, ok: 'Group', fields: [{ key: 'name', label: 'Name', text: true, value: `Group ${n}` }] });
+    if (!v?.name?.trim()) return;
+    await callTool('group', { features: ids, name: v.name.trim() }, 'Group');
+  },
+  async ungroup() {
+    const ids = selIds().filter((id) => groupOf(id));
+    if (ids.length) await callTool('ungroup', { features: ids }, 'Ungroup');
+  },
+  async faceOp(tool) {
+    // One face per body: each edit becomes a new feature on that body, so a second face of the
+    // same body is picked again on the result.
+    const all = (S.selection?.selectors ?? []).filter((x) => x.startsWith('face('));
+    const faces = all.filter((x, i) => all.findIndex((y) => featureOf(y) === featureOf(x)) === i);
+    if (!faces.length) return;
+    if (faces.length < all.length) toast('Several faces of one body: only the first is used. Select the others again afterwards.', '', 6000);
+    const what = `${faces.length > 1 ? faces.length + ' faces' : 'face'}`;
+    const spec = {
+      face_extrude: { title: `Extrude ${what} (mm)`, ok: 'Extrude', fields: [{ key: 'distance', label: 'Distance (+ out / − in)', value: 5 }] },
+      face_inset: { title: `Inset ${what} (mm)`, ok: 'Inset', fields: [{ key: 'inset', label: 'Inset from edges', value: 2, min: 0.001 },
+        { key: 'depth', label: 'Depth (0 = split only, + pad, − pocket)', value: 0 }] },
+      face_offset: { title: `Offset ${what} (mm)`, ok: 'Offset', fields: [{ key: 'distance', label: 'Distance (+ out of the material)', value: 1 }] },
+    }[tool];
+    const v = await formDialog(spec);
+    if (!v) return;
+    if ('distance' in v && !v.distance) { toast('Distance must be non-zero', 'bad'); return; }
+    const args = { ...v };
+    if (tool === 'face_inset' && !args.depth) delete args.depth;
+    for (const face of faces) await callTool(tool, { face, ...args }, spec.ok);
   },
   toolDialog: (name) => openToolForm(name),
   materialMenu(ev) {
@@ -1117,6 +1283,8 @@ document.addEventListener('keydown', (e) => {
     else if (vp.measure.on) toggleMeasure();
     else if (S.selection?.selectors?.length) api('select', { selectors: [] }).then(applySelection).catch(() => {});
   } else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+  else if (mod && !typing && !overlay && e.key.toLowerCase() === 'd' && selIds().length) { e.preventDefault(); actionEnv.duplicate(); }
+  else if (mod && !typing && !overlay && e.key.toLowerCase() === 'g' && selIds().length) { e.preventDefault(); e.shiftKey ? actionEnv.ungroup() : actionEnv.group(); }
   else if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
   else if (!typing && !mod && !overlay && e.key === 'f') vp.fit();
   else if (!typing && !mod && !overlay && e.key === 'm') toggleMeasure();

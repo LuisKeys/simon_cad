@@ -129,6 +129,10 @@ section.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .node .intent { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .node .errors { color: var(--bad); font-size: 12px; }
 .node .meta { display: flex; gap: 6px; align-items: center; color: var(--faint); font-size: 11.5px; }
+.group { display: flex; flex-direction: column; gap: 1px; }
+.group .row.grp .name { font-weight: 600; }
+.group .row.grp .fold { width: 26px; }
+.group .members { display: flex; flex-direction: column; gap: 1px; margin-left: 14px; padding-left: 6px; border-left: 1px solid var(--line, #2a2a2a); }
 .src { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--panel-3); color: var(--muted); white-space: nowrap; }
 .src.agent { background: rgba(255, 122, 0, .12); color: #ffb070; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }

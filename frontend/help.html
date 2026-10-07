@@ -71,9 +71,9 @@
 <table>
 <tr><th>Area</th><th>What it does</th></tr>
 <tr><td><b>Header</b></td><td>The <b>project name</b> opens a menu with <b>New</b> and <b>Open</b> (Open lists projects in <code>projects_output</code>, or type a path); <b>Undo/Redo</b>; <b>Save</b>; <b>Export</b> STEP or STL; <b>Help</b> (this page); <b>⋯</b> for the <b>⌘K</b> command palette and the interaction <b>Level</b> (Review/Auto). The outer buttons show or hide the side panels, which you can also resize by dragging their edge.</tr>
-<tr><td><b>Design tree</b></td><td>Every feature with a status dot, its intent, and user/agent provenance. Click a row to select it and see its details, parameters (each edit is a <code>modify_parameter</code> ChangeSet) and Appearance; Shift/Ctrl-click selects several. The eye toggles visibility; double-click or F2 renames; right-click or press-and-hold for more. Right-click for the context menu.</td></tr>
+<tr><td><b>Design tree</b></td><td>Every feature with a status dot, its intent, and user/agent provenance. Click a row to select it and see its details, parameters (each edit is a <code>modify_parameter</code> ChangeSet) and Appearance; Shift/Ctrl-click selects several. The eye toggles visibility; double-click or F2 renames; right-click or press-and-hold for more (Duplicate, Group, Suppress, Delete…). <b>Groups</b> appear as folders: click one to select all its bodies, use its arrow to fold it, its eye to hide it, and ⋯ to rename, duplicate or ungroup it.</td></tr>
 <tr><td><b>Selection panel</b></td><td>The faces / edges / vertices / bodies currently picked, plus shared appearance controls when several bodies are selected.</td></tr>
-<tr><td><b>Action bar</b></td><td>The strip above the viewport shows only what makes sense for the current selection. With nothing selected: <b>Select</b> mode, <b>Create</b>, <b>Measure</b> (<kbd>M</kbd>), <b>Section</b> plane (X/Y/Z + offset), <b>View</b> (mesh view, standard views, play design) and <b>Fit</b> (<kbd>F</kbd>). With a body: Move, Rotate, Mirror, Pattern, Fillet, Chamfer, Material, Color, Hide, Delete. With a face: Hole. With edges: Fillet, Chamfer. With two bodies: Union, Subtract, Intersect. Actions that do not fit move into <b>More</b>.</td></tr>
+<tr><td><b>Action bar</b></td><td>The strip above the viewport shows only what makes sense for the current selection. With nothing selected: <b>Select</b> mode, <b>Create</b>, <b>Measure</b> (<kbd>M</kbd>), <b>Section</b> plane (X/Y/Z + offset), <b>View</b> (mesh view, standard views, play design) and <b>Fit</b> (<kbd>F</kbd>). With a body: Move, Rotate, Scale, Duplicate, Align, Mirror, Pattern, Fillet, Chamfer, Group (Ungroup when it is in one), Material, Color, Hide, Delete. With a face: Hole, Extrude, Inset, Offset. With edges: Fillet, Chamfer. With two bodies: Union, Subtract, Intersect, plus Align and Group for any number of bodies. Actions that do not fit move into <b>More</b>.</td></tr>
 <tr><td><b>Viewport</b></td><td>Orbit, pan, zoom; view cube (click a face/edge/corner to snap the view); hover highlight; ghost preview of proposed changes.</td></tr>
 <tr><td><b>History</b></td><td>A semantic checkpoint after every committed ChangeSet, in a collapsible strip. Select a step to get <b>Restore</b>, which proposes going back (never auto-committed). <b>Compare</b> shows features/parameters changed and the volume delta.</td></tr>
 <tr><td><b>Conversation</b></td><td>Your messages, the agent’s answers and ChangeSet cards (commands, affected features, warnings, validation, volume delta, Preview / Commit / Reject). <b>Clear</b> resets the chat and the attached documents.</td></tr>
@@ -202,6 +202,46 @@
 </section>
 
 <section>
+<h2 id="body-edit" data-group="Prompt cookbook">Scale, duplicate, align and groups</h2>
+<h3>Scale</h3>
+<p>Uniform with a factor, or per axis. The fixed point is the body’s centre by default; <i>base</i> keeps the bottom on the print bed.</p>
+<div class="prompt">Make the bracket 50% bigger, keeping it on the bed.</div>
+<div class="prompt">Scale the lid to 80% along X only.</div>
+<div class="prompt">Scale this part by 2 about the origin.</div>
+<h3>Duplicate</h3>
+<p>A copy is <b>linked</b>: it follows later parameter edits of its source (change the source’s size and the copy changes too). It keeps the source’s colour, material and group. <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates the selection.</p>
+<div class="prompt">Duplicate the standoff 20 mm along +X.</div>
+<div class="prompt">Make a copy of these two parts 50 mm up.</div>
+<h3>Align</h3>
+<p>Moves bodies so their bounding boxes line up (each moved body gets a <code>transform</code> feature, all in one undoable change). With several bodies the first selected stays put; with one body, alignment is to the world origin.</p>
+<div class="prompt">Align the selected parts on their centres along X and Y.</div>
+<div class="prompt">Put the boss on the floor (minimum Z = 0).</div>
+<div class="prompt">Line up the tops of these three blocks with the base plate.</div>
+<h3>Groups</h3>
+<p>Groups organize the design tree; they never merge geometry (use a boolean union for that). Grouping is presentation-only: it commits immediately, never rebuilds geometry, and is undoable. A feature built on a grouped body joins its group. <kbd>Ctrl</kbd>+<kbd>G</kbd> groups the selection, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> ungroups it.</p>
+<div class="prompt">Group the base plate and the bosses as “Chassis”.</div>
+<div class="prompt">Rename the Chassis group to “Frame”.</div>
+<div class="prompt">Ungroup Frame.</div>
+</section>
+
+<section>
+<h2 id="face-edit" data-group="Prompt cookbook">Face extrude, inset and offset</h2>
+<p>Select a face (pick filter <i>Face</i> or <i>Auto</i>), then use <b>Extrude</b>, <b>Inset</b> or <b>Offset</b> in the action bar, or ask the agent. Each is a parametric feature: its distance stays editable in the design tree.</p>
+<table>
+<tr><th>Operation</th><th>What it does</th></tr>
+<tr><td><b>Extrude</b> (push/pull)</td><td>Sweeps the exact outline of a planar face along its normal. Positive adds material outward; negative cuts into the body.</td></tr>
+<tr><td><b>Inset</b></td><td>Shrinks a planar face’s outline by a distance from its edges. With a depth the inset region becomes a pad (+) or a pocket with a rim (−). Without depth it only splits the face, so the inner face can be selected and extruded on its own.</td></tr>
+<tr><td><b>Offset</b></td><td>Moves any face along its normal; the faces around it stretch or shrink to follow. On a cylinder the radius changes. “Outward” means out of the material, so on a hole wall a positive offset makes the hole <i>smaller</i>.</td></tr>
+</table>
+<div class="prompt">Pull the selected face out 5 mm.</div>
+<div class="prompt">Push this face in 2 mm.</div>
+<div class="prompt">Inset the top face 3 mm and sink it 4 mm to make a tray.</div>
+<div class="prompt">Inset this face 2 mm and raise it 1 mm as a pad.</div>
+<div class="prompt">Make the selected hole 0.2 mm bigger for clearance.  <span class="muted">(face_offset −0.1 on the hole wall)</span></div>
+<div class="result">Faces picked by index belong to the model they were picked on: select again after other changes. Several faces of one body are edited one at a time.</div>
+</section>
+
+<section>
 <h2 id="params" data-group="Prompt cookbook">Parameters, expressions and feature management</h2>
 <h3>Change a value</h3>
 <div class="prompt">Make the plate 5 mm thick instead of 4.</div>
@@ -253,6 +293,7 @@
 
 <section>
 <h2 id="materials-sec" data-group="Prompt cookbook">Materials</h2>
+<p class="muted">A material or colour stays with the part as you keep working on it: a hole, fillet, scale, move, face edit or boolean carries the look of the body it modifies.</p>
 <p>A visual PBR library (30 materials, below). Choose via prompt, via <b>Choose…</b> in the Appearance group (search, category chips, sphere thumbnails), by <b>dragging a thumbnail</b> onto an object or tree row (dropping on a selected object applies to the whole selection), or right-click → <b>Material…</b> / recent materials / <b>Remove material</b>. Color and opacity are overrides on top of the material. Everything is a ChangeSet with undo, and never rebuilds geometry.</p>
 <div class="prompt">Make the bracket brushed aluminum.</div>
 <div class="prompt">Use black ABS for the enclosure and clear glass for the window.</div>
@@ -293,7 +334,7 @@
 <tr><td>Section plane</td><td>Choose X / Y / Z in <b>Section</b> and drag the offset slider to cut the view open.</td></tr>
 <tr><td>Measure</td><td>Toggle <b>Measure</b>, click two surface points.</td></tr>
 <tr><td>Mesh view</td><td><b>Mesh</b> shows the triangle mesh (hides grid, edges and sketches).</td></tr>
-<tr><td>Context menu</td><td>Right-click an object: materials, Delete…</td></tr>
+<tr><td>Context menu</td><td>Right-click an object: materials, Duplicate, Group, Delete…</td></tr>
 </table>
 <h3>Selection → conversation</h3>
 <p>Your selection appears as chips above the prompt box and is sent with every request. These prompts rely on it:</p>
@@ -402,6 +443,9 @@
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd></td><td>Save</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd></td><td>Undo</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td>Redo</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>D</kbd></td><td>Duplicate the selected bodies</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>G</kbd></td><td>Group the selection</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>Ungroup the selection</td></tr>
 <tr><td><kbd>F</kbd></td><td>Fit view</td></tr>
 <tr><td><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>Delete selection (not while typing)</td></tr>
 <tr><td><kbd>Esc</kbd></td><td>Close palette / dialog / menu</td></tr>
@@ -430,6 +474,7 @@
   <li>Holes start only from axis-aligned planar faces.</li>
   <li><code>index=</code> selectors are valid only for the model they were picked on.</li>
   <li>Patterns repeat holes and cut features only.</li>
+  <li>Scale, align and face edits apply to visible bodies (not to features a later feature consumes). Face extrude and inset need planar faces; non-uniform scaling turns cylinders into free-form surfaces.</li>
   <li>No robotics catalog, assemblies or macros yet; intent verbs are natural-language openers.</li>
   <li>Edits are refused while the agent is working on a turn (the UI keeps updating).</li>
 </ul>
@@ -438,6 +483,8 @@
 <tr><th>Symptom</th><th>What to do</th></tr>
 <tr><td>The prompt returns a provider error</td><td>Check <code>.env</code> (provider and key). Palette tools and manual edits still work.</td></tr>
 <tr><td>A request was “refused” with a list of features</td><td>Other features depend on the target. Delete or re-point them first, or say “delete them too”.</td></tr>
+<tr><td>“is not a visible body: … builds on it”</td><td>That feature was already modified by a later one. Apply the edit to the feature named in the message (the visible body).</td></tr>
+<tr><td>Face offset failed</td><td>The neighbouring faces cannot be stretched that far (for example offsetting past another face). Use a smaller distance, or Extrude for planar faces.</td></tr>
 <tr><td>Fillet / chamfer failed</td><td>The distance is larger than the available geometry. Use a smaller value or select only the edges you want.</td></tr>
 <tr><td>My selection disappeared</td><td>It is cleared whenever the model changes (index-based selectors would be stale). Select again.</td></tr>
 <tr><td>Edit is refused with “busy” (409)</td><td>The agent is still working. Wait for the answer.</td></tr>

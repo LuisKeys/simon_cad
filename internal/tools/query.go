@@ -124,6 +124,9 @@ func ModelSummary(env Env) (map[string]any, error) {
 		if !n.Appearance.IsZero() {
 			f["appearance"] = AppearanceView(n.Appearance)
 		}
+		if n.Group != "" {
+			f["group"] = n.Group
+		}
 		feats = append(feats, f)
 	}
 	var bodies []map[string]any

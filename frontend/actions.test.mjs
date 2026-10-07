@@ -23,6 +23,18 @@ test('only valid actions are offered', () => {
   assert.ok(!ids(['body(feature=a)', 'body(feature=b)', 'body(feature=c)']).includes('union'));
 });
 
+test('body, face and group actions follow the selection', () => {
+  const body = ids(['body(feature=a)']);
+  for (const a of ['scale', 'duplicate', 'align', 'group']) assert.ok(body.includes(a), a);
+  assert.ok(!body.includes('ungroup'), 'ungroup needs a grouped object');
+  const grouped = actionsFor(selectionContext(['body(feature=a)'], (f) => (f === 'a' ? 'Base' : ''))).map((a) => a.id);
+  assert.ok(grouped.includes('ungroup'));
+  const face = ids(['face(feature=a,side=+Z)']);
+  for (const a of ['face-extrude', 'face-inset', 'face-offset']) assert.ok(face.includes(a), a);
+  assert.ok(!face.includes('scale') && !ids(['edge(feature=a,index=1)']).includes('face-extrude'));
+  assert.ok(ids(['body(feature=a)', 'body(feature=b)']).includes('align'));
+});
+
 test('delete is always last', () => {
   for (const s of [['body(feature=a)'], ['face(feature=a,side=+Z)'], ['edge(feature=a,index=1)'], ['vertex(feature=a,index=1)'], ['body(feature=a)', 'body(feature=b)']]) {
     const l = ids(s);

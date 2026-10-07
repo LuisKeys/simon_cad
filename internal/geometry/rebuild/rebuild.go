@@ -153,7 +153,7 @@ func (e *Engine) Rebuild(g *cadir.Graph) (*Model, error) {
 
 	consumed := map[string]bool{}
 	for _, n := range g.Nodes {
-		if n.Suppressed {
+		if n.Suppressed || !features.Consumes(n.Type) {
 			continue
 		}
 		for _, d := range cadir.EffectiveDeps(n) {

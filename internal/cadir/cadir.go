@@ -68,6 +68,18 @@ type Appearance struct {
 	TextureScale *float64 `json:"texture_scale,omitempty"`
 }
 
+// MaxGroupName bounds a group label.
+const MaxGroupName = 64
+
+// NormalizeGroup trims a group label and checks its length ("" means no group).
+func NormalizeGroup(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if len(name) > MaxGroupName {
+		return "", fmt.Errorf("group name is longer than %d characters", MaxGroupName)
+	}
+	return name, nil
+}
+
 var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 
 // NormalizeColor validates a "#RRGGBB" color and returns it upper-cased.
@@ -138,8 +150,11 @@ type Node struct {
 	Metadata      Metadata          `json:"metadata"`
 	Suppressed    bool              `json:"suppressed,omitempty"`
 	Appearance    *Appearance       `json:"appearance,omitempty"`
-	Status        string            `json:"status,omitempty"`
-	Errors        []string          `json:"errors,omitempty"`
+	// Group is an organizational label shared by the nodes of one user group (design tree).
+	// Like appearance it is never an input to geometry.
+	Group  string   `json:"group,omitempty"`
+	Status string   `json:"status,omitempty"`
+	Errors []string `json:"errors,omitempty"`
 }
 
 // Graph is the ordered feature DAG. Order is insertion order and is the tie-breaker
@@ -304,8 +319,8 @@ func (g *Graph) Canonical() ([]byte, error) {
 // Hash is a content hash of the authoritative content (excludes derived status/errors and timestamps).
 func (g *Graph) Hash() string { return g.hash(false) }
 
-// GeometryHash is Hash ignoring presentation-only appearance: it is unchanged by an
-// appearance-only edit.
+// GeometryHash is Hash ignoring presentation-only appearance and grouping: it is unchanged
+// by an appearance-only or grouping edit.
 func (g *Graph) GeometryHash() string { return g.hash(true) }
 
 func (g *Graph) hash(ignoreAppearance bool) string {
@@ -314,7 +329,7 @@ func (g *Graph) hash(ignoreAppearance bool) string {
 		n.Status, n.Errors = "", nil
 		n.Metadata.Created, n.Metadata.Modified = "", ""
 		if ignoreAppearance {
-			n.Appearance = nil
+			n.Appearance, n.Group = nil, ""
 		}
 	}
 	b, _ := json.Marshal(c)

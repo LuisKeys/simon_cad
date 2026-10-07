@@ -4,16 +4,16 @@
 //
 //   none | body | face | edge | vertex | multiBody | mixed
 //
-// Actions are only offered when a backing tool exists. (Scale, duplicate, face extrude/inset,
-// group and align have no tool yet, so they are intentionally absent.)
+// Actions are only offered when a backing tool exists.
 
-export const GROUPS = ['mode', 'create', 'view', 'transform', 'geometry', 'boolean', 'appearance', 'visibility', 'measure', 'destructive'];
+export const GROUPS = ['mode', 'create', 'view', 'transform', 'geometry', 'face', 'boolean', 'organize', 'appearance', 'visibility', 'measure', 'destructive'];
 
 const kindOf = (sel) => /^(\w+)\(/.exec(sel)?.[1] ?? '';
 const featureOf = (sel) => { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1].trim() : ''; };
 
-/** Summarise a selector list: { ctx, kinds:Set, features:[ids], count }. */
-export function selectionContext(selectors = []) {
+/** Summarise a selector list: { ctx, kinds:Set, features:[ids], count, grouped }. `groupOf`
+ *  maps a feature id to its design-tree group ('' when none). */
+export function selectionContext(selectors = [], groupOf = () => '') {
   const kinds = new Set(selectors.map(kindOf).filter(Boolean));
   const features = [...new Set(selectors.map(featureOf).filter(Boolean))];
   let ctx = 'none';
@@ -26,7 +26,8 @@ export function selectionContext(selectors = []) {
       else ctx = 'mixed';
     }
   }
-  return { ctx, kinds, features, count: selectors.length, selectors };
+  const grouped = features.some((f) => !!groupOf(f));
+  return { ctx, kinds, features, count: selectors.length, selectors, grouped };
 }
 
 const ALL = ['none', 'body', 'face', 'edge', 'vertex', 'multiBody', 'mixed'];
@@ -47,6 +48,9 @@ export const ACTIONS = [
   // -- bodies ------------------------------------------------------------------------------
   { id: 'move', label: 'Move', icon: 'move', group: 'transform', contexts: ['body', 'multiBody', 'vertex'], primary: true, run: (e) => e.transform('move') },
   { id: 'rotate', label: 'Rotate', icon: 'rotate', group: 'transform', contexts: ['body', 'multiBody'], primary: true, run: (e) => e.transform('rotate') },
+  { id: 'scale', label: 'Scale', icon: 'scale', group: 'transform', contexts: ['body', 'multiBody'], run: (e) => e.scale() },
+  { id: 'duplicate', label: 'Duplicate', icon: 'duplicate', group: 'transform', contexts: ['body', 'multiBody'], key: 'Ctrl+D', run: (e) => e.duplicate() },
+  { id: 'align', label: 'Align', icon: 'align', group: 'transform', contexts: ['body', 'multiBody'], run: (e) => e.align() },
   { id: 'mirror', label: 'Mirror', icon: 'mirror', group: 'geometry', contexts: ['body'], run: (e) => e.toolDialog('mirror') },
   { id: 'pattern', label: 'Pattern', icon: 'pattern', group: 'geometry', contexts: ['body'], kind: 'menu',
     items: [['linear_pattern', 'Linear pattern', 'pattern'], ['circular_pattern', 'Circular pattern', 'rotate']] },
@@ -55,9 +59,14 @@ export const ACTIONS = [
   { id: 'union', label: 'Union', icon: 'union', group: 'boolean', contexts: ['multiBody'], visible: (s) => s.features.length === 2, primary: true, run: (e) => e.boolean('union') },
   { id: 'subtract', label: 'Subtract', icon: 'subtract', group: 'boolean', contexts: ['multiBody'], visible: (s) => s.features.length === 2, primary: true, run: (e) => e.boolean('subtract') },
   { id: 'intersect', label: 'Intersect', icon: 'intersect', group: 'boolean', contexts: ['multiBody'], visible: (s) => s.features.length === 2, run: (e) => e.boolean('intersect') },
+  { id: 'group', label: 'Group', icon: 'group', group: 'organize', contexts: ['body', 'multiBody'], key: 'Ctrl+G', run: (e) => e.group() },
+  { id: 'ungroup', label: 'Ungroup', icon: 'ungroup', group: 'organize', contexts: ['body', 'multiBody'], visible: (s) => !!s.grouped, key: 'Ctrl+Shift+G', run: (e) => e.ungroup() },
 
   // -- faces / edges -----------------------------------------------------------------------
   { id: 'hole', label: 'Hole', icon: 'hole', group: 'geometry', contexts: ['face'], visible: (s) => s.count === 1, primary: true, run: (e) => e.toolDialog('add_hole') },
+  { id: 'face-extrude', label: 'Extrude', icon: 'extrude', group: 'face', contexts: ['face'], primary: true, title: 'Push/pull the face along its normal', run: (e) => e.faceOp('face_extrude') },
+  { id: 'face-inset', label: 'Inset', icon: 'inset', group: 'face', contexts: ['face'], title: 'Shrink the face outline (optionally as a pocket or pad)', run: (e) => e.faceOp('face_inset') },
+  { id: 'face-offset', label: 'Offset', icon: 'offset', group: 'face', contexts: ['face'], title: 'Move the face; adjacent faces follow (holes change size)', run: (e) => e.faceOp('face_offset') },
   { id: 'fillet', label: 'Fillet', icon: 'fillet', group: 'geometry', contexts: ['edge'], primary: true, run: (e) => e.edgeOp('fillet') },
   { id: 'chamfer', label: 'Chamfer', icon: 'chamfer', group: 'geometry', contexts: ['edge'], primary: true, run: (e) => e.edgeOp('chamfer') },
 

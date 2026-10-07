@@ -62,6 +62,14 @@ const ICONS = {
   folder: [P('m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2')],
   command: [P('M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3')],
   ban: [C(12, 12, 10), L(4.9, 4.9, 19.1, 19.1)],
+  scale: [P('M21 3 9 15'), P('M15 3h6v6'), P('M3 15v6h6'), R(3, 3, 8, 8, 1)],
+  duplicate: [R(8, 8, 14, 14), P('M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2')],
+  align: [L(3, 3, 3, 21), R(7, 5, 13, 5, 1), R(7, 14, 8, 5, 1)],
+  group: [R(2, 2, 20, 20, 3), R(6, 6, 6, 5, 1), R(12, 13, 6, 5, 1)],
+  ungroup: [R(2, 2, 9, 8, 2), R(13, 14, 9, 8, 2), P('M15 4h5v5'), P('M9 20H4v-5')],
+  extrude: [P('M4 15h16v5H4z'), P('M12 12V3'), P('m8 7 4-4 4 4')],
+  inset: [R(3, 3, 18, 18), R(8, 8, 8, 8, 1), P('m3 3 5 5'), P('m21 3-5 5'), P('m3 21 5-5'), P('m21 21-5-5')],
+  offset: [P('M4 20V9a5 5 0 0 1 5-5h11'), P('M8 20v-9a3 3 0 0 1 3-3h9'), P('m14 14 3 3'), P('m17 14-3 3')],
   restore: [P('M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8'), P('M3 3v5h5'), P('M12 7v5l4 2')],
   compare: [P('M16 3h5v5'), P('M8 3H3v5'), P('M12 22v-8.3a4 4 0 0 0-1.17-2.87L3 3'), P('m15 9 6-6'), P('M21 16v5h-5'), P('m15 15 6 6')],
 };
@@ -77,6 +85,8 @@ export function icon(name) {
 /** Feature type (as shown in the design tree) -> icon name. */
 export function featureIcon(type = '') {
   const t = type.toLowerCase();
+  const exact = { copy: 'duplicate', scale: 'scale', face_extrude: 'extrude', face_inset: 'inset', face_offset: 'offset' };
+  if (exact[t]) return exact[t];
   for (const k of ['cylinder', 'cone', 'sphere', 'torus', 'hole', 'mirror', 'fillet', 'chamfer', 'sketch', 'union', 'subtract', 'intersect']) if (t.includes(k)) return k;
   if (t.includes('pattern')) return 'pattern';
   if (t.includes('transform')) return 'move';

@@ -565,7 +565,8 @@ func (a *App) ApplyTool(name string, args []byte, policy Policy) Outcome {
 	if res.Plan.RequireApproval {
 		policy = PolicyPreview
 	}
-	commit := policy == PolicyCommit || policy == PolicyAuto && cs.AutoCommitEligible()
+	lowRisk := res.Plan.LowRisk && len(cs.Warnings) == 0
+	commit := policy == PolicyCommit || policy == PolicyAuto && (cs.AutoCommitEligible() || lowRisk)
 	if commit {
 		if err := a.commit(cs); err != nil {
 			out.OK, out.Error = false, err.Error()

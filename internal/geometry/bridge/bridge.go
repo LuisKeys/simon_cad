@@ -7,7 +7,7 @@ package bridge
 #cgo CFLAGS: -I${SRCDIR}/../../../native/occ/include
 #cgo LDFLAGS: -L${SRCDIR}/../../../out/native -lsimon_occ
 #cgo LDFLAGS: -L${SRCDIR}/../../../third_party/occt-install/lib -Wl,-rpath,${SRCDIR}/../../../third_party/occt-install/lib
-#cgo LDFLAGS: -lTKDESTEP -lTKDESTL -lTKMesh -lTKBO -lTKBool -lTKFillet -lTKOffset -lTKTopAlgo -lTKPrim
+#cgo LDFLAGS: -lTKDESTEP -lTKDESTL -lTKMesh -lTKFeat -lTKBO -lTKBool -lTKFillet -lTKOffset -lTKTopAlgo -lTKPrim
 #cgo LDFLAGS: -lTKGeomAlgo -lTKGeomBase -lTKBRep -lTKG3d -lTKG2d -lTKMath -lTKXSBase -lTKShHealing -lTKernel -lstdc++
 #include <stdlib.h>
 #include "occ_bridge.h"
@@ -253,6 +253,55 @@ func Mirror(s Handle, ox, oy, oz, nx, ny, nz float64) (Handle, error) {
 	err := check("mirror", C.occ_mirror(C.occ_handle(s), C.double(ox), C.double(oy), C.double(oz),
 		C.double(nx), C.double(ny), C.double(nz), &out))
 	return Handle(out), err
+}
+
+// Scale scales a shape about (ox,oy,oz) by per-axis factors.
+func Scale(s Handle, ox, oy, oz, sx, sy, sz float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("scale", C.occ_scale(C.occ_handle(s), C.double(ox), C.double(oy), C.double(oz),
+		C.double(sx), C.double(sy), C.double(sz), &out))
+	return Handle(out), err
+}
+
+func faceOp(op string, fn func(C.occ_handle, C.int32_t, C.double, *C.occ_handle) C.occ_status, s Handle, face int, d float64) (Handle, error) {
+	var out C.occ_handle
+	err := check(op, fn(C.occ_handle(s), C.int32_t(face), C.double(d), &out))
+	return Handle(out), err
+}
+
+// UnifyFaces merges same-domain neighbouring faces and edges.
+func UnifyFaces(s Handle) (Handle, error) {
+	var out C.occ_handle
+	err := check("unify_faces", C.occ_unify_faces(C.occ_handle(s), &out))
+	return Handle(out), err
+}
+
+// FaceGet copies one face of a shape.
+func FaceGet(s Handle, face int) (Handle, error) {
+	var out C.occ_handle
+	err := check("face_get", C.occ_face_get(C.occ_handle(s), C.int32_t(face), &out))
+	return Handle(out), err
+}
+
+// FaceInset is the planar face shrunk by d from its boundary.
+func FaceInset(s Handle, face int, d float64) (Handle, error) {
+	return faceOp("face_inset", func(h C.occ_handle, i C.int32_t, v C.double, o *C.occ_handle) C.occ_status {
+		return C.occ_face_inset(h, i, v, o)
+	}, s, face, d)
+}
+
+// FaceImprintInset splits the face along its inset outline.
+func FaceImprintInset(s Handle, face int, d float64) (Handle, error) {
+	return faceOp("face_imprint_inset", func(h C.occ_handle, i C.int32_t, v C.double, o *C.occ_handle) C.occ_status {
+		return C.occ_face_imprint_inset(h, i, v, o)
+	}, s, face, d)
+}
+
+// OffsetFace moves one face along its outward normal by d.
+func OffsetFace(s Handle, face int, d float64) (Handle, error) {
+	return faceOp("offset_face", func(h C.occ_handle, i C.int32_t, v C.double, o *C.occ_handle) C.occ_status {
+		return C.occ_offset_face(h, i, v, o)
+	}, s, face, d)
 }
 
 // Face, Edge and Mesh mirror occ_face_info, occ_edge_info and the occ_mesh buffers.

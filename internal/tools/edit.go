@@ -30,13 +30,22 @@ var knownParams = map[string][]string{
 	"union":            {},
 	"subtract":         {},
 	"intersect":        {},
+	"scale":            {"factor", "sx", "sy", "sz", "about", "ox", "oy", "oz"},
+	"copy":             {"dx", "dy", "dz"},
+	"face_extrude":     {"distance"},
+	"face_inset":       {"inset", "depth"},
+	"face_offset":      {"distance"},
 }
+
+// signedParams are exceptions to strictlyPositive: signed distances of face edits.
+var signedParams = map[string]bool{"face_extrude.distance": true, "face_offset.distance": true, "face_inset.depth": true}
 
 // strictlyPositive parameters must be > 0.
 var strictlyPositive = map[string]bool{
 	"dx": false, "dy": false, "dz": false, // box extents are positive but pattern/transform deltas are not; checked per type
 	"radius": true, "height": true, "major_radius": true, "minor_radius": true, "diameter": true, "depth": true, "distance": true,
 	"cb_diameter": true, "cb_depth": true, "cs_diameter": true, "w": true, "h": true, "r": true, "width": true,
+	"factor": true, "sx": true, "sy": true, "sz": true, "inset": true,
 }
 
 func isKnown(typ, name string) bool {
@@ -102,7 +111,7 @@ func editTools() []*Tool {
 					if !finite(v) {
 						return nil, fmt.Errorf("value must be finite")
 					}
-					if (strictlyPositive[name] || strings.HasPrefix(name, "dim_") || n.Type == "box" && (name == "dx" || name == "dy" || name == "dz")) && v <= 0 {
+					if (strictlyPositive[name] && !signedParams[n.Type+"."+name] || strings.HasPrefix(name, "dim_") || n.Type == "box" && (name == "dx" || name == "dy" || name == "dz")) && v <= 0 {
 						return nil, fmt.Errorf("%s must be greater than 0", name)
 					}
 					if name == "count" && (v < 2 || v != math.Trunc(v)) {

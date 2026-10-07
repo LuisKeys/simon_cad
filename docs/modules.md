@@ -14,6 +14,7 @@ The only code that touches OpenCascade.
 | `primitives.cpp` | `occ_box`, `occ_cylinder`, `occ_cone`, `occ_extrude_polygon` (closed XY polygon prism). |
 | `booleans.cpp` | `occ_boolean_union`, `occ_boolean_subtract`, `occ_boolean_intersect` (inputs not consumed). |
 | `fillets.cpp` | `occ_fillet_all_edges`, `occ_chamfer_all_edges`, and the selective `occ_fillet_edges`, `occ_chamfer_edges` (kernel edge indices). |
+| `modify.cpp` | `occ_scale` (uniform `gp_Trsf` / non-uniform `gp_GTrsf`), `occ_unify_faces`, face edits by kernel index: `occ_face_get`, `occ_face_inset` (`BRepOffsetAPI_MakeOffset`), `occ_face_imprint_inset` (`BRepFeat_SplitShape`), `occ_offset_face` (`BRepOffset_MakeOffset::SetOffsetOnFace`, result re-closed into a valid solid). |
 | `mesh.cpp` | `occ_tessellate` / `occ_mesh_*`: per-face triangle ranges, edge polylines, topological vertices and per-face/edge descriptors; numbering in `TopExp::MapShapes` order. |
 | `export.cpp` | STEP export/import, STL export. Silences OCCT's stdout messages so `--json` output stays clean. |
 | `tests/bridge_test.cpp` | ABI test: validity, volumes, error paths, handle-count returns to 0 after churn. Runs under valgrind. |
@@ -114,6 +115,11 @@ properties + `Bounds()`), and `Ctx` (kernel, node, resolved params, already-buil
 | `fillet` / `chamfer` | `target`, `radius` / `distance` | All edges; size must be below half the thinnest dimension. |
 | `transform` | `target`, `dx dy dz`, `angle_deg`, `ax ay az`, `ox oy oz` | Rotate first, then translate. |
 | `mirror` | `target`, `plane`, `offset` | Result = original ∪ mirrored copy. |
+| `scale` | `target`, `factor` or `sx sy sz`, `about` center/base/origin/point, `ox oy oz` | Fixed point resolved from the target's bounds at build time. |
+| `copy` | `source`, `dx dy dz` | Linked duplicate; does **not** consume `source` (`KeepsInputs`). |
+| `face_extrude` | `target`, `distance` (signed), `references.face` (planar) | Prism of the face along its normal; + union, − cut; seams unified. |
+| `face_inset` | `target`, `inset` (>0), `depth` (signed, optional), `references.face` (planar) | With depth: prism of the inset face; without: the inset outline is imprinted (face split). |
+| `face_offset` | `target`, `distance` (signed), `references.face` (any surface) | Kernel per-face offset; planar faces fall back to a face sweep. |
 
 Intermediate shapes are tracked in an `arena` so every error path releases them.
 

@@ -68,6 +68,8 @@ func Decode(r Record) (Command, error) {
 		c = &SetMaterialScale{}
 	case "ResetAppearance":
 		c = &ResetAppearance{}
+	case "SetGroup":
+		c = &SetGroup{}
 	case "RestoreSnapshot":
 		c = &RestoreSnapshot{}
 	default:
@@ -330,10 +332,11 @@ func (c *Rename) Apply(g *cadir.Graph) (Command, error) {
 
 // ---- Appearance (presentation only; never affects geometry) ------------------------
 
-// IsAppearance reports whether a command type only edits presentation metadata.
+// IsAppearance reports whether a command type only edits presentation metadata (appearance
+// and design-tree grouping).
 func IsAppearance(t string) bool {
 	switch t {
-	case "SetColor", "SetOpacity", "SetVisibility", "ResetAppearance", "SetMaterial", "RemoveMaterial", "SetMaterialScale":
+	case "SetColor", "SetOpacity", "SetVisibility", "ResetAppearance", "SetMaterial", "RemoveMaterial", "SetMaterialScale", "SetGroup":
 		return true
 	}
 	return false
@@ -506,6 +509,30 @@ func (c *ResetAppearance) Apply(g *cadir.Graph) (Command, error) {
 		n.Appearance = c.Restore.Clone()
 	}
 	return &ResetAppearance{ID: c.ID, Restore: old}, nil
+}
+
+// ---- SetGroup (design-tree organization; never affects geometry) -------------------
+
+// SetGroup puts a node in a named group; an empty Group removes it from its group.
+type SetGroup struct {
+	ID    string `json:"id"`
+	Group string `json:"group"`
+}
+
+func (*SetGroup) Type() string { return "SetGroup" }
+
+func (c *SetGroup) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	name, err := cadir.NormalizeGroup(c.Group)
+	if err != nil {
+		return nil, err
+	}
+	old := n.Group
+	n.Group = name
+	return &SetGroup{ID: c.ID, Group: old}, nil
 }
 
 // ---- RestoreSnapshot (checkpoint restore) ------------------------------------------

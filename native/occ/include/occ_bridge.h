@@ -100,6 +100,23 @@ occ_status occ_rotate(occ_handle s, double ox, double oy, double oz,
 occ_status occ_mirror(occ_handle s, double ox, double oy, double oz,
                       double nx, double ny, double nz, occ_handle* out);
 
+/* Scale about (ox,oy,oz) by (sx,sy,sz), all > 0. Equal factors keep analytic surfaces;
+ * unequal ones convert them to B-splines. */
+occ_status occ_scale(occ_handle s, double ox, double oy, double oz, double sx, double sy, double sz, occ_handle* out);
+
+/* Face-level edits. face_index is as in occ_tessellate.
+ *  occ_face_get            copy of the face (e.g. to sweep it with occ_prism)
+ *  occ_face_inset          the planar face's region shrunk by distance from every boundary
+ *  occ_face_imprint_inset  the shape with that inset outline imprinted (the face is split in two)
+ *  occ_offset_face         the shape with that face moved by distance along its outward normal
+ *                          (negative = inward); adjacent faces are extended or trimmed */
+/* Merges coplanar / co-cylindrical neighbouring faces and collinear edges (face indices change). */
+occ_status occ_unify_faces(occ_handle s, occ_handle* out);
+occ_status occ_face_get(occ_handle s, int32_t face_index, occ_handle* out);
+occ_status occ_face_inset(occ_handle s, int32_t face_index, double distance, occ_handle* out);
+occ_status occ_face_imprint_inset(occ_handle s, int32_t face_index, double distance, occ_handle* out);
+occ_status occ_offset_face(occ_handle s, int32_t face_index, double distance, occ_handle* out);
+
 /* Queries */
 occ_status occ_is_valid(occ_handle s, int32_t* valid);
 occ_status occ_mass_props(occ_handle s, occ_props* out);

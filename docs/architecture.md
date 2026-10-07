@@ -169,6 +169,24 @@ feature names a `target` (a node whose body it modifies) and produces a new body
 
 - **Tool features** (`hole`, `extrude`) expose a *tool generator* (the cutter or the added solid)
   and a `subtract` flag; their build is `target ∘ tool`.
+- **Body edits** `scale` (uniform or per axis, about the centre / base / origin / a point, resolved at
+  build time from the target's bounds) and the face edits `face_extrude`, `face_inset`, `face_offset`
+  (`references.face` on the target; push/pull results have coplanar seams merged) are ordinary
+  modifying features. Tools refuse them on a feature that a later one already consumes (that would
+  fork the chain); the error names the visible body to use instead.
+- **Copies** (`copy`, from the `duplicate` tool) are the one feature that does **not consume** its
+  input (`Feature.KeepsInputs`): source and copy are both leaves, and the copy follows the source's
+  parameters. `align` is a tool, not a feature: it computes per-body translations from the current
+  bounds and emits ordinary `transform` features.
+- **Low-risk multi-command plans:** `Plan.LowRisk` lets one gesture over several objects (duplicate
+  several bodies, align) auto-commit under the *auto* policy like a single command.
+- **Groups** (`Node.group`, `SetGroup`, tools `group` / `ungroup`) are presentation like appearance:
+  excluded from the content key and `GeometryHash`, auto-committed, never a checkpoint.
+- **Appearance and group follow the visible body.** Appearance lives on the node, and the viewport
+  shows the leaf's. A new feature that modifies a body (its `target`, else its `source`, else its
+  first dependency) therefore starts with a copy of that body's appearance and group, so a material
+  survives scale, fillet, holes, moves, face edits and booleans (the boolean's `tool` body does not
+  contribute). It is a copy taken at creation: restyling the result never edits its inputs.
 - **Patterns** (`linear_pattern`, `circular_pattern`) take a `source` hole/extrude feature,
   re-create its tool, transform copies of it and apply them to the source's output. That keeps
   patterns general without teaching them about holes.
@@ -205,7 +223,8 @@ ChangeSet ids. Geometry rebuilds from the CAD-IR alone; `geometry`/`cadir` never
 
 Commands are small, serializable and **exactly invertible**:
 `AddFeature`, `RemoveFeature`, `SetParameter`, `SetExpression`, `Reorder`, `Suppress`, `Rename`,
-and `RestoreSnapshot` (checkpoint restore). `Apply(graph)` mutates the graph and returns its
+the presentation commands (`SetColor`, `SetOpacity`, `SetVisibility`, `SetMaterial`, `RemoveMaterial`,
+`SetMaterialScale`, `ResetAppearance`, `SetGroup`) and `RestoreSnapshot` (checkpoint restore). `Apply(graph)` mutates the graph and returns its
 inverse; failed commands leave the graph untouched.
 
 A `ChangeSet` records commands, their inverses (the rollback info), affected features, expected

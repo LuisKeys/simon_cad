@@ -167,6 +167,15 @@ type Feature struct {
 	// Target returns the node ID this feature modifies ("" for primitives); used for
 	// suppression pass-through.
 	Target func(Params) string
+	// KeepsInputs marks features that read their dependencies without consuming them (copy):
+	// the inputs stay visible bodies.
+	KeepsInputs bool
+}
+
+// Consumes reports whether a node of type t consumes its dependencies (unknown types do).
+func Consumes(t string) bool {
+	f, ok := registry[t]
+	return !ok || !f.KeepsInputs
 }
 
 var registry = map[string]*Feature{}

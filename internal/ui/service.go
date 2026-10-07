@@ -1290,7 +1290,7 @@ type TreeNode struct {
 	Deps       []string          `json:"deps"`
 	Params     map[string]any    `json:"params"`
 	Exprs      map[string]string `json:"expressions,omitempty"`
-	Group      string            `json:"group,omitempty"` // macro grouping (Phase 3)
+	Group      string            `json:"group,omitempty"` // design-tree group (organization only)
 }
 
 // State is everything the panels render.
@@ -1351,7 +1351,8 @@ func (s *Service) State() (*State, error) {
 		}
 		st.Tree = append(st.Tree, TreeNode{ID: n.ID, Name: name, Type: n.Type, Status: n.Status, Errors: nz(n.Errors),
 			Intent: n.Intent, CreatedBy: n.Provenance.CreatedBy, Capability: n.Provenance.Capability,
-			Suppressed: n.Suppressed, Visible: leaf[n.ID], Appearance: n.Appearance, Deps: nz(n.Dependencies), Params: n.Parameters, Exprs: n.Expressions})
+			Suppressed: n.Suppressed, Visible: leaf[n.ID], Appearance: n.Appearance, Deps: nz(n.Dependencies), Params: n.Parameters, Exprs: n.Expressions,
+			Group: n.Group})
 	}
 	for _, cs := range s.app.Pending() {
 		st.Pending = append(st.Pending, app.CardOf(cs))

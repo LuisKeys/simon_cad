@@ -280,6 +280,37 @@ func (s *Shape) Mirror(ox, oy, oz, nx, ny, nz float64) (*Shape, error) {
 	})
 }
 
+// Scale scales the shape about (ox,oy,oz) by per-axis factors (all > 0).
+func (s *Shape) Scale(ox, oy, oz, sx, sy, sz float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.Scale(h, ox, oy, oz, sx, sy, sz) })
+}
+
+// UnifyFaces merges neighbouring faces on the same surface (and collinear edges), e.g. the
+// coplanar seams a push/pull union leaves behind.
+func (s *Shape) UnifyFaces() (*Shape, error) {
+	return s.unary(bridge.UnifyFaces)
+}
+
+// Face copies the face with the kernel index (as in Tessellate).
+func (s *Shape) Face(face int) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.FaceGet(h, face) })
+}
+
+// FaceInset returns the planar face shrunk by d (> 0) from every boundary, as a new face.
+func (s *Shape) FaceInset(face int, d float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.FaceInset(h, face, d) })
+}
+
+// ImprintInset returns the shape with the face split along its inset outline.
+func (s *Shape) ImprintInset(face int, d float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.FaceImprintInset(h, face, d) })
+}
+
+// OffsetFace returns the shape with one face moved by d along its outward normal.
+func (s *Shape) OffsetFace(face int, d float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.OffsetFace(h, face, d) })
+}
+
 // Mesh types are re-exported so callers never import the bridge package.
 type (
 	Mesh = bridge.Mesh

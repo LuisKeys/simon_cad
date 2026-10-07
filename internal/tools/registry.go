@@ -70,6 +70,9 @@ type Plan struct {
 	// RequireApproval keeps the ChangeSet proposed (never auto-committed) whatever the policy,
 	// so the user always sees the preview first. Used for interpreted, possibly ambiguous input.
 	RequireApproval bool
+	// LowRisk marks several commands that form one non-destructive user gesture (align,
+	// duplicate several bodies): under the auto policy they commit like a single command.
+	LowRisk bool
 }
 
 // Tool is one registered capability-tagged operation.
