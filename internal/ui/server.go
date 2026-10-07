@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/vision"
 )
 
@@ -288,6 +289,22 @@ func (s *Server) routes() {
 	})
 	m.HandleFunc("/api/chat/clear", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"ok": true}, s.Svc.ClearChat())
+	})
+	m.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusOK, config.Current())
+			return
+		}
+		var in config.Settings
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		if err := config.Save(in); err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, config.Current())
 	})
 	m.HandleFunc("/api/level", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

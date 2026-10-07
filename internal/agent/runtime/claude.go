@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/accelone/simoncad/internal/config"
 )
 
 // DefaultModel is used when ANTHROPIC_MODEL is not set.
-const DefaultModel = "claude-sonnet-5-5"
+const DefaultModel = config.DefaultClaudeModel
 
 // Claude is the Anthropic Messages API provider (tool use, non-streaming in Phase 1).
 type Claude struct {
@@ -26,15 +27,15 @@ type Claude struct {
 // NewClaudeFromEnv reads ANTHROPIC_API_KEY (OS-keychain storage arrives with the desktop app),
 // ANTHROPIC_BASE_URL and ANTHROPIC_MODEL.
 func NewClaudeFromEnv() (*Claude, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
+	key := config.Get("ANTHROPIC_API_KEY")
 	if key == "" {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set; set it to use the live agent (recorded mode needs no key)")
 	}
 	c := &Claude{APIKey: key, BaseURL: "https://api.anthropic.com", Model: DefaultModel, HTTP: &http.Client{Timeout: 120 * time.Second}}
-	if u := os.Getenv("ANTHROPIC_BASE_URL"); u != "" {
+	if u := config.Get("ANTHROPIC_BASE_URL"); u != "" {
 		c.BaseURL = strings.TrimRight(u, "/")
 	}
-	if m := os.Getenv("ANTHROPIC_MODEL"); m != "" {
+	if m := config.Get("ANTHROPIC_MODEL"); m != "" {
 		c.Model = m
 	}
 	return c, nil

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/dotenv"
 	"os"
 	"strings"
@@ -60,6 +61,9 @@ func main() {
 		os.Exit(2)
 	}
 	dotenv.Load(".env")
+	if err := config.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning:", err)
+	}
 	cmds := map[string]func([]string) error{
 		"bracket": runBracket, "create": runCreate, "modify": runModify, "tool": runTool,
 		"build": runBuild, "export": runExport, "history": runHistory, "restore": runRestore,

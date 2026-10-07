@@ -28,6 +28,7 @@ import (
 	"github.com/accelone/simoncad/internal/agent/workflow"
 	"github.com/accelone/simoncad/internal/app"
 	"github.com/accelone/simoncad/internal/cadir"
+	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
@@ -434,7 +435,7 @@ func (u unlocking) Capabilities() runtime.ProviderCapabilities {
 }
 
 func autonomousFromEnv() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("SIMONCAD_AUTONOMOUS"))) {
+	switch strings.ToLower(strings.TrimSpace(config.Get("SIMONCAD_AUTONOMOUS"))) {
 	case "0", "off", "false", "no":
 		return false
 	}

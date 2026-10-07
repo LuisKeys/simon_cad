@@ -3,9 +3,10 @@ package runtime
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/accelone/simoncad/internal/config"
 )
 
 // Providers selectable with SIMONCAD_PROVIDER.
@@ -15,25 +16,11 @@ const (
 	ProviderOllama = "ollama"
 )
 
-func envOr(key, def string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
-	}
-	return def
-}
+func envOr(key, def string) string { return config.GetOr(key, def) }
 
 // ProviderNameFromEnv returns the normalized SIMONCAD_PROVIDER (default claude).
 func ProviderNameFromEnv() (string, error) {
-	switch p := strings.ToLower(envOr("SIMONCAD_PROVIDER", ProviderClaude)); p {
-	case "claude", "anthropic":
-		return ProviderClaude, nil
-	case "openai":
-		return ProviderOpenAI, nil
-	case "ollama":
-		return ProviderOllama, nil
-	default:
-		return "", fmt.Errorf("unknown SIMONCAD_PROVIDER %q (use claude, openai or ollama)", p)
-	}
+	return config.ProviderName()
 }
 
 // NewProviderFromEnv builds the live LLM provider chosen by SIMONCAD_PROVIDER:
@@ -55,18 +42,18 @@ func NewNamedProviderFromEnv(name string) (Provider, error) {
 	client := &http.Client{Timeout: 300 * time.Second}
 	switch name {
 	case ProviderOpenAI:
-		key := os.Getenv("OPENAI_API_KEY")
+		key := config.Get("OPENAI_API_KEY")
 		if key == "" {
 			return nil, fmt.Errorf("SIMONCAD_PROVIDER=openai but OPENAI_API_KEY is not set")
 		}
-		model := os.Getenv("OPENAI_MODEL")
+		model := config.Get("OPENAI_MODEL")
 		if model == "" {
 			return nil, fmt.Errorf("SIMONCAD_PROVIDER=openai but OPENAI_MODEL is not set")
 		}
-		return &OpenAI{Flavor: "openai", APIKey: key, Model: model, HTTP: client, ReasoningEffort: os.Getenv("OPENAI_REASONING_EFFORT"),
+		return &OpenAI{Flavor: "openai", APIKey: key, Model: model, HTTP: client, ReasoningEffort: config.Get("OPENAI_REASONING_EFFORT"),
 			BaseURL: strings.TrimRight(envOr("OPENAI_BASE_URL", "https://api.openai.com"), "/")}, nil
 	case ProviderOllama:
-		model := os.Getenv("OLLAMA_MODEL")
+		model := config.Get("OLLAMA_MODEL")
 		if model == "" {
 			return nil, fmt.Errorf("SIMONCAD_PROVIDER=ollama but OLLAMA_MODEL is not set (e.g. llama3.1)")
 		}

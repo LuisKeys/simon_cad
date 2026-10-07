@@ -11,6 +11,23 @@
   color-scheme: dark; accent-color: var(--accent); font-size: 14px;
 }
 @media (pointer: coarse) { :root { --touch: 44px; } }
+/* Light theme (Settings > Theme): same tokens, lighter values; surfaces that hard-code a dark
+   colour get a token override below. */
+:root[data-theme=light] {
+  --bg: #eef0f3; --panel: #ffffff; --panel-2: #e8eaee; --panel-3: #dcdfe5; --line: #d5d8de;
+  --text: #1c1f24; --muted: #565c66; --faint: #7d838d;
+  --accent: #e56d00; --accent-2: #c25a00; --accent-soft: rgba(229, 109, 0, .12); --accent-line: rgba(229, 109, 0, .5);
+  --ok: #1c8a58; --warn: #9a6a00; --bad: #c93c3c; --ghost: #0f9d96;
+  --sel: #b35200; --hover: #1d6fb0;
+  color-scheme: light;
+}
+:root[data-theme=light] .brand .word, :root[data-theme=light] .msg.user { color: var(--text); }
+:root[data-theme=light] #viewport { background: radial-gradient(ellipse at 50% 35%, #fbfbfc, #dfe2e7); }
+:root[data-theme=light] .node.sel .row { background: var(--panel-3); }
+:root[data-theme=light] .dialog, :root[data-theme=light] .ctxmenu, :root[data-theme=light] .toast { background: var(--panel); }
+:root[data-theme=light] .abtn.destructive { color: var(--muted); }
+:root[data-theme=light] .src.agent { color: var(--accent-2); }
+:root[data-theme=light] button.primary:hover:not(:disabled) { background: #ff8c24; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
@@ -39,7 +56,7 @@ button.danger:hover:not(:disabled) { background: rgba(239, 106, 106, .18); color
 .ibtn[aria-pressed=true] { color: var(--text); }
 .ibtn[aria-pressed=false] { color: var(--faint); }
 
-select, input[type=text], input[type=search], input[type=number], textarea { background: var(--panel-2); border: 1px solid transparent; border-radius: var(--radius); padding: 6px 10px; min-height: 36px; transition: border-color var(--ease); }
+select, input[type=text], input[type=password], input[type=search], input[type=number], textarea { background: var(--panel-2); border: 1px solid transparent; border-radius: var(--radius); padding: 6px 10px; min-height: 36px; transition: border-color var(--ease); }
 select:hover, input:hover, textarea:hover { border-color: var(--panel-3); }
 textarea { resize: vertical; width: 100%; }
 kbd { background: var(--panel-2); border-radius: 4px; padding: 0 5px; font-size: 12px; color: var(--muted); }
@@ -210,7 +227,7 @@ section.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .overlay[hidden] { display: none; }
 .dialog { width: min(640px, calc(100vw - 24px)); background: #1c1c1c; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; max-height: 70vh; box-shadow: 0 16px 48px rgba(0,0,0,.55); }
 .dialog.small { width: min(440px, calc(100vw - 24px)); }
-.dialog input[type=text] { width: 100%; padding: 8px 10px; }
+.dialog input[type=text], .dialog input[type=password] { width: 100%; padding: 8px 10px; }
 .pal-list { list-style: none; margin: 0; padding: 0; overflow: auto; }
 .pal-list li { padding: 8px 10px; min-height: 40px; border-radius: var(--radius); cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
 .pal-list li.on, .pal-list li:hover { background: var(--panel-2); }
@@ -383,3 +400,16 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .ok-box { padding: 6px 8px; border-radius: 6px; background: rgba(76, 195, 138, .12); color: var(--ok); }
 .small { font-size: 12px; }
 @media (max-width: 900px) { .vc-body, .vc-info { grid-template-columns: 1fr; } .vc-panes { grid-template-columns: 1fr; } }
+
+/* ---- settings ------------------------------------------------------------------------------ */
+.dialog.settings { width: min(480px, calc(100vw - 24px)); overflow: auto; }
+.dialog.settings .dtitle { font-size: 16px; font-weight: 600; }
+.dialog.settings h2 { margin: 8px 0 0; }
+.srow { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: center; }
+.srow label { color: var(--muted); font-size: 12px; }
+.srow .row { align-items: center; }
+.srow .row input { flex: 1; min-width: 0; }
+.dialog.settings select, .dialog.settings input { width: 100%; }
+.dialog.settings .row:last-child { align-items: center; margin-top: 6px; }
+.dialog.settings .bad { color: var(--bad); font-size: 12px; }
+@media (max-width: 480px) { .srow { grid-template-columns: 1fr; gap: 4px; } }

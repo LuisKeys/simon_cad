@@ -597,6 +597,18 @@ export class Viewport {
     });
   }
 
+  /** Recolors the grid for the UI theme (the canvas is transparent over the CSS background). */
+  setTheme(theme) {
+    const light = theme === 'light';
+    const major = new THREE.Color(light ? 0xa9afba : 0x3a3a3a), minor = new THREE.Color(light ? 0xcdd1d9 : 0x232323);
+    const c = this.grid.geometry.getAttribute('color');
+    for (let v = 0; v < c.count; v++) { // GridHelper: 4 vertices per division, center line first colour
+      const col = Math.floor(v / 4) === 20 ? major : minor;
+      c.setXYZ(v, col.r, col.g, col.b);
+    }
+    c.needsUpdate = true;
+  }
+
   /** Mesh view: shows each body's triangle mesh and hides the grid, B-rep edges and sketch outlines. */
   setMeshOnly(on) {
     this.meshOnly = !!on;

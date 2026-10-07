@@ -1,8 +1,9 @@
 package runtime
 
 import (
-	"os"
 	"strings"
+
+	"github.com/accelone/simoncad/internal/config"
 )
 
 // ProviderCapabilities is what a provider/model can accept. The router selects a provider by
@@ -78,7 +79,7 @@ func ModelCapabilities(flavor, model string) ProviderCapabilities {
 		return allCapabilities
 	case ProviderOllama:
 		c := ProviderCapabilities{Text: true, StructuredOutput: true, ToolCalls: true}
-		switch strings.ToLower(strings.TrimSpace(os.Getenv("OLLAMA_VISION"))) {
+		switch strings.ToLower(strings.TrimSpace(config.Get("OLLAMA_VISION"))) {
 		case "1", "true", "yes", "on":
 			c.Vision = true
 		case "0", "false", "no", "off":

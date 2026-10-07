@@ -10,6 +10,7 @@ import { ThumbnailRenderer } from './materials/pbr.js';
 import { materialEditor, materialMenu, DND_TYPE, noteRecentMaterial } from './materials/panel.js';
 import { icon, featureIcon } from './icons.js';
 import { selectionContext, actionsFor, groupRuns, ACTIONS } from './actions.js';
+import { openSettings, loadTheme } from './settings.js';
 import { initPanels, getPref, setPref } from './panels.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1179,6 +1180,7 @@ async function openProject() {
 $('project').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
   { label: 'New project…', icon: 'file-plus', run: newProject },
   { label: 'Open project…', icon: 'folder', run: openProject }]));
+$('btn-settings').addEventListener('click', () => openSettings({ toast, onTheme: (t) => vp.setTheme(t) }));
 $('btn-more').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
   { label: 'Command palette', icon: 'command', key: 'Ctrl+K', run: openPalette },
   { sep: true }, { head: 'Agent level' },
@@ -1329,5 +1331,6 @@ function toast(msg, kind = '', ms = 4500) {
   toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
+loadTheme((t) => vp.setTheme(t));
 refresh();
 api('palette').then((p) => { S.paletteAll = p; }).catch(() => {}); // warm the palette so Ctrl+K is instant
