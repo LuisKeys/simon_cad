@@ -201,7 +201,8 @@ function render(st) {
   if (!st.refine_state) S.refineState = null;
   S.level = st.level;
   loadMaterials(st.path ?? st.name);
-  $('project').replaceChildren(h('span', { class: 'pname' }, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, '●') : null, icon('down'));
+  // replaceChildren stringifies null into a "null" text node, so drop absent children first.
+  $('project').replaceChildren(...[h('span', { class: 'pname' }, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, '●') : null, icon('down')].filter(Boolean));
   $('btn-undo').disabled = !st.can_undo || st.busy;
   $('btn-clear').disabled = st.busy || (st.chat.length === 0 && !(st.specs ?? []).length);
   $('btn-redo').disabled = !st.can_redo || st.busy;

@@ -1368,11 +1368,18 @@ func (s *Service) Save(dir string) (string, error) {
 		return "", fmt.Errorf("this project has no location yet; give a path")
 	}
 	dir = resolveProjectPath(withProjectExt(dir))
-	if abs, err := filepath.Abs(dir); err == nil && s.path != "" {
-		if cur, err := filepath.Abs(s.path); err == nil && cur != abs {
+	if s.path != "" {
+		if !samePath(s.path, dir) {
 			// "Save as" produces a second project, not a second copy of the same one: two
 			// directories claiming one id would make component references ambiguous.
 			s.app.ReIdentify()
+		}
+	}
+	// A project keeps the name it was created with ("untitled" by default), so adopt the
+	// directory's name on a first save or a "save as": the header should match the file.
+	if base := strings.TrimSuffix(filepath.Base(dir), projectExt); base != "" {
+		if s.path == "" || !samePath(s.path, dir) || s.app.Meta.Name == "untitled" {
+			s.app.Meta.Name = base
 		}
 	}
 	if err := s.app.Save(dir); err != nil {
@@ -1381,6 +1388,19 @@ func (s *Service) Save(dir string) (string, error) {
 	s.path, s.dirty = dir, false
 	s.hub.Publish(Notice{Kind: "state"})
 	return dir, nil
+}
+
+// samePath reports whether two project paths point at the same directory.
+func samePath(a, b string) bool {
+	x, err := filepath.Abs(a)
+	if err != nil {
+		return false
+	}
+	y, err := filepath.Abs(b)
+	if err != nil {
+		return false
+	}
+	return x == y
 }
 
 // Export writes STEP or STL through the export tools.
