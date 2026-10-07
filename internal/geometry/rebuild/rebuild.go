@@ -217,6 +217,11 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 	}
 	res.Params = params
 	resolved[n.ID] = params
+	if feat.Kind == features.KindParams { // design parameters: values only, no geometry
+		pj, _ := json.Marshal(params)
+		res.Status, res.Key = cadir.StatusOK, hashKey("parameters", string(pj))
+		return
+	}
 
 	depKeys := make([]string, len(deps))
 	for i, d := range deps {

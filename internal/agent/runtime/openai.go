@@ -36,8 +36,9 @@ type oaToolCall struct {
 }
 
 type oaMessage struct {
-	Role       string       `json:"role"`
-	Content    *string      `json:"content"`
+	Role string `json:"role"`
+	// Content is a *string, or a []any of text/image_url parts when the message has images.
+	Content    any          `json:"content"`
 	ToolCalls  []oaToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string       `json:"tool_call_id,omitempty"`
 }
@@ -53,12 +54,17 @@ func toOpenAIMessages(system string, msgs []Message) []oaMessage {
 	}
 	for _, m := range msgs {
 		var texts []string
+		var images []any // image_url parts (vision-capable Ollama models)
 		var calls []oaToolCall
 		var results []oaMessage
 		for _, b := range m.Content {
 			switch b.Type {
 			case "text":
 				texts = append(texts, b.Text)
+			case "image":
+				if b.Source != nil {
+					images = append(images, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + b.Source.MediaType + ";base64," + b.Source.Data}})
+				}
 			case "tool_use":
 				var c oaToolCall
 				c.ID, c.Type = b.ID, "function"
@@ -73,7 +79,10 @@ func toOpenAIMessages(system string, msgs []Message) []oaMessage {
 			}
 		}
 		out = append(out, results...)
-		if len(texts) > 0 || len(calls) > 0 {
+		if len(images) > 0 {
+			parts := []any{map[string]any{"type": "text", "text": strings.Join(texts, "\n")}}
+			out = append(out, oaMessage{Role: m.Role, Content: append(parts, images...)})
+		} else if len(texts) > 0 || len(calls) > 0 {
 			msg := oaMessage{Role: m.Role, ToolCalls: calls}
 			if len(texts) > 0 {
 				msg.Content = strp(strings.Join(texts, "\n"))
@@ -86,12 +95,19 @@ func toOpenAIMessages(system string, msgs []Message) []oaMessage {
 	return out
 }
 
-// SupportsImages is true for the OpenAI Responses API; the Ollama chat path is text only.
-func (o *OpenAI) SupportsImages() bool { return o.Flavor == "openai" }
+// Capabilities comes from the registry: OpenAI accepts images and PDFs; an Ollama model
+// accepts images only when it is a multimodal model (see ModelCapabilities).
+func (o *OpenAI) Capabilities() ProviderCapabilities { return ModelCapabilities(o.Flavor, o.Model) }
+
+// SupportsImages reports the vision capability (kept for ImageCapable callers).
+func (o *OpenAI) SupportsImages() bool { return o.Capabilities().Vision }
 
 func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	if HasImages(req.Messages) && !o.SupportsImages() {
 		return nil, fmt.Errorf("provider %s does not support image input", o.Flavor)
+	}
+	if HasDocuments(req.Messages) && !o.Capabilities().Attachments {
+		return nil, fmt.Errorf("provider %s does not support document input", o.Flavor)
 	}
 	model := req.Model
 	if model == "" {
@@ -221,6 +237,11 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 				if b.Source != nil {
 					parts = append(parts, map[string]any{"type": "input_image", "image_url": "data:" + b.Source.MediaType + ";base64," + b.Source.Data})
 				}
+			case "document":
+				if b.Source != nil {
+					parts = append(parts, map[string]any{"type": "input_file", "filename": firstNonEmpty(b.Title, "document.pdf"),
+						"file_data": "data:" + b.Source.MediaType + ";base64," + b.Source.Data})
+				}
 			case "reasoning":
 				items = append(items, json.RawMessage(b.Input))
 			case "tool_use":
@@ -234,7 +255,7 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 			}
 		}
 		input = append(input, items...)
-		if len(parts) > len(texts) { // at least one image: send content parts
+		if len(parts) > len(texts) { // at least one image or file: send content parts
 			input = append(input, map[string]any{"role": m.Role, "content": parts})
 		} else if len(texts) > 0 {
 			input = append(input, map[string]any{"role": m.Role, "content": strings.Join(texts, "\n")})
@@ -319,4 +340,13 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 		}
 	}
 	return r, nil
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }

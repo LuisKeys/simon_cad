@@ -17,6 +17,7 @@ import (
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
 	"github.com/accelone/simoncad/internal/vision"
+	"github.com/accelone/simoncad/internal/visual"
 )
 
 // Env is what tools may read. It is implemented by the app composition root.
@@ -41,6 +42,11 @@ type Env interface {
 	SetMeshDetail(level string)
 	// Export writes the current model ("step" or "stl") and returns a summary.
 	Export(format, path string, deflection float64) (map[string]any, error)
+	// Visual is the visual-refinement state (not CAD state); Render draws standard views
+	// offscreen into it; SilhouetteAgainstReference scores a render against its reference.
+	Visual() *visual.State
+	Render(views []string, w, h int, mode string) ([]*visual.Render, error)
+	SilhouetteAgainstReference(r *visual.Render) (visual.SilhouetteScore, bool)
 }
 
 // Args are decoded, schema-validated tool arguments.

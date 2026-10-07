@@ -10,7 +10,7 @@ import (
 
 // Block is one content block of a message (provider-neutral, Messages-API shaped).
 type Block struct {
-	Type      string          `json:"type"` // text | image | tool_use | tool_result
+	Type      string          `json:"type"` // text | image | document | tool_use | tool_result
 	Text      string          `json:"text,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
@@ -22,7 +22,9 @@ type Block struct {
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
 	Data      string `json:"data,omitempty"` // redacted_thinking payload
-	// Source is the payload of an image block.
+	// Title names a document block (its file name).
+	Title string `json:"title,omitempty"`
+	// Source is the payload of an image or document (PDF) block.
 	Source *ImageSource `json:"source,omitempty"`
 }
 
@@ -36,6 +38,18 @@ type ImageSource struct {
 // ImageCapable is implemented by providers that may be sent image blocks. A provider that
 // does not implement it is assumed to accept them (Replay/Recorder wrappers).
 type ImageCapable interface{ SupportsImages() bool }
+
+// HasDocuments reports whether any message carries a document block.
+func HasDocuments(msgs []Message) bool {
+	for _, m := range msgs {
+		for _, b := range m.Content {
+			if b.Type == "document" {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // HasImages reports whether any message carries an image block.
 func HasImages(msgs []Message) bool {

@@ -96,6 +96,20 @@ values are ignored. `.env` is git-ignored; `.env.example` documents everything.
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL` | Claude provider (model defaults to `claude-sonnet-5-5`) |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | OpenAI provider |
 | `OLLAMA_MODEL`, `OLLAMA_BASE_URL` | Local Ollama (no key; default URL `http://localhost:11434`) |
+| `OLLAMA_VISION` | `true`/`false` overrides whether the Ollama model accepts images (default: detected from the model name) |
+| `SIMONCAD_AUTONOMOUS` | `off` disables the plan → execute → validate → correct workflow in the UI (default on) |
+
+**Visual refinement** (toolbar → Visual): attach reference images (side, front, top views work
+best), describe the object and run it. The model is built coarse to fine (blockout → primary →
+secondary → materials) from design parameters, rendered from fixed cameras after every change,
+scored against the references (silhouette IoU/contour/box, proportions, landmarks, a vision
+critic), corrected at most 3 changes at a time, and reverted automatically when a change makes it
+look worse. Regions that are already right can be locked.
+
+Providers are chosen by capability, not by name: the selected provider handles everything it can;
+an attachment it cannot handle (an image or PDF with a text-only Ollama model) is processed by
+OpenAI if configured, otherwise Claude, and Ollama keeps acting as the CAD agent. Image features
+(Attach image, Create from Image) are hidden when no configured provider has vision.
 
 ## CLI reference
 
@@ -119,7 +133,8 @@ Every command accepts `--json` for machine-readable output (`{"ok": …}`; error
 | `bracket [--out DIR]` | Phase 0 servo bracket proof |
 
 Agent commands (`create`, `modify`) and `tool` accept `--preview` (propose only) and `--commit`
-(commit even multi-command ChangeSets), plus `--label` for the checkpoint name. Without either flag
+(commit even multi-command ChangeSets), plus `--label` for the checkpoint name. `create` and
+`modify` also accept `--autonomous` (plan, execute step by step, validate and auto-correct). Without either flag
 the commit policy is *auto*: a single non-destructive command commits immediately; anything larger
 stays **proposed** until you `commit` it.
 
@@ -145,8 +160,12 @@ internal/
   history/             semantic checkpoints, compare
   tools/               tool registry, JSON-schema validation, all tools
   persistence/         .scadproj read/write
-  agent/runtime/       providers, tool-call loop, recordings, eval harness
-  agent/capabilities/  pluggable capabilities (geometry so far)
+  agent/runtime/       providers, capability registry, model router, tool-call loop, recordings, evals
+  agent/attachments/   attachment classification and capability-based routing (vision, PDF)
+  agent/workflow/      planner, executor, validator, correction loop, agent state machine
+  agent/refine/        visual closed-loop refinement: planner, CAD builder, vision critic, controller
+  visual/              offscreen renderer, silhouettes, proportions, stage scoring, regions/locks
+  agent/capabilities/  pluggable capabilities (geometry, vision)
   rendering/           tessellation → viewport meshes, pick IDs ↔ selectors
   ui/                  UI service, local HTTP/SSE server, event hub
   export/              STL watertightness checker

@@ -4,6 +4,7 @@
 import { api, subscribe, h, mm3, materialUrl } from './api.js';
 import { Viewport } from './viewport.js';
 import { initVision } from './vision.js';
+import { initVisualPanel } from './visualcmp.js';
 import { MaterialLibrary } from './materials/library.js';
 import { ThumbnailRenderer } from './materials/pbr.js';
 import { materialEditor, materialMenu, DND_TYPE, noteRecentMaterial } from './materials/panel.js';
@@ -170,8 +171,12 @@ function scheduleRefresh() {
 }
 
 subscribe((n) => {
+  visualPanel.onNotice(n);
+  if (n.kind === 'refine' && n.refine) { S.refineState = n.refine; renderAgentState(); return; }
+  if (n.kind === 'visual') return;
   if (n.kind === 'chat' && n.chat) { addChat(n.chat); return; }
   if (n.kind === 'selection') { api('state').then((st) => { S.state = st; applySelection(st.selection); }).catch(() => {}); return; }
+  if (n.kind === 'agent_state' && n.state) { S.agentState = n.state; renderAgentState(); return; }
   if (n.kind === 'state' || n.kind === 'agent_done') scheduleRefresh();
 });
 
@@ -183,8 +188,15 @@ const vision = initVision({
   showPreview: (id) => showPreview(id), refresh: () => refresh(),
 });
 
+// Visual comparison panel and closed-loop refinement (reference images stay constraints).
+const visualPanel = initVisualPanel({
+  $, toast: (...a) => toast(...a), getState: () => S.state,
+  attachmentIds: () => vision.attachmentIds(), clearAttachments: () => vision.clearAttachments(),
+});
+
 function render(st) {
   S.selection = st.selection;
+  if (!st.refine_state) S.refineState = null;
   S.level = st.level;
   loadMaterials(st.path ?? st.name);
   $('project').replaceChildren(h('span', { class: 'pname' }, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, '●') : null, icon('down'));
@@ -619,13 +631,29 @@ function renderChat(st) {
     const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
     if (m.role === 'draft') return draftCard(m, st);
     if (m.role === 'tool') return h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`);
-    return h('div', { class: cls }, m.text, vision.thumbs(m.images));
+    return h('div', { class: cls }, m.text, vision.thumbs(m.images, m.docs));
   });
   nodes.push(...vision.proposalCards(st));
   for (const cs of st.pending) nodes.push(changeSetCard(cs));
-  if (st.busy) nodes.push(h('div', { class: 'msg system' }, 'The agent is working…'));
+  if (st.busy) nodes.push(h('div', { id: 'agent-state', class: 'msg system' }, st.refine_state ? refineText(st.refine_state) : agentStateText(st.agent_state)));
   el.replaceChildren(...nodes);
   if (stick) el.scrollTop = el.scrollHeight;
+}
+
+// Workflow progress: Planning… / Creating base… (2/5) / Validating model… / Correcting… / Done.
+function agentStateText(ev) {
+  if (!ev || !ev.message || ev.state === 'IDLE') return 'The agent is working…';
+  let t = ev.message;
+  if (ev.state === 'EXECUTING' && ev.step && ev.total) t += ` (${ev.step}/${ev.total})`;
+  if (ev.state === 'CORRECTING' && ev.attempt) t += ` (attempt ${ev.attempt}/3)`;
+  return t;
+}
+
+const refineText = (ev) => `Visual refinement — ${ev.message}${ev.scores?.overall !== undefined ? ` (overall ${Math.round(ev.scores.overall * 100)}%)` : ''}`;
+
+function renderAgentState() {
+  const el = document.getElementById('agent-state');
+  if (el) el.textContent = S.refineState ? refineText(S.refineState) : agentStateText(S.agentState);
 }
 
 function draftCard(m, st) {
@@ -758,6 +786,7 @@ $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = $('prompt').value.trim();
   if (!text) return;
+  if (vision.uploading()) { toast('Wait until the attachments finish uploading.', 'bad'); return; }
   try {
     await api('prompt', { text, thinking: $('thinking').checked, images: vision.attachmentIds() });
     $('prompt').value = ''; autosize();

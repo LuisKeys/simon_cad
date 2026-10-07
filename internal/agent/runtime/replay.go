@@ -55,6 +55,9 @@ func (r *Recorder) SupportsImages() bool {
 	return true
 }
 
+// Capabilities delegates to the wrapped provider.
+func (r *Recorder) Capabilities() ProviderCapabilities { return CapabilitiesOf(r.Inner) }
+
 func (r *Recorder) Complete(ctx context.Context, req Request) (*Response, error) {
 	resp, err := r.Inner.Complete(ctx, req)
 	if err == nil {

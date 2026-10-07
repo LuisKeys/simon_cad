@@ -201,12 +201,73 @@ leak check, incremental-rebuild budget, and the servo-bracket dogfood test.
 | File | Contents |
 |---|---|
 | `types.go` | Provider-neutral `Message`, `Block`, `ToolDef`, `Request`, `Response`, `Provider` interface |
-| `provider.go` | `NewProviderFromEnv` — `SIMONCAD_PROVIDER` → Claude / OpenAI / Ollama |
-| `claude.go` | Anthropic Messages API client (retries on 429 / 5xx) |
-| `openai.go` | Chat Completions client for OpenAI and Ollama; converts between the neutral blocks and OpenAI messages / tool calls |
+| `provider.go` | `NewProviderFromEnv` — `SIMONCAD_PROVIDER` → Claude / OpenAI / Ollama; `NewNamedProviderFromEnv` builds any one of them |
+| `capabilities.go` | Provider capability registry: `ProviderCapabilities` (text, vision, attachments, structured output, tool calls), `ModelCapabilities(flavor, model)` (Ollama vision by model family or `OLLAMA_VISION`), `CapabilitiesOf` |
+| `router.go` | Model router: `Router.Route(need)` → the selected provider if it has the capabilities, else OpenAI, else Claude, else `CapabilityUnavailableError` |
+| `claude.go` | Anthropic Messages API client (retries on 429 / 5xx); image and PDF document blocks |
+| `openai.go` | Responses API client for OpenAI (images, PDF `input_file`) and Chat Completions for Ollama (image parts for multimodal models); converts between the neutral blocks and OpenAI messages / tool calls |
 | `replay.go` | `Recording`, `Replay` provider, `Recorder` wrapper |
-| `runtime.go` | `Capability` interface, `Runtime.Run` tool-call loop, `Result` |
+| `runtime.go` | `Capability` interface, `Runtime.Run`, `Conversation` (`Begin` / `Send` / `Finish`: the tool-call loop, reusable one plan step at a time), `ImageInterpreter` hook for providers without vision, `Result` |
 | `eval.go` | `Case`, `RunCase`, `LoadCases`, `Match`, `Suite` |
+
+## `internal/agent/attachments` — attachment processor
+
+`Classify` sorts an upload into `IMAGE` / `TEXT` / `DOCUMENT` (PDF) / `UNKNOWN`; `Requirements`
+maps each kind to the provider capabilities it needs (vision, text, attachments). `Processor`
+routes the work through the model router: with a text-only selected provider (e.g. Ollama) an
+image goes to a vision model that runs `analyze_image` (no model edits) and returns a structured
+description, which the selected provider then works from as the CAD agent; `ExtractDocument`
+turns a PDF into text on a document-capable model. Nothing is routed by provider name.
+
+## `internal/agent/workflow` — autonomous workflow
+
+`User request → Plan → Execute → Validate → Correct → Final result`, with the states `IDLE`,
+`PLANNING`, `EXECUTING`, `VALIDATING`, `CORRECTING`, `COMPLETED`, `FAILED` reported through
+`Agent.OnState`.
+
+| File | Contents |
+|---|---|
+| `planner.go` | `NeedsPlan` (simple edits skip planning), `Planner` (one `submit_plan` call → `Plan`: analysis, steps with refs and dependencies, expectations) |
+| `executor.go` | `Executor` runs steps one `Conversation.Send` at a time; `StepResult` per step; dependents of a failed step are skipped; refs map to feature ids |
+| `validator.go` | Deterministic `Validator`: failed/skipped steps, missing refs, dangling dependencies, failed or empty bodies, dimensions (2 % / 0.5 mm), position, material/color, body count; each issue blamed on a step |
+| `correction.go` | `Corrector`: re-executes failed steps and their dependents, otherwise one targeted repair request; `MaxAutocorrectionAttempts = 3` |
+| `agent.go` | `Agent.Run` orchestration; an attempt that adds structural problems is undone (latest valid state); final summary |
+
+The UI uses the workflow by default (`SIMONCAD_AUTONOMOUS=off` disables it); the CLI with
+`--autonomous`. Recorded evals keep using `Runtime.Run`.
+
+## `internal/visual` — deterministic visual measurement
+
+No language model and no geometry edits. `camera.go`: fixed cameras (left/right/front/rear/top
+orthographic, front_3q/rear_3q perspective; azimuth 0 = front, 90 = left side) and a fixed
+`Frame`, so renders of successive iterations share their pixel scale. `raster.go`: z-buffered
+software rasterizer over the tessellated bodies (shaded with outlines, or silhouette: object
+white, background black). `mask.go`: reference segmentation (alpha, or border-colour background
+estimate + largest component + hole filling), normalization, IoU, chamfer contour distance,
+bounding-box aspect, mirroring for side views, difference images. `proportions.go`: landmarks in
+normalized image coordinates, ratios (wheelbase, height/length, overhangs, cabin, wheel diameter,
+windshield, roof width), ratio comparison and landmark alignment. `scoring.go`: the stages
+BLOCKOUT → PRIMARY → SECONDARY → MATERIALS with thresholds and per-stage weights. `state.go`:
+references and calibrations, regions and locks, the render store (session only), the iteration
+history and failed corrections (saved in `agent-history.json` under `visual`).
+
+## `internal/agent/refine` — visual closed-loop refinement
+
+Separate roles: `Planner` (modeling strategy: design parameters, regions, stage contents),
+`Builder` (the CAD builder: the ordinary tool loop, at most 3 structural changes per correction
+via `Runtime.MaxStructural`), the renderer (`App.RenderCamera`), `VisionCritic` (structured JSON
+only, no tools that edit), `Analyzer` (reference view, calibration, landmarks) and `Controller`
+(the loop: render → measure + critique → advance the stage when its thresholds pass, otherwise
+apply ≤ 3 corrections → render → revert if the overall score drops by more than the tolerance,
+remembering the failed correction; every iteration gets a checkpoint). The builder never needs
+vision; the critic and analyzer use a vision model chosen by the router.
+
+Design parameters are `parameters` nodes (no geometry) referenced by feature expressions
+(`vehicle.wheelbase`); tools `define_parameters`, `set_parameter`, `bind_parameters`. Region
+tools `define_region`, `lock_region`, `unlock_region`; `render_model`,
+`calibrate_reference_image`, `get_visual_state` (capability `visual`). Locks are enforced in
+`App.ApplyTool` for every caller (agent, UI, CLI): geometry of a locked region cannot change,
+appearance can.
 
 ## `internal/agent/capabilities/geometry`
 

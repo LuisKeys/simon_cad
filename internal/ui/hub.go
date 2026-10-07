@@ -1,14 +1,23 @@
 package ui
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/accelone/simoncad/internal/agent/refine"
+	"github.com/accelone/simoncad/internal/agent/workflow"
+)
 
 // Notice tells a front end that something changed; it carries no model data, so a client
 // refetches the state or scene it needs.
 type Notice struct {
-	Kind string       `json:"kind"` // state | selection | chat | event | agent_done
-	Type string       `json:"type,omitempty"`
-	Seq  int          `json:"seq,omitempty"`
-	Chat *ChatMessage `json:"chat,omitempty"`
+	Kind  string          `json:"kind"` // state | selection | chat | event | agent_state | agent_done | refine | visual
+	Type  string          `json:"type,omitempty"`
+	Seq   int             `json:"seq,omitempty"`
+	Chat  *ChatMessage    `json:"chat,omitempty"`
+	State *workflow.Event `json:"state,omitempty"` // agent_state: the workflow transition
+	// Refine is a visual-refinement progress event (kind "refine"); kind "visual" means the
+	// visual state (iterations, regions, references) changed.
+	Refine *refine.Event `json:"refine,omitempty"`
 }
 
 // Hub fans notices out to subscribers without ever blocking the publisher.

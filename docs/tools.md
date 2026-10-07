@@ -47,6 +47,15 @@ Align bodies along one or more axes by moving them (each moved body gets a trans
 | `reference` | string |  | Optional body that stays put and is aligned to |
 | `to` | first \| selection \| origin |  | What to align to (first \| selection \| origin) |
 
+### `bind_parameters`
+
+Drive several parameters of one feature by expressions over design parameters in ONE ChangeSet, e.g. feature='body', bindings={dx:'vehicle.length', dz:'vehicle.height - vehicle.ground_clearance'}.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `bindings` | object | yes | parameter → expression |
+| `feature` | string | yes | Feature id |
+
 ### `boolean`
 
 Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`; op=intersect keeps only the volume shared by both. Both inputs are consumed (they stop appearing as separate bodies).
@@ -181,6 +190,15 @@ Create a torus (ring, O-ring seat, donut). Centered at (x,y,z); `major_radius` i
 | `x` | number |  | Center X (mm) |
 | `y` | number |  | Center Y (mm) |
 | `z` | number |  | Center Z (mm) |
+
+### `define_parameters`
+
+Create or extend a named set of design parameters (numbers in mm or degrees) that control major geometry, e.g. set='vehicle' with length, width, height, wheelbase, front_overhang, roof_height, windshield_angle. Then drive feature parameters from them with bind_parameters (dx = 'vehicle.length'), so later refinement edits one parameter (set_parameter) and every dependent feature regenerates. Prefer this over destructive edits.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `parameters` | object | yes | name → number |
+| `set` | string | yes | Parameter set id, lowercase (e.g. vehicle) |
 
 ### `delete_objects`
 
@@ -440,6 +458,15 @@ Set display opacity (0 = invisible, 1 = opaque; ~0.5 for 'semi-transparent') of 
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 | `opacity` | number | yes | Opacity 0..1 |
 
+### `set_parameter`
+
+Change one design parameter (name, or set.name when several sets have it); every feature bound to it regenerates. This is the preferred way to correct proportions during visual refinement (e.g. roof_height 1020, windshield_angle 26).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Parameter name or set.name |
+| `value` | number | yes | New value |
+
 ### `set_visibility`
 
 Show or hide features/bodies in the viewport (e.g. 'hide the reference servo'). Hidden objects still exist and are still exported. Defaults to the current selection.
@@ -505,6 +532,21 @@ Record what you see in an attached image as a structured sketch proposal (this d
 | `profiles` | array of object | yes | Closed regions: an outer loop of entity ids plus inner loops (holes/cutouts) |
 | `relationships` | array of object |  | Detected relations |
 
+### `calibrate_reference_image`
+
+Read or manually set the camera of a reference image (azimuth 0=front, 90=left side, 180=rear, 270=right; elevation 90=top; projection orthographic|perspective; scale). With only image_id it returns the current calibration; giving values stores a manual calibration that automatic analysis will not overwrite.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `azimuth` | number |  | Degrees |
+| `elevation` | number |  | Degrees |
+| `focal_length_mm` | number |  | 35 mm-equivalent focal length (perspective) |
+| `image_id` | string | yes | Reference image id |
+| `mirrored` | boolean |  | The object faces the other way |
+| `projection` | orthographic \| perspective |  | Projection (orthographic \| perspective) |
+| `scale` | number |  | Relative scale, default 1 |
+| `view` | left \| right \| front \| rear \| top \| front_3q \| rear_3q \| other |  | View label (left \| right \| front \| rear \| top \| front_3q \| rear_3q \| other) |
+
 ### `check_delete`
 
 Dry run of delete_objects: reports which features would be deleted, which selected faces/edges/vertices resolve to which owning feature, and which other features depend on the targets. Changes nothing.
@@ -524,6 +566,16 @@ Record the user's answer about a dimension: confirm the detected value, or give 
 | `dimension` | string | yes | Dimension id |
 | `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
 | `value` | number > 0 |  | Value in mm; omit to confirm the detected value |
+
+### `define_region`
+
+Declare which CAD objects and design parameters shape a visual region (e.g. 'roof' → objects [roof, cabin], parameters [vehicle.roof_height]). The vision critic reports errors per region, so regions make its corrections actionable. Redefining a region keeps its lock.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Region name, e.g. roof, front_hood, wheels |
+| `objects` | array of string |  | Feature ids |
+| `parameters` | array of string |  | Design parameters (set.name) |
 
 ### `export_step`
 
@@ -572,6 +624,12 @@ Read an interpretation's current proposal and its validation report (missing / u
 |---|---|---|---|
 | `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
 
+### `get_visual_state`
+
+Describe the visual refinement state: references (view, calibration, landmarks), reference proportions, regions and locks, design parameters, current stage and the latest scores.
+
+_No arguments._
+
 ### `list_materials`
 
 List the visual materials in the library (built-in plus project materials), optionally for one category (Metals, Plastics, Rubber, Carbon Fiber, Glass, Electronics, Wood, Generic).
@@ -579,6 +637,14 @@ List the visual materials in the library (built-in plus project materials), opti
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `category` | string |  | Category filter, optional |
+
+### `lock_region`
+
+Lock a region whose geometry is already correct: its objects and parameters cannot be modified (appearance still can) until unlock_region.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Region name |
 
 ### `measure_distance`
 
@@ -588,6 +654,16 @@ Measure between two things. Each of `from`/`to` is a selector like face(feature=
 |---|---|---|---|
 | `from` | string | yes | Selector or feature id |
 | `to` | string | yes | Selector or feature id |
+
+### `render_model`
+
+Render the current model offscreen from fixed cameras (left, right, front, rear, top orthographic; front_3q, rear_3q perspective). mode=shaded for appearance, silhouette for a binary mask (object white, background black). Returns render ids; when references exist, each matching view also gets its silhouette score. Never assume the model looks right without rendering it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `mode` | shaded \| silhouette |  | Render mode (default shaded) (shaded \| silhouette) |
+| `resolution` | array of integer ≥ 64 ≤ 2048 |  | [width, height], default [1024, 1024] |
+| `views` | array of left \| right \| front \| rear \| top \| front_3q \| rear_3q |  | Default: left, front, top, front_3q |
 
 ### `search_materials`
 
@@ -616,6 +692,14 @@ Set the real scale of the drawing explicitly, either as mm_per_px, or as a lengt
 | `mm` | number > 0 |  | The real length of that distance (mm) |
 | `mm_per_px` | number > 0 |  | Millimetres per image pixel |
 | `pixels` | number > 0 |  | A length measured in the image (px) |
+
+### `unlock_region`
+
+Unlock a region. Only do this when the user explicitly asks.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Region name |
 
 ### `update_sketch_proposal`
 

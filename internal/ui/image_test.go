@@ -227,8 +227,9 @@ func TestPromptWithImageRejectedForTextOnlyProvider(t *testing.T) {
 	s.NewProvider = func() (runtime.Provider, error) {
 		return &runtime.OpenAI{Flavor: "ollama", BaseURL: "http://127.0.0.1:1", Model: "m"}, nil
 	}
+	s.NewRouter = func() *runtime.Router { return &runtime.Router{} } // no fallback configured
 	err := s.PromptWith("x", true, []string{info.ID})
-	if err == nil || !strings.Contains(err.Error(), "does not support image input") {
+	if err == nil || !strings.Contains(err.Error(), "no fallback provider is configured") {
 		t.Fatalf("got %v", err)
 	}
 	if err := s.PromptWith("x", true, []string{"img_nope"}); err == nil {

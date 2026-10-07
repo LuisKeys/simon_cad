@@ -74,6 +74,11 @@ type apiError struct {
 
 func (c *Claude) SupportsImages() bool { return true }
 
+// Capabilities: Claude accepts images, PDF documents and tools.
+func (c *Claude) Capabilities() ProviderCapabilities {
+	return ModelCapabilities(ProviderClaude, c.Model)
+}
+
 // maxImageBytes is the Messages API limit for one image.
 const maxImageBytes = 5 << 20
 

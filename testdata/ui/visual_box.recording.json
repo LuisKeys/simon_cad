@@ -1,0 +1,304 @@
+{
+ "source": "scripted",
+ "responses": [
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "u_submit_reference_analysis",
+     "name": "submit_reference_analysis",
+     "input": {
+      "view": "left",
+      "object_class": "car",
+      "calibration": {
+       "azimuth": 90,
+       "elevation": 0,
+       "projection": "orthographic"
+      },
+      "landmarks": {
+       "front_tip": [
+        0.17,
+        0.6
+       ],
+       "rear_tip": [
+        0.83,
+        0.6
+       ]
+      },
+      "known_dimensions_mm": {
+       "length": 4000
+      }
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "u_submit_strategy",
+     "name": "submit_strategy",
+     "input": {
+      "object_class": "car",
+      "parameter_set": "vehicle",
+      "parameters": {
+       "length": 4000,
+       "width": 1800,
+       "height": 1600
+      },
+      "regions": [
+       {
+        "name": "body",
+        "objects": [
+         "body"
+        ],
+        "parameters": [
+         "vehicle.height"
+        ]
+       }
+      ],
+      "stages": {
+       "BLOCKOUT": [
+        "body block"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "c0",
+     "name": "define_parameters",
+     "input": {
+      "set": "vehicle",
+      "parameters": {
+       "length": 4000,
+       "width": 1800,
+       "height": 1600
+      }
+     }
+    },
+    {
+     "type": "tool_use",
+     "id": "c1",
+     "name": "create_box",
+     "input": {
+      "id": "body",
+      "dx": 10,
+      "dy": 10,
+      "dz": 10
+     }
+    },
+    {
+     "type": "tool_use",
+     "id": "c2",
+     "name": "bind_parameters",
+     "input": {
+      "feature": "body",
+      "bindings": {
+       "dx": "vehicle.length",
+       "dy": "vehicle.width",
+       "dz": "vehicle.height"
+      }
+     }
+    },
+    {
+     "type": "tool_use",
+     "id": "c3",
+     "name": "define_region",
+     "input": {
+      "name": "body",
+      "objects": [
+       "body"
+      ],
+      "parameters": [
+       "vehicle.height"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "end_turn",
+   "content": [
+    {
+     "type": "text",
+     "text": "Created the blockout body driven by vehicle parameters."
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "u_submit_critique",
+     "name": "submit_critique",
+     "input": {
+      "overall_score": 0.5,
+      "largest_errors": [
+       {
+        "region": "body",
+        "problem": "body is too tall",
+        "severity": 0.9,
+        "estimated_correction": {
+         "parameter": "vehicle.height",
+         "value": 1000
+        }
+       }
+      ],
+      "good_regions": [],
+      "recommended_next_actions": [
+       "lower the body"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "c0",
+     "name": "set_parameter",
+     "input": {
+      "name": "vehicle.height",
+      "value": 1000,
+      "intent": "Lower the body to match the reference silhouette"
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "end_turn",
+   "content": [
+    {
+     "type": "text",
+     "text": "Lowered vehicle.height to 1000 mm."
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "u_submit_critique",
+     "name": "submit_critique",
+     "input": {
+      "overall_score": 0.96,
+      "largest_errors": [],
+      "good_regions": [
+       "body"
+      ],
+      "recommended_next_actions": []
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "end_turn",
+   "content": [
+    {
+     "type": "text",
+     "text": "Nothing to add for a simple block."
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "u_submit_critique",
+     "name": "submit_critique",
+     "input": {
+      "overall_score": 0.96,
+      "largest_errors": [],
+      "good_regions": [
+       "body"
+      ],
+      "recommended_next_actions": []
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "end_turn",
+   "content": [
+    {
+     "type": "text",
+     "text": "Nothing to add for a simple block."
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "u_submit_critique",
+     "name": "submit_critique",
+     "input": {
+      "overall_score": 0.96,
+      "largest_errors": [],
+      "good_regions": [
+       "body"
+      ],
+      "recommended_next_actions": []
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "c0",
+     "name": "set_color",
+     "input": {
+      "features": [
+       "body"
+      ],
+      "color": "#C0392B"
+     }
+    }
+   ]
+  },
+  {
+   "stop_reason": "end_turn",
+   "content": [
+    {
+     "type": "text",
+     "text": "Painted the body red."
+    }
+   ]
+  },
+  {
+   "stop_reason": "tool_use",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "u_submit_critique",
+     "name": "submit_critique",
+     "input": {
+      "overall_score": 0.96,
+      "largest_errors": [],
+      "good_regions": [
+       "body"
+      ],
+      "recommended_next_actions": []
+     }
+    }
+   ]
+  }
+ ]
+}

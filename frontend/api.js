@@ -39,6 +39,11 @@ export async function uploadSpec(file) {
 // <img src> cannot send headers, so the token travels in the query string for images.
 export const imageUrl = (id) => `/api/image/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
 
+// Offscreen renders and silhouette differences of the visual refinement.
+export const renderUrl = (id) => `/api/render/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
+export const diffUrl = (iteration, ref, previous) =>
+  `/api/visual/diff?iteration=${iteration}&ref=${encodeURIComponent(ref)}${previous ? '&previous=1' : ''}&token=${encodeURIComponent(token)}&t=${Date.now()}`;
+
 // Texture files of a material (loaded by Three's TextureLoader, which cannot set headers).
 export const materialUrl = (id, file) => `/api/materials/${encodeURIComponent(id)}/${encodeURIComponent(file)}?token=${encodeURIComponent(token)}`;
 

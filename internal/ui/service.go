@@ -19,9 +19,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/accelone/simoncad/internal/agent/attachments"
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
 	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
+	visualcap "github.com/accelone/simoncad/internal/agent/capabilities/visual"
+	"github.com/accelone/simoncad/internal/agent/refine"
 	"github.com/accelone/simoncad/internal/agent/runtime"
+	"github.com/accelone/simoncad/internal/agent/workflow"
 	"github.com/accelone/simoncad/internal/app"
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/events"
@@ -49,7 +53,13 @@ type ProviderFactory func() (runtime.Provider, error)
 type Service struct {
 	// NewProvider defaults to the environment-configured provider.
 	NewProvider ProviderFactory
-	Clock       func() time.Time
+	// NewRouter builds the model router (fallback providers for attachments the selected
+	// provider cannot handle). Defaults to the environment configuration.
+	NewRouter func() *runtime.Router
+	// Autonomous enables the plan → execute → validate → correct workflow for complex
+	// requests (default on; SIMONCAD_AUTONOMOUS=off disables it).
+	Autonomous bool
+	Clock      func() time.Time
 
 	mu    sync.Mutex
 	app   *app.App
@@ -65,6 +75,11 @@ type Service struct {
 	hub  *Hub
 
 	busy bool
+	// agentState is the workflow state of the running (or last) agent turn.
+	agentState *workflow.Event
+	// refineCancel stops the running visual refinement; refineState is its latest event.
+	refineCancel context.CancelFunc
+	refineState  *refine.Event
 	// draft holds the ChangeSets an agent turn committed at the Review level; the user keeps
 	// or discards them as one batch.
 	draft []string
@@ -79,12 +94,13 @@ type ChatMessage struct {
 	OK        bool     `json:"ok,omitempty"`
 	ChangeSet string   `json:"changeset,omitempty"`
 	Images    []string `json:"images,omitempty"` // ids of images attached to a user message
+	Docs      []string `json:"docs,omitempty"`   // documents first sent with this user message
 	Time      string   `json:"time"`
 }
 
 func NewService(a *app.App, path string) *Service {
-	s := &Service{NewProvider: runtime.NewProviderFromEnv, Clock: time.Now, level: LevelReview,
-		rend: rendering.New(), hub: NewHub()}
+	s := &Service{NewProvider: runtime.NewProviderFromEnv, NewRouter: runtime.NewRouterFromEnv, Clock: time.Now, level: LevelReview,
+		Autonomous: autonomousFromEnv(), rend: rendering.New(), hub: NewHub()}
 	s.rend.DetailFn = func() rendering.Detail { d, _ := rendering.ParseDetail(s.app.MeshDetail()); return d }
 	s.attach(a, path)
 	return s
@@ -412,6 +428,19 @@ func (u unlocking) Complete(ctx context.Context, r runtime.Request) (*runtime.Re
 	return u.Provider.Complete(ctx, r)
 }
 
+// Capabilities reports the wrapped provider's capabilities.
+func (u unlocking) Capabilities() runtime.ProviderCapabilities {
+	return runtime.CapabilitiesOf(u.Provider)
+}
+
+func autonomousFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SIMONCAD_AUTONOMOUS"))) {
+	case "0", "off", "false", "no":
+		return false
+	}
+	return true
+}
+
 // keepDraft accepts the open draft batch and records its checkpoint. Caller holds mu.
 func (s *Service) keepDraft() {
 	if len(s.draft) == 0 {
@@ -492,6 +521,7 @@ type Spec struct {
 	Name  string `json:"name"`
 	Chars int    `json:"chars"`
 	text  string
+	sent  bool // already shown on a user message
 }
 
 const (
@@ -509,11 +539,11 @@ func (s *Service) AddSpec(name string, data []byte) (Spec, error) {
 		return Spec{}, fmt.Errorf("document is larger than %d KB", maxSpecBytes>>10)
 	}
 	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
-		return Spec{}, fmt.Errorf("%s is not a text document (use .txt, .md, .json, .csv…)", name)
+		return Spec{}, fmt.Errorf("%s is not a text document (use .txt, .md, .json, .csv… or PDF)", name)
 	}
 	text := strings.TrimSpace(string(data))
 	if text == "" {
-		return Spec{}, fmt.Errorf("%s is empty", name)
+		return Spec{}, fmt.Errorf("%s is empty: the file has no text to attach", name)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -533,6 +563,47 @@ func (s *Service) AddSpec(name string, data []byte) (Spec, error) {
 	return sp, nil
 }
 
+// maxDocumentBytes bounds an uploaded PDF (its extracted text must still fit maxSpecBytes).
+const maxDocumentBytes = 20 << 20
+
+// AddAttachment classifies an uploaded document and attaches it as short-term memory:
+// text documents directly, PDFs after a document-capable model extracted their content
+// (routed through the model router, so it works with Ollama selected when OpenAI or Claude
+// is configured). Images go through UploadImage instead.
+func (s *Service) AddAttachment(name string, data []byte) (Spec, error) {
+	switch kind := attachments.Classify(name, data); kind {
+	case attachments.KindText:
+		return s.AddSpec(name, data)
+	case attachments.KindDocument:
+		if len(data) > maxDocumentBytes {
+			return Spec{}, fmt.Errorf("document is larger than %d MB", maxDocumentBytes>>20)
+		}
+		s.mu.Lock()
+		router, prov := s.NewRouter(), (runtime.Provider)(nil)
+		if p, err := s.NewProvider(); err == nil {
+			prov = p
+		}
+		s.mu.Unlock()
+		router.Selected = prov
+		text, model, err := (&attachments.Processor{Router: router}).ExtractDocument(context.Background(), name, data)
+		if err != nil {
+			return Spec{}, err
+		}
+		header := fmt.Sprintf("(content extracted from %s by %s)\n", filepath.Base(name), model)
+		if len(text) > maxSpecBytes-len(header) {
+			text = text[:maxSpecBytes-len(header)]
+			for !utf8.ValidString(text) {
+				text = text[:len(text)-1]
+			}
+		}
+		return s.AddSpec(name, []byte(header+text))
+	case attachments.KindImage:
+		return Spec{}, fmt.Errorf("%s is an image: attach it as an image", name)
+	default:
+		return Spec{}, fmt.Errorf("%s: unsupported attachment type (use images, text documents or PDF)", name)
+	}
+}
+
 // RemoveSpec detaches one document.
 func (s *Service) RemoveSpec(name string) error {
 	s.mu.Lock()
@@ -546,6 +617,19 @@ func (s *Service) RemoveSpec(name string) error {
 	s.specs = kept
 	s.hub.Publish(Notice{Kind: "state"})
 	return nil
+}
+
+// newSpecs marks the documents not yet shown on a user message as sent and returns their
+// names. Caller holds mu.
+func (s *Service) newSpecs() []string {
+	var out []string
+	for i := range s.specs {
+		if !s.specs[i].sent {
+			s.specs[i].sent = true
+			out = append(out, s.specs[i].Name)
+		}
+	}
+	return out
 }
 
 // specContext renders the attached documents for the model ("" when none).
@@ -592,14 +676,29 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		s.mu.Unlock()
 		return err
 	}
-	if c, ok := prov.(runtime.ImageCapable); ok && len(images) > 0 && !c.SupportsImages() {
-		s.mu.Unlock()
-		return fmt.Errorf("provider %s does not support image input; set SIMONCAD_PROVIDER to claude or openai", prov.Name())
+	// Images the selected provider cannot see go to a vision-capable model first (attachment
+	// processor + model router); the selected provider stays the CAD agent.
+	var interp runtime.ImageInterpreter
+	if len(images) > 0 && !runtime.CapabilitiesOf(prov).Vision {
+		router := s.NewRouter()
+		router.Selected = prov
+		proc := &attachments.Processor{Router: router, NoThinking: !thinking,
+			Wrap: func(p runtime.Provider) runtime.Provider { return unlocking{p, &s.mu} },
+			OnRoute: func(kind attachments.Kind, used string) {
+				s.say("system", fmt.Sprintf("%s cannot read images; the image is interpreted by %s.", prov.Name(), used), "", true, "")
+			}}
+		if err := proc.Available(attachments.KindImage); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		interp = proc.Images()
 	}
 	s.keepDraft() // a new request implicitly accepts the previous batch
 	s.busy = true
+	s.agentState = &workflow.Event{State: workflow.StateIdle}
 	prior := s.history()
 	s.sayWith("user", text, "", true, "", append([]string(nil), images...))
+	s.chat[len(s.chat)-1].Docs = s.newSpecs() // the message shows the documents it introduced
 	s.hub.Publish(Notice{Kind: "state"})
 	level := s.level
 	s.mu.Unlock()
@@ -614,7 +713,8 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		// The lock is held for the turn, except while waiting on the model (see unlocking).
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New(), vis.New()}, History: prior, NoThinking: !thinking, ImageIDs: images, Reference: s.specContext()}
+		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New(), vis.New(), visualcap.New()}, History: prior, NoThinking: !thinking,
+			ImageIDs: images, Interpreter: interp, Reference: s.specContext()}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
 			if o.ChangeSet != nil {
@@ -636,7 +736,17 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		if level == LevelAuto {
 			pol = app.PolicyAuto
 		}
-		res, err := rt.Run(context.Background(), s.app, text, pol)
+		var res *runtime.Result
+		var err error
+		if s.Autonomous {
+			ag := &workflow.Agent{Runtime: rt, OnState: s.setAgentState, OnRevert: s.dropFromDraft,
+				OnPlan: func(p *workflow.Plan) { s.say("plan", "Plan:\n"+p.Text(), "", true, "") }}
+			var wr *workflow.Result
+			wr, err = ag.Run(context.Background(), s.app, text, pol)
+			res = wr.Result
+		} else {
+			res, err = rt.Run(context.Background(), s.app, text, pol)
+		}
 		switch {
 		case err != nil:
 			s.say("system", "Agent error: "+err.Error(), "", false, "")
@@ -654,8 +764,30 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 	return nil
 }
 
-// maxPromptImages bounds the images of one request (a proposal is built from one drawing).
-const maxPromptImages = 4
+// setAgentState publishes a workflow transition. Caller holds mu.
+func (s *Service) setAgentState(ev workflow.Event) {
+	s.agentState = &ev
+	s.hub.Publish(Notice{Kind: "agent_state", State: &ev})
+}
+
+// dropFromDraft forgets draft ChangeSets that the workflow undid. Caller holds mu.
+func (s *Service) dropFromDraft(ids []string) {
+	gone := map[string]bool{}
+	for _, id := range ids {
+		gone[id] = true
+	}
+	kept := s.draft[:0]
+	for _, id := range s.draft {
+		if !gone[id] {
+			kept = append(kept, id)
+		}
+	}
+	s.draft = kept
+	s.hub.Publish(Notice{Kind: "state"})
+}
+
+// maxPromptImages bounds the images of one request.
+const maxPromptImages = 10
 
 // ---- images ----------------------------------------------------------------------------
 
@@ -1317,6 +1449,34 @@ type State struct {
 	Images      []ImageInfo      `json:"images"`
 	Specs       []Spec           `json:"specs"`
 	Proposals   []ProposalView   `json:"proposals"`
+	AgentState  *workflow.Event  `json:"agent_state,omitempty"`
+	RefineState *refine.Event    `json:"refine_state,omitempty"` // while a visual refinement runs
+	Features    Features         `json:"features"`
+}
+
+// Features says which attachment workflows can work with the configured providers. It
+// looks at every configured provider, not only the selected one: with Ollama selected,
+// images still work when OpenAI or Claude is configured.
+type Features struct {
+	Images      bool   `json:"images"`
+	ImageReason string `json:"image_reason,omitempty"`
+	Documents   bool   `json:"documents"` // PDF documents
+	// Refinement: visual closed-loop refinement can run (it needs a vision model).
+	Refinement bool `json:"refinement"`
+}
+
+func (s *Service) features() Features {
+	router := s.NewRouter()
+	if p, err := s.NewProvider(); err == nil {
+		router.Selected = p
+	}
+	proc := &attachments.Processor{Router: router}
+	f := Features{Images: proc.Available(attachments.KindImage) == nil, Documents: proc.Available(attachments.KindDocument) == nil}
+	f.Refinement = f.Images
+	if !f.Images {
+		f.ImageReason = "Image features need a vision model: set OPENAI_API_KEY and OPENAI_MODEL or ANTHROPIC_API_KEY (or use a multimodal Ollama model)."
+	}
+	return f
 }
 
 // State snapshots the project for the panels.
@@ -1343,6 +1503,10 @@ func (s *Service) State() (*State, error) {
 	}
 	if p, err := runtime.ProviderNameFromEnv(); err == nil {
 		st.Provider = p
+	}
+	st.AgentState, st.Features = s.agentState, s.features()
+	if s.refineCancel != nil {
+		st.RefineState = s.refineState
 	}
 	for _, n := range g.Nodes {
 		name := n.Metadata.Name

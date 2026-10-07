@@ -165,15 +165,15 @@ func (s *Server) routes() {
 	})
 	m.HandleFunc("/api/spec", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "POST the raw document text with ?name=", http.StatusMethodNotAllowed)
+			http.Error(w, "POST the raw document (text or PDF) with ?name=", http.StatusMethodNotAllowed)
 			return
 		}
-		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSpecBytes+1))
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDocumentBytes+1))
 		if err != nil {
-			fail(w, fmt.Errorf("document is larger than %d KB or unreadable", maxSpecBytes>>10))
+			fail(w, fmt.Errorf("document is larger than %d MB or unreadable", maxDocumentBytes>>20))
 			return
 		}
-		sp, err := s.Svc.AddSpec(r.URL.Query().Get("name"), b)
+		sp, err := s.Svc.AddAttachment(r.URL.Query().Get("name"), b)
 		reply(w, sp, err)
 	})
 	m.HandleFunc("/api/spec/remove", func(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +212,73 @@ func (s *Server) routes() {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "private, max-age=3600")
 		_, _ = w.Write(data)
+	})
+	// ---- visual refinement ----
+	pngOut := func(w http.ResponseWriter, data []byte) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		_, _ = w.Write(data)
+	}
+	m.HandleFunc("/api/visual", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, s.Svc.Visual()) })
+	m.HandleFunc("/api/render/", func(w http.ResponseWriter, r *http.Request) {
+		data, ok := s.Svc.RenderPNG(strings.TrimPrefix(r.URL.Path, "/api/render/"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		pngOut(w, data)
+	})
+	m.HandleFunc("/api/visual/diff", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		n, _ := strconv.Atoi(q.Get("iteration"))
+		data, err := s.Svc.VisualDiff(n, q.Get("ref"), q.Get("previous") == "1")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		pngOut(w, data)
+	})
+	m.HandleFunc("/api/visual/run", func(w http.ResponseWriter, r *http.Request) {
+		var in RefineRequest
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		if err := s.Svc.RunRefinement(in); err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+	})
+	m.HandleFunc("/api/visual/stop", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"ok": true}, s.Svc.StopRefinement())
+	})
+	iterationAction := func(f func(int) error) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			var in struct {
+				Iteration int `json:"iteration"`
+			}
+			if err := decode(r, &in); err != nil {
+				fail(w, err)
+				return
+			}
+			reply(w, map[string]any{"ok": true}, f(in.Iteration))
+		}
+	}
+	m.HandleFunc("/api/visual/accept", iterationAction(s.Svc.AcceptIteration))
+	m.HandleFunc("/api/visual/revert", iterationAction(s.Svc.RevertIteration))
+	m.HandleFunc("/api/visual/lock", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Region string `json:"region"`
+			Locked bool   `json:"locked"`
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.SetRegionLock(in.Region, in.Locked))
 	})
 	m.HandleFunc("/api/draft/keep", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"ok": true}, s.Svc.KeepDraft())

@@ -11,7 +11,7 @@ import { confidenceClass, pct, entityShapes, entityRoles, drawingWidthPx, uncert
 const OK_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_SIDE = 2048;          // longest side sent to the model
 const MAX_PLAIN_BYTES = 4.5e6;  // below this and ≤ MAX_SIDE the original file is sent as is
-const MAX_ATTACH = 4;
+const MAX_ATTACH = 10;         // images per request (the server enforces the same bound)
 
 /** Downscales large images (and re-encodes as JPEG) so uploads stay well under the API limits. */
 async function prepare(file) {
@@ -35,44 +35,104 @@ async function prepare(file) {
 /**
  * ctx: { $, toast, getState(), getSelection(), showPreview(id), refresh() }
  * Returns hooks the main app calls: attachmentIds(), clearAttachments(), onState(st),
- * proposalCards(st), thumbs(ids).
+ * proposalCards(st), thumbs(ids, docs), uploading().
  */
 export function initVision(ctx) {
   const { $, toast } = ctx;
   const V = { attach: [], open: null, dismissed: new Set(), seen: new Set(), drafts: {}, error: '', busy: false };
+  // Which attachment workflows the configured providers support (State.features).
+  const features = () => ctx.getState()?.features ?? { images: true, documents: false };
+  const imagesOff = () => {
+    if (features().images) return false;
+    toast(features().image_reason || 'Image features need a vision model (OpenAI or Claude).', 'bad');
+    return true;
+  };
 
   // ---- attachments ------------------------------------------------------------------
 
   const isImage = (f) => OK_TYPES.includes(f.type) || f.type.startsWith('image/');
+  let seq = 0;
+  // The server's error without the file name it repeats ("x.txt is empty: …" → "File is empty: …").
+  const reason = (name, msg) => {
+    let r = (msg || 'upload failed').trim();
+    if (r.startsWith(name)) r = r.slice(name.length).replace(/^[:\s]+/, '');
+    if (/^(is|has|was)\b/.test(r)) r = 'file ' + r;
+    return r.charAt(0).toUpperCase() + r.slice(1);
+  };
+  const kb = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
+  // Documents being uploaded (a PDF is extracted by a model first, which takes a while). They
+  // show as cards right away; the server's spec list replaces them once stored.
+  V.docs = [];
   async function addSpec(file) {
-    try { await uploadSpec(file); ctx.refresh(); } catch (e) { toast(e.message, 'bad'); }
+    const d = { key: ++seq, name: file.name || 'document', size: file.size, status: 'uploading' };
+    V.docs.push(d); renderSpecs(ctx.getState());
+    try {
+      await uploadSpec(file);
+      V.docs = V.docs.filter((x) => x !== d);
+      ctx.refresh();
+    } catch (e) {
+      d.status = 'error'; d.error = e.message;
+      toast(`${d.name}: ${e.message}`, 'bad');
+    }
+    renderSpecs(ctx.getState());
   }
 
   function renderSpecs(st) {
-    $('specs').replaceChildren(...(st?.specs ?? []).map((s) => h('span', { class: 'chip spec', title: `${s.name} · ${s.chars} characters · remembered until Clear` },
-      h('span', {}, `📄 ${s.name}`),
-      h('button', { type: 'button', 'aria-label': `Remove ${s.name}`, onclick: async () => { try { await api('spec/remove', { name: s.name }); ctx.refresh(); } catch (e) { toast(e.message, 'bad'); } } }, '✕'))));
+    const stored = (st?.specs ?? []).map((s) => h('span', { class: 'chip spec', title: `${s.name} · ${s.chars} characters · remembered until Clear` },
+      h('span', { class: 'ficon', 'aria-hidden': 'true' }, '📄'),
+      h('span', { class: 'fname' }, s.name), h('span', { class: 'fmeta' }, `${s.chars.toLocaleString()} chars`),
+      h('button', { type: 'button', 'aria-label': `Remove ${s.name}`, onclick: async () => { try { await api('spec/remove', { name: s.name }); ctx.refresh(); } catch (e) { toast(e.message, 'bad'); } } }, '✕')));
+    const pending = V.docs.map((d) => h('span', { class: `chip spec ${d.status}`, title: d.error ? `${d.name}: ${d.error}` : `${d.name} · uploading…` },
+      h('span', { class: 'ficon', 'aria-hidden': 'true' }, d.status === 'error' ? '⚠' : '📄'),
+      h('span', { class: 'fname' }, d.name), h('span', { class: 'fmeta' }, d.status === 'error' ? reason(d.name, d.error) : `${kb(d.size)} · uploading…`),
+      h('button', { type: 'button', 'aria-label': `Remove ${d.name}`, onclick: () => { V.docs = V.docs.filter((x) => x !== d); renderSpecs(ctx.getState()); } }, '✕')));
+    $('specs').replaceChildren(...stored, ...pending);
+    renderCount(st);
+  }
+
+  // The Attach button shows how many attachments go with the next message.
+  function renderCount(st = ctx.getState()) {
+    const n = V.attach.length + (st?.specs ?? []).length + V.docs.length;
+    let b = $('btn-attach').querySelector('.count');
+    if (!n) { b?.remove(); return; }
+    if (!b) { b = h('span', { class: 'count' }); $('btn-attach').append(b); }
+    b.textContent = String(n);
+    b.title = `${n} attachment${n === 1 ? '' : 's'}`;
   }
 
   const addAny = (f) => (isImage(f) ? addFile(f) : addSpec(f));
 
+  // An image card appears immediately (local preview, "uploading…"), then becomes ready or failed.
   async function addFile(file) {
-    if (V.attach.length >= MAX_ATTACH) { toast(`Attach at most ${MAX_ATTACH} images.`, 'bad'); return null; }
+    if (imagesOff()) return null;
+    if (V.attach.length >= MAX_ATTACH) { toast(`Attach at most ${MAX_ATTACH} images to one message.`, 'bad'); return null; }
+    const a = { key: ++seq, name: file.name || 'pasted image', status: 'uploading', preview: URL.createObjectURL(file) };
+    V.attach.push(a); renderAttachments();
     try {
-      const blob = await prepare(file);
-      const info = await uploadImage(blob);
-      if (!V.attach.some((a) => a.id === info.id)) V.attach.push({ id: info.id, w: info.width, h: info.height, name: file.name || 'pasted image' });
-      renderAttachments();
+      const info = await uploadImage(await prepare(file));
+      if (V.attach.some((x) => x.id === info.id)) V.attach = V.attach.filter((x) => x !== a); // same image twice
+      else Object.assign(a, { id: info.id, w: info.width, h: info.height, status: 'ready' });
       return info;
-    } catch (e) { toast(e.message, 'bad'); return null; }
+    } catch (e) {
+      Object.assign(a, { status: 'error', error: e.message });
+      toast(`${a.name}: ${e.message}`, 'bad');
+      return null;
+    } finally {
+      renderAttachments();
+      if (a.status !== 'error') URL.revokeObjectURL(a.preview); // the card now shows the stored image
+    }
   }
 
   function renderAttachments() {
-    $('attachments').replaceChildren(...V.attach.map((a) => h('span', { class: 'chip attach', title: `${a.name} · ${a.w}×${a.h}px` },
-      h('img', { src: imageUrl(a.id), alt: '' }),
-      h('span', {}, `${a.name} · ${a.w}×${a.h}`),
-      h('button', { type: 'button', 'aria-label': `Remove ${a.name}`, onclick: () => { V.attach = V.attach.filter((x) => x.id !== a.id); renderAttachments(); } }, '✕'))));
+    $('attachments').replaceChildren(...V.attach.map((a) => {
+      const meta = a.status === 'ready' ? `${a.w}×${a.h}` : a.status === 'error' ? reason(a.name, a.error) : 'uploading…';
+      return h('span', { class: `chip attach ${a.status}`, title: a.error ? `${a.name}: ${a.error}` : `${a.name} · ${meta}` },
+        h('img', { src: a.id ? imageUrl(a.id) : a.preview, alt: '' }),
+        h('span', { class: 'fname' }, `${a.name} · ${meta}`),
+        h('button', { type: 'button', 'aria-label': `Remove ${a.name}`, onclick: () => { V.attach = V.attach.filter((x) => x !== a); renderAttachments(); } }, '✕'));
+    }));
+    renderCount();
   }
 
   const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
@@ -83,23 +143,23 @@ export function initVision(ctx) {
   document.addEventListener('drop', async (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault(); dragDepth = 0; $('drop-hint').hidden = true;
-    for (const f of [...e.dataTransfer.files]) await addAny(f);
+    await Promise.all([...e.dataTransfer.files].map(addAny));
     $('prompt').focus();
   });
   document.addEventListener('paste', async (e) => {
     const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
     if (!files.length) return;
     e.preventDefault();
-    for (const f of files) await addFile(f);
+    await Promise.all(files.map(addFile));
     $('prompt').focus();
   });
   $('btn-attach').addEventListener('click', () => { V.fromImage = false; $('file-input').click(); });
-  $('btn-from-image').addEventListener('click', () => { V.fromImage = true; $('file-input').click(); });
+  $('btn-from-image').addEventListener('click', () => { if (imagesOff()) return; V.fromImage = true; $('file-input').click(); });
   $('file-input').addEventListener('change', async (e) => {
     const files = [...e.target.files];
     e.target.value = '';
-    for (const f of files) await addAny(f);
-    if (V.fromImage && V.attach.length && !$('prompt').value.trim()) {
+    await Promise.all(files.map(addAny));
+    if (V.fromImage && V.attach.some((a) => a.status === 'ready') && !$('prompt').value.trim()) {
       const onFace = (ctx.getSelection()?.selectors ?? []).some((s) => /^face\(/.test(s));
       $('prompt').value = onFace ? 'Create this shape on the selected face from the attached image.' : 'Create this part from the attached image.';
       $('composer').requestSubmit();
@@ -274,7 +334,7 @@ export function initVision(ctx) {
     closePanel();
     if (!V.attach.some((a) => a.id === p.image_id)) {
       const info = (ctx.getState().images ?? []).find((i) => i.id === p.image_id);
-      V.attach.push({ id: p.image_id, w: info?.width ?? p.image_w, h: info?.height ?? p.image_h, name: 'source image' });
+      V.attach.push({ key: ++seq, status: 'ready', id: p.image_id, w: info?.width ?? p.image_w, h: info?.height ?? p.image_h, name: 'source image' });
       renderAttachments();
     }
     $('prompt').value = `Correct interpretation ${p.id}: `;
@@ -335,13 +395,29 @@ export function initVision(ctx) {
     });
   }
 
-  function thumbs(ids) {
-    return (ids ?? []).length ? h('div', { class: 'thumbs' }, ids.map((id) => h('img', { class: 'thumb', src: imageUrl(id), alt: 'attached image', loading: 'lazy' }))) : null;
+  /** What a sent user message carried: image thumbnails and the documents attached with it. */
+  function thumbs(ids, docs) {
+    const imgs = (ids ?? []).map((id) => h('img', { class: 'thumb', src: imageUrl(id), alt: 'attached image', loading: 'lazy' }));
+    const files = (docs ?? []).map((d) => h('span', { class: 'msg-doc', title: `${d} · remembered until Clear` }, `📄 ${d}`));
+    return imgs.length || files.length ? h('div', { class: 'thumbs' }, ...imgs, ...files) : null;
+  }
+
+  // Hide image workflows that cannot work with the configured providers.
+  const TEXT_ACCEPT = '.txt,.md,.markdown,.json,.csv,.yaml,.yml,.xml,text/*';
+  function renderFeatures(st) {
+    const f = st.features ?? { images: true, documents: false };
+    $('btn-from-image').hidden = !f.images;
+    $('file-input').accept = [f.images ? OK_TYPES.join(',') : '', TEXT_ACCEPT, f.documents ? '.pdf,application/pdf' : ''].filter(Boolean).join(',');
+    $('btn-attach').title = (f.images ? 'Attach an image or a text document' : 'Attach a text document') +
+      (f.documents ? ' (or PDF)' : '') + ' with specifications (or drop / paste one anywhere). Documents are remembered until Clear.' +
+      (f.images ? '' : ' Images are unavailable: ' + (f.image_reason || 'no vision model is configured.'));
+    if (!f.images && V.attach.length) { V.attach = []; renderAttachments(); }
   }
 
   /** Called after every state refresh: opens the panel for a new interpretation, re-renders an open one. */
   function onState(st) {
     renderSpecs(st);
+    renderFeatures(st);
     for (const p of st.proposals ?? []) {
       if ((p.used ?? []).length || V.dismissed.has(p.id) || V.seen.has(p.id)) continue;
       V.seen.add(p.id);
@@ -360,8 +436,12 @@ export function initVision(ctx) {
   $('interp').addEventListener('click', (e) => { if (e.target === $('interp')) closePanel(); });
 
   return {
-    attachmentIds: () => V.attach.map((a) => a.id),
-    clearAttachments: () => { V.attach = []; renderAttachments(); },
+    attachmentIds: () => V.attach.filter((a) => a.status === 'ready').map((a) => a.id),
+    uploading: () => V.attach.some((a) => a.status === 'uploading') || V.docs.some((d) => d.status === 'uploading'),
+    clearAttachments: () => {
+      V.attach = []; V.docs = V.docs.filter((d) => d.status === 'uploading');
+      renderAttachments(); renderSpecs(ctx.getState());
+    },
     onState, proposalCards, thumbs,
   };
 }

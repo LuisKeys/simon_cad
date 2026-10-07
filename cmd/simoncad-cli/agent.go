@@ -13,11 +13,13 @@ import (
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
 	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
 	"github.com/accelone/simoncad/internal/agent/runtime"
+	"github.com/accelone/simoncad/internal/agent/workflow"
 	"github.com/accelone/simoncad/internal/app"
 )
 
 type agentFlags struct {
 	preview, commit bool
+	autonomous      bool
 	label           string
 	recording       string
 	record          string
@@ -63,7 +65,19 @@ func runAgentTurn(a *app.App, intent string, f *agentFlags, pol app.Policy, quie
 			fmt.Print("    " + strings.ReplaceAll(strings.TrimRight(describeOutcome(o), "\n"), "\n", "\n    ") + "\n")
 		}
 	}
-	res, err := rt.Run(ctx, a, intent, pol)
+	var res *runtime.Result
+	if f.autonomous {
+		ag := &workflow.Agent{Runtime: rt}
+		if !quiet && !jsonOut {
+			ag.OnState = func(ev workflow.Event) { fmt.Printf("[%s] %s\n", ev.State, ev.Message) }
+			ag.OnPlan = func(p *workflow.Plan) { fmt.Printf("Plan:\n%s\n", p.Text()) }
+		}
+		var wr *workflow.Result
+		wr, err = ag.Run(ctx, a, intent, pol)
+		res = wr.Result
+	} else {
+		res, err = rt.Run(ctx, a, intent, pol)
+	}
 	if ferr := finish(); ferr != nil && err == nil {
 		err = ferr
 	}
@@ -75,6 +89,7 @@ func agentFlagSet(name string) (*agentFlags, func([]string) ([]string, error)) {
 	fs := newFlags(name)
 	fs.BoolVar(&f.preview, "preview", false, "propose ChangeSets without committing")
 	fs.BoolVar(&f.commit, "commit", false, "commit every valid ChangeSet, even multi-step ones")
+	fs.BoolVar(&f.autonomous, "autonomous", false, "plan, execute, validate and auto-correct complex requests")
 	fs.StringVar(&f.label, "label", "", "semantic checkpoint label (default: the intent)")
 	fs.StringVar(&f.recording, "recording", "", "replay a recorded agent run instead of calling the API")
 	fs.StringVar(&f.record, "record", "", "save the live agent run to this recording file")

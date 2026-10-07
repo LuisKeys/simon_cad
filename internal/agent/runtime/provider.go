@@ -46,6 +46,12 @@ func NewProviderFromEnv() (Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewNamedProviderFromEnv(name)
+}
+
+// NewNamedProviderFromEnv builds one provider from its environment configuration,
+// independently of SIMONCAD_PROVIDER (the router uses it for fallbacks).
+func NewNamedProviderFromEnv(name string) (Provider, error) {
 	client := &http.Client{Timeout: 300 * time.Second}
 	switch name {
 	case ProviderOpenAI:
@@ -66,6 +72,12 @@ func NewProviderFromEnv() (Provider, error) {
 		}
 		return &OpenAI{Flavor: "ollama", Model: model, HTTP: client,
 			BaseURL: strings.TrimRight(envOr("OLLAMA_BASE_URL", "http://localhost:11434"), "/")}, nil
+	case ProviderClaude:
+		c, err := NewClaudeFromEnv()
+		if err != nil {
+			return nil, err // not a typed nil inside the interface
+		}
+		return c, nil
 	}
-	return NewClaudeFromEnv()
+	return nil, fmt.Errorf("unknown provider %q", name)
 }

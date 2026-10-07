@@ -21,9 +21,11 @@ import (
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
 	"github.com/accelone/simoncad/internal/persistence"
+	"github.com/accelone/simoncad/internal/rendering"
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
 	"github.com/accelone/simoncad/internal/vision"
+	"github.com/accelone/simoncad/internal/visual"
 	materialsdata "github.com/accelone/simoncad/materials"
 )
 
@@ -64,6 +66,10 @@ type App struct {
 	// Presentation only; it is never an input to geometry.
 	Materials *materials.Library
 	matDir    string // project dir whose assets/materials feed Materials ("" = none)
+	// Visual is the visual-refinement state (references, regions and locks, iteration
+	// history, offscreen renders). Not CAD state; region locks are enforced in ApplyTool.
+	Visual     *visual.State
+	offscreenR *rendering.Renderer
 	// meshDetail is the viewport mesh detail ("fine" | "normal" | "coarse"). Display only:
 	// it is not CAD state, is not saved and never changes geometry.
 	meshDetail string
@@ -86,7 +92,7 @@ func newApp(clock func() time.Time) *App {
 	k := api.New()
 	a := &App{K: k, Engine: rebuild.New(k), Graph: cadir.NewGraph(), Hist: &history.Log{}, Bus: events.NewBus(),
 		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI},
-		Vision: vision.NewStore(), Images: vision.NewImageStore(),
+		Vision: vision.NewStore(), Images: vision.NewImageStore(), Visual: visual.NewState(),
 		Materials: materials.New(materialsdata.FS())}
 	a.Bus.Now = clock
 	a.Mgr = commands.NewManager(a.Graph, a, a.Bus)
@@ -116,6 +122,11 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 	if len(a.AH.Interpretations) > 0 {
 		if err := json.Unmarshal(a.AH.Interpretations, a.Vision); err != nil {
 			return nil, fmt.Errorf("agent-history.json interpretations: %w", err)
+		}
+	}
+	if len(a.AH.Visual) > 0 {
+		if err := json.Unmarshal(a.AH.Visual, a.Visual); err != nil {
+			return nil, fmt.Errorf("agent-history.json visual: %w", err)
 		}
 	}
 	for _, im := range p.Images { // retained source images; the geometry never needs them
@@ -216,6 +227,14 @@ func (a *App) Save(dir string) error {
 			return err
 		}
 		a.AH.Interpretations = b
+	}
+	a.AH.Visual = nil
+	if !a.Visual.Empty() {
+		b, err := json.Marshal(a.Visual)
+		if err != nil {
+			return err
+		}
+		a.AH.Visual = b
 	}
 	var imgs []persistence.Image
 	for _, im := range a.Images.All() {
@@ -333,6 +352,13 @@ func (e toolEnv) Images() *vision.ImageStore     { return e.a.Images }
 func (e toolEnv) Materials() *materials.Library  { return e.a.Materials }
 func (e toolEnv) MeshDetail() string             { return e.a.MeshDetail() }
 func (e toolEnv) SetMeshDetail(level string)     { e.a.meshDetail = level }
+func (e toolEnv) Visual() *visual.State          { return e.a.Visual }
+func (e toolEnv) Render(views []string, w, h int, mode string) ([]*visual.Render, error) {
+	return e.a.Render(views, w, h, mode)
+}
+func (e toolEnv) SilhouetteAgainstReference(r *visual.Render) (visual.SilhouetteScore, bool) {
+	return e.a.SilhouetteAgainstReference(r)
+}
 func (e toolEnv) Provenance() cadir.Provenance {
 	return cadir.Provenance{CreatedBy: e.a.actor.CreatedBy, Capability: e.a.actor.Capability,
 		ToolCallID: e.a.callID, Model: e.a.actor.Model}
@@ -558,6 +584,11 @@ func (a *App) ApplyTool(name string, args []byte, policy Policy) Outcome {
 				break
 			}
 		}
+		_ = a.Mgr.Reject(cs.ID)
+		return out
+	}
+	if reason := a.lockViolation(cs, res.Plan.Commands); reason != "" {
+		out.Error = reason
 		_ = a.Mgr.Reject(cs.ID)
 		return out
 	}

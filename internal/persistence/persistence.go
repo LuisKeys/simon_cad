@@ -60,6 +60,9 @@ type AgentHistory struct {
 	// Interpretations are the image proposals (vision capability). They explain image-derived
 	// features but are never needed to rebuild geometry.
 	Interpretations json.RawMessage `json:"interpretations,omitempty"`
+	// Visual is the visual-refinement state: references and their analysis, regions and
+	// locks, the iteration history (scores, changes, parameters). Renders are not saved.
+	Visual json.RawMessage `json:"visual,omitempty"`
 }
 
 // Image is a retained source image stored under assets/images/.

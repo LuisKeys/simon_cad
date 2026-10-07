@@ -63,7 +63,7 @@ func editable(n *cadir.Node, name string) bool {
 	if isKnown(n.Type, name) {
 		return true
 	}
-	if n.Type == "sketch" && strings.HasPrefix(name, "dim_") {
+	if (n.Type == "sketch" && strings.HasPrefix(name, "dim_")) || n.Type == "parameters" {
 		_, ok := n.Parameters[name].(float64)
 		return ok
 	}
@@ -72,10 +72,10 @@ func editable(n *cadir.Node, name string) bool {
 
 func editableList(n *cadir.Node) string {
 	list := append([]string(nil), knownParams[n.Type]...)
-	if n.Type == "sketch" {
+	if n.Type == "sketch" || n.Type == "parameters" {
 		var dims []string
 		for k := range n.Parameters {
-			if strings.HasPrefix(k, "dim_") {
+			if strings.HasPrefix(k, "dim_") || n.Type == "parameters" {
 				dims = append(dims, k)
 			}
 		}
