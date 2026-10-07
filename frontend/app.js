@@ -7,9 +7,20 @@ import { initVision } from './vision.js';
 import { MaterialLibrary } from './materials/library.js';
 import { ThumbnailRenderer } from './materials/pbr.js';
 import { materialEditor, materialMenu, DND_TYPE, noteRecentMaterial } from './materials/panel.js';
+import { icon, featureIcon } from './icons.js';
+import { selectionContext, actionsFor, groupRuns, ACTIONS } from './actions.js';
+import { initPanels, getPref, setPref } from './panels.js';
 
 const $ = (id) => document.getElementById(id);
-const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false };
+const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
+  openNode: null, renaming: null, histSel: null, histOpen: getPref('history', true) };
+
+// Icons are declared in the markup (data-icon) and drawn here, so there is one icon set.
+function hydrateIcons(root = document) {
+  for (const el of root.querySelectorAll('[data-icon]:not([data-ic])')) { el.dataset.ic = '1'; el.prepend(icon(el.dataset.icon)); }
+}
+hydrateIcons();
+const panels = initPanels({ layout: $('layout'), toggles: { left: $('btn-panel-left'), right: $('btn-panel-right') } });
 
 // ---- viewport wiring -----------------------------------------------------------------
 
@@ -38,8 +49,8 @@ const vp = new Viewport($('gl'), $('cube'), {
     const ids = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
     const hasMat = (S.state?.tree ?? []).some((t) => ids.includes(t.id) && t.appearance?.material_id);
     showMenu(at, [
-      ...(ids.length ? materialMenu(materialCtx, ids, { hasMaterial: hasMat, openPanel: () => materialCtx.rerender() }) : []),
-      { label: n > 1 ? `Delete ${n} selected` : 'Delete', key: 'Del', danger: true, disabled: n === 0, run: () => deleteObjects() }]);
+      ...(ids.length ? [...materialMenu(materialCtx, ids, { hasMaterial: hasMat, openPanel: openMaterialPanel }), { sep: true }] : []),
+      { label: n > 1 ? `Delete ${n} selected` : 'Delete', icon: 'trash', key: 'Del', danger: true, disabled: n === 0, run: () => deleteObjects() }]);
   },
   onHover: (p) => {
     $('hud').textContent = p ? `${p.kind} ${p.kind === 'body' ? p.body : '#' + p.index} on ${p.body}` : hudStats();
@@ -117,6 +128,8 @@ function applySelection(sel) {
   S.selection = sel;
   vp.setSelection(sel.highlights ?? []);
   renderSelection(sel);
+  if (S.state) renderTree(S.state);
+  renderCtxBar();
 }
 
 // ---- data refresh --------------------------------------------------------------------
@@ -168,50 +181,131 @@ const vision = initVision({
 });
 
 function render(st) {
+  S.selection = st.selection;
+  S.level = st.level;
   loadMaterials(st.path ?? st.name);
-  $('project').replaceChildren(...[h('span', {}, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, ' ●') : null].filter(Boolean));
+  $('project').replaceChildren(h('span', { class: 'pname' }, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, '●') : null, icon('down'));
   $('btn-undo').disabled = !st.can_undo || st.busy;
   $('btn-clear').disabled = st.busy || (st.chat.length === 0 && !(st.specs ?? []).length);
   $('btn-redo').disabled = !st.can_redo || st.busy;
-  $('level').value = st.level;
-  $('btn-play').disabled = st.frames === 0 || S.playing;
   $('send').disabled = st.busy;
-  $('send').textContent = st.busy ? 'Working…' : 'Send';
+  $('send').classList.toggle('busy', !!st.busy);
+  $('send').title = st.busy ? 'Working…' : 'Send (Enter)';
   renderTree(st);
   renderSelection(st.selection);
   renderTimeline(st);
   renderChat(st);
+  renderCtxBar();
   vision.onState(st);
 }
+
+// Touch equivalent of right-click: press and hold. A click that follows a long-press is swallowed.
+function onLongPress(el, fn, ms = 500) {
+  let t = null, x0 = 0, y0 = 0;
+  const cancel = () => { clearTimeout(t); t = null; };
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
+    x0 = e.clientX; y0 = e.clientY; cancel();
+    t = setTimeout(() => { t = null; el._lp = performance.now(); fn({ x: x0, y: y0 }); }, ms);
+  });
+  el.addEventListener('pointermove', (e) => { if (t && Math.hypot(e.clientX - x0, e.clientY - y0) > 8) cancel(); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, cancel);
+}
+const justLongPressed = (el) => performance.now() - (el._lp ?? -1e9) < 700;
 
 function renderTree(st) {
   const el = $('tree');
   if (!st.tree.length) { el.replaceChildren(h('div', { class: 'muted' }, 'No features yet.')); return; }
-  const selFeatures = new Set((st.selection.selectors ?? []).map(featureOf));
+  const sel = S.selection ?? st.selection;
+  const selFeatures = new Set((sel.selectors ?? []).map(featureOf));
   el.replaceChildren(...st.tree.map((n) => {
     const open = S.openNode === n.id;
-    const row = h('div', { class: 'row', role: 'treeitem', 'aria-expanded': String(open), tabindex: '0', dataset: { id: n.id },
-      oncontextmenu: (e) => {
-        e.preventDefault();
-        showMenu({ x: e.clientX, y: e.clientY }, [{ label: `Delete ${n.name}`, key: 'Del', danger: true, run: () => deleteObjects({ features: [n.id] }) }]);
-      },
-      onclick: () => { S.openNode = open ? null : n.id; renderTree(S.state); },
-      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } } },
-      h('span', { class: `dot ${n.status === 'ok' && !n.suppressed ? '' : n.suppressed ? 'suppressed' : n.status}`, title: n.suppressed ? 'suppressed' : n.status }),
-      h('span', { class: 'name', title: n.id }, n.name),
-      h('span', { class: 'type' }, n.type),
-      h('span', { class: `badge ${n.created_by}`, title: n.capability ? `${n.created_by} · ${n.capability}` : n.created_by }, n.created_by || '—'),
-      n.visible ? null : h('span', { class: 'badge hidden', title: 'Consumed by a later feature' }, 'input'),
-      n.visible ? h('button', { type: 'button', class: 'eye', 'aria-pressed': String(n.appearance?.visible !== false),
-        'aria-label': `${n.appearance?.visible === false ? 'Show' : 'Hide'} ${n.name}`, title: n.appearance?.visible === false ? 'Show' : 'Hide',
-        onclick: (e) => { e.stopPropagation(); applyAppearance('set_visibility', [n.id], { visible: n.appearance?.visible === false }); } },
-        n.appearance?.visible === false ? '🚫' : '👁') : null);
+    const selected = selFeatures.has(n.id);
+    const hiddenApp = n.appearance?.visible === false;
+    const renaming = S.renaming === n.id;
+    const row = h('div', { class: 'row', role: 'treeitem', 'aria-selected': String(selected), 'aria-expanded': String(open), tabindex: '0',
+      title: n.intent ? `${n.type} — ${n.intent}` : n.type, dataset: { id: n.id },
+      oncontextmenu: (e) => { e.preventDefault(); if (!justLongPressed(row)) treeMenu(n, { x: e.clientX, y: e.clientY }); },
+      onclick: (e) => { if (justLongPressed(row)) return; rowClick(n, e); },
+      ondblclick: () => startRename(n),
+      onkeydown: (e) => {
+        if (e.target !== row) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); rowClick(n, e); }
+        else if (e.key === 'F2') { e.preventDefault(); startRename(n); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const rows = [...el.querySelectorAll('.row')];
+          rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+        }
+      } },
+      n.visible ? h('button', { type: 'button', class: 'eye', 'aria-pressed': String(!hiddenApp),
+        'aria-label': `${hiddenApp ? 'Show' : 'Hide'} ${n.name}`, title: hiddenApp ? 'Show' : 'Hide',
+        onclick: (e) => { e.stopPropagation(); applyAppearance('set_visibility', [n.id], { visible: hiddenApp }); } },
+        icon(hiddenApp ? 'eye-off' : 'eye')) : h('span', { style: 'width:34px;flex:none' }),
+      h('span', { class: 'ficon' }, icon(featureIcon(n.type))),
+      n.suppressed || n.status !== 'ok' ? h('span', { class: `dot ${n.suppressed ? 'suppressed' : n.status}`, title: n.suppressed ? 'suppressed' : n.status }) : null,
+      renaming ? renameInput(n) : h('span', { class: 'name' }, n.name),
+      n.created_by === 'agent' ? h('span', { class: 'src agent', title: n.capability ? `agent · ${n.capability}` : 'created by the agent' }, 'agent') : null,
+      n.visible ? null : h('span', { class: 'src', title: 'Consumed by a later feature' }, 'input'),
+      selected ? h('button', { type: 'button', class: 'more', 'aria-haspopup': 'menu', 'aria-label': `Actions for ${n.name}`,
+        onclick: (e) => { e.stopPropagation(); treeMenu(n, { el: e.currentTarget }); } }, icon('more')) : null);
+    onLongPress(row, (pt) => treeMenu(n, pt));
     const kids = [row];
-    if (n.intent) kids.push(h('div', { class: 'intent' }, n.intent));
-    if (n.errors.length) kids.push(h('div', { class: 'errors' }, n.errors[0]));
-    if (open) kids.push(appearanceEditor([n]), paramEditor(n));
-    return h('div', { class: `node${selFeatures.has(n.id) ? ' sel' : ''}`, role: 'none' }, ...kids);
+    if (open) {
+      kids.push(h('div', { class: 'detail' },
+        n.intent ? h('div', { class: 'intent' }, n.intent) : null,
+        h('div', { class: 'meta' }, h('span', {}, n.type), h('span', {}, '·'), h('span', {}, n.id), n.created_by ? h('span', {}, '· ' + n.created_by) : null),
+        n.errors.length ? h('div', { class: 'errors' }, n.errors[0]) : null,
+        n.visible ? appearanceEditor([n]) : null, paramEditor(n)));
+    } else if (n.errors.length) kids.push(h('div', { class: 'detail' }, h('div', { class: 'errors' }, n.errors[0])));
+    return h('div', { class: `node${selected ? ' sel' : ''}${n.suppressed || hiddenApp ? ' off' : ''}`, role: 'none', dataset: { type: n.type } }, ...kids);
   }));
+  if (S.renaming) el.querySelector('input.rename')?.focus();
+}
+
+// Click selects the object (and shows its details); Shift adds, Ctrl/Cmd toggles; clicking
+// the one selected object again folds its details away.
+async function rowClick(n, e) {
+  if (S.renaming) return;
+  const redraw = () => { if (S.state) renderTree(S.state); };
+  if (!n.visible) { S.openNode = S.openNode === n.id ? null : n.id; redraw(); return; } // consumed features cannot be picked, only inspected
+  const sels = S.selection?.selectors ?? [];
+  const mode = e.shiftKey ? 'add' : (e.ctrlKey || e.metaKey) ? 'toggle' : 'replace';
+  if (mode === 'replace' && sels.length === 1 && /^body\(/.test(sels[0]) && featureOf(sels[0]) === n.id) { S.openNode = S.openNode === n.id ? null : n.id; redraw(); return; }
+  S.openNode = mode === 'replace' ? n.id : null;
+  try { applySelection(await api('pick', { body: n.id, kind: 'body', index: -1, triangle: -1, mode })); } catch (err) { toast(err.message, 'bad'); }
+}
+
+function renameInput(n) {
+  let done = false;
+  const finish = async (commit) => {
+    if (done) return; done = true;
+    const v = input.value.trim();
+    S.renaming = null;
+    if (S.state) renderTree(S.state);
+    if (commit && v && v !== n.name) await callTool('rename_feature', { feature: n.id, name: v });
+  };
+  const input = h('input', { type: 'text', class: 'rename', value: n.name, 'aria-label': `Rename ${n.name}`,
+    onclick: (e) => e.stopPropagation(), ondblclick: (e) => e.stopPropagation(),
+    onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); } },
+    onblur: () => finish(true) });
+  setTimeout(() => input.select(), 0);
+  return h('span', { class: 'name' }, input);
+}
+function startRename(n) { S.renaming = n.id; renderTree(S.state); }
+
+function treeMenu(n, at) {
+  const selIds = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
+  const ids = selIds.includes(n.id) && selIds.length > 1 ? selIds : [n.id];
+  const hiddenApp = n.appearance?.visible === false;
+  const nodes = ids.map((id) => S.state.tree.find((t) => t.id === id)).filter(Boolean);
+  showMenu(at, [
+    n.visible && { label: hiddenApp ? 'Show' : 'Hide', icon: hiddenApp ? 'eye' : 'eye-off', run: () => applyAppearance('set_visibility', ids, { visible: hiddenApp }) },
+    { label: 'Rename', icon: 'pencil', key: 'F2', disabled: ids.length > 1, run: () => startRename(n) },
+    { label: n.suppressed ? 'Unsuppress' : 'Suppress', icon: 'ban', run: async () => { for (const t of nodes) await callTool('suppress_feature', { feature: t.id, suppressed: !n.suppressed }); } },
+    { sep: true },
+    { label: ids.length > 1 ? `Delete ${ids.length} objects` : `Delete ${n.name}`, icon: 'trash', key: 'Del', danger: true, run: () => deleteObjects({ features: ids }) },
+  ]);
 }
 
 function paramEditor(n) {
@@ -286,20 +380,49 @@ async function deleteObjects(req = {}) {
   scheduleRefresh();
 }
 
-// A small context menu shared by the viewport and the design tree.
+// A small menu shared by the viewport, the design tree, the top bar and the action bar.
+// `at` is a point {x, y} or an anchor {el}. Items: {label, icon, key, run, danger, disabled,
+// checked (radio), data} plus {sep: true} and {head: 'Title'}.
 function showMenu(at, items) {
   const m = $('ctxmenu');
-  const close = () => { m.hidden = true; document.removeEventListener('pointerdown', away, true); };
+  const opener = document.activeElement;
+  const close = (restore = false) => {
+    m.hidden = true; document.removeEventListener('pointerdown', away, true);
+    if (restore && opener?.focus) opener.focus();
+  };
   const away = (e) => { if (!m.contains(e.target)) close(); };
-  m.replaceChildren(...items.map((it) => h('li', { role: 'menuitem', tabindex: '-1', class: it.danger ? 'danger' : '', 'aria-disabled': String(!!it.disabled),
-    onclick: () => { if (it.disabled) return; close(); it.run(); },
-    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.target.click(); } else if (e.key === 'Escape') close(); } },
-    h('span', {}, it.label), it.key ? h('kbd', {}, it.key) : null)));
+  const focusable = () => [...m.querySelectorAll('li[tabindex]')];
+  m.replaceChildren(...items.filter(Boolean).map((it) => {
+    if (it.sep) return h('li', { class: 'sep', role: 'separator' });
+    if (it.head) return h('li', { class: 'head', role: 'presentation' }, it.head);
+    const radio = it.checked !== undefined;
+    return h('li', { role: radio ? 'menuitemradio' : 'menuitem', tabindex: '-1', class: it.danger ? 'danger' : '', 'aria-disabled': String(!!it.disabled),
+      'aria-checked': radio ? String(!!it.checked) : null, dataset: it.data,
+      onclick: () => { if (it.disabled) return; close(); it.run?.(); },
+      onkeydown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); }
+        else if (e.key === 'Escape') { e.preventDefault(); close(true); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const f = focusable(); const i = f.indexOf(e.currentTarget);
+          f[(i + (e.key === 'ArrowDown' ? 1 : -1) + f.length) % f.length]?.focus();
+        }
+      } },
+    it.icon ? icon(it.icon) : radio ? (it.checked ? icon('check') : h('span', { class: 'ic' })) : null,
+    h('span', { class: 'lbl' }, it.label), it.key ? h('kbd', {}, it.key) : null);
+  }));
   m.hidden = false;
-  m.style.left = Math.min(at.x, innerWidth - m.offsetWidth - 8) + 'px';
-  m.style.top = Math.min(at.y, innerHeight - m.offsetHeight - 8) + 'px';
+  const w = m.offsetWidth, ht = m.offsetHeight;
+  let x, y;
+  if (at.el) {
+    const r = at.el.getBoundingClientRect();
+    x = r.left; y = r.bottom + 4;
+    if (y + ht > innerHeight - 8) y = Math.max(8, r.top - ht - 4);
+  } else { x = at.x; y = at.y; }
+  m.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(y, innerHeight - ht - 8)) + 'px';
   document.addEventListener('pointerdown', away, true);
-  m.firstElementChild?.focus();
+  focusable()[0]?.focus();
 }
 
 // ---- appearance (color / opacity / visibility) -----------------------------------------
@@ -368,11 +491,8 @@ function featureOf(sel) { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1
 function renderSelection(sel) {
   const list = $('sel-list'), chips = $('chips');
   const ents = sel?.entities ?? [];
-  if (!ents.length) {
-    list.replaceChildren(h('div', { class: 'muted' }, 'Click a face, edge or vertex in the viewport. Shift-click adds to the selection.'));
-    chips.replaceChildren();
-    return;
-  }
+  $('sel-section').hidden = !ents.length;
+  if (!ents.length) { list.replaceChildren(); chips.replaceChildren(); return; }
   const selNodes = (S.state?.tree ?? []).filter((n) => n.visible && new Set(ents.map((e) => featureOf(e.selector))).has(n.id));
   list.replaceChildren(...(selNodes.length ? [h('div', { class: 'sel-item' }, h('b', {}, `Appearance · ${selNodes.length} object${selNodes.length > 1 ? 's' : ''}`), appearanceEditor(selNodes))] : []), ...ents.map((e) => h('div', { class: 'sel-item' },
     h('code', {}, e.selector),
@@ -449,14 +569,37 @@ function changeSetCard(cs) {
 
 function renderTimeline(st) {
   const el = $('timeline');
-  if (!st.checkpoints.length) { el.replaceChildren(h('div', { class: 'none' }, 'Semantic timeline: checkpoints appear here as the design evolves.')); return; }
-  el.replaceChildren(...st.checkpoints.map((c) => h('div', { class: `cp${c.current ? ' current' : ''}`, title: `${c.label}\n${c.time}` },
-    h('div', { class: 'label' }, `${c.seq}. ${c.label}`),
-    h('div', { class: 'muted', style: 'font-size:11px' }, `${c.actor || 'user'} · ${c.changesets.length} change${c.changesets.length === 1 ? '' : 's'}`),
-    h('div', { class: 'acts' },
-      h('button', { disabled: c.current || st.busy, onclick: () => restoreCheckpoint(c) }, 'Restore'),
-      h('button', { onclick: () => compareCheckpoint(c) }, 'Compare')))));
+  const n = st.checkpoints.length;
+  $('hist-title').textContent = n ? `History · ${n} step${n === 1 ? '' : 's'}` : 'History';
+  const prev = el.scrollLeft, grew = n > (S.cpCount ?? 0);
+  S.cpCount = n;
+  if (S.histSel && !st.checkpoints.some((c) => c.id === S.histSel)) S.histSel = null;
+  if (!n) el.replaceChildren(h('div', { class: 'none' }, 'Checkpoints appear here as the design evolves.'));
+  else {
+    el.replaceChildren(...st.checkpoints.map((c) => {
+      const sel = S.histSel === c.id;
+      return h('button', { type: 'button', class: `cp${c.current ? ' current' : ''}${sel ? ' sel' : ''}`, 'aria-pressed': String(sel), title: `${c.label}\n${c.time}`,
+        onclick: () => { S.histSel = sel ? null : c.id; renderTimeline(S.state); } },
+        h('div', { class: 'label' }, h('span', { class: 'n' }, c.seq), c.label),
+        h('div', { class: 'sub' }, `${c.actor || 'user'} · ${c.changesets.length} change${c.changesets.length === 1 ? '' : 's'}`));
+    }));
+    el.scrollLeft = grew ? el.scrollWidth : prev;
+  }
+  // Restore / Compare exist only once a step is selected.
+  const c = st.checkpoints.find((x) => x.id === S.histSel);
+  const acts = $('hist-actions');
+  acts.hidden = !c;
+  if (c) acts.replaceChildren(
+    h('button', { type: 'button', disabled: c.current || st.busy, onclick: () => restoreCheckpoint(c) }, icon('restore'), 'Restore'),
+    h('button', { type: 'button', onclick: () => compareCheckpoint(c) }, icon('compare'), 'Compare'));
 }
+
+function applyHistoryOpen() {
+  $('history').dataset.open = String(S.histOpen);
+  $('hist-toggle').setAttribute('aria-expanded', String(S.histOpen));
+}
+$('hist-toggle').addEventListener('click', () => { S.histOpen = !S.histOpen; setPref('history', S.histOpen); applyHistoryOpen(); });
+applyHistoryOpen();
 
 // ---- ChangeSet lifecycle ----------------------------------------------------------------
 
@@ -525,7 +668,7 @@ $('composer').addEventListener('submit', async (e) => {
   if (!text) return;
   try {
     await api('prompt', { text, thinking: $('thinking').checked, images: vision.attachmentIds() });
-    $('prompt').value = '';
+    $('prompt').value = ''; autosize();
     vision.clearAttachments();
   } catch (err) { toast(err.message, 'bad'); }
 });
@@ -537,13 +680,19 @@ $('btn-clear').addEventListener('click', async () => {
 $('prompt').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
 });
+// The prompt grows with its content (52px minimum, 40% of the window at most).
+function autosize() {
+  const p = $('prompt');
+  p.style.height = 'auto';
+  p.style.height = Math.min(p.scrollHeight, innerHeight * 0.4) + 'px';
+}
+$('prompt').addEventListener('input', autosize);
 
 // ---- playback ------------------------------------------------------------------------
 
-$('btn-play').addEventListener('click', async () => {
+async function playDesign() {
   if (S.playing || !S.state?.frames) return;
   S.playing = true;
-  $('btn-play').disabled = true;
   clearPreview();
   vp.clear();
   try {
@@ -558,40 +707,233 @@ $('btn-play').addEventListener('click', async () => {
   S.playing = false;
   vp.clear();
   await refresh();
-});
-
-// ---- toolbar -------------------------------------------------------------------------
-
-for (const b of document.querySelectorAll('[data-filter]')) {
-  b.addEventListener('click', () => {
-    vp.filter = b.dataset.filter;
-    document.querySelectorAll('[data-filter]').forEach((x) => x.classList.toggle('on', x === b));
-  });
 }
-$('btn-measure').addEventListener('click', () => {
+
+// ---- contextual action bar -------------------------------------------------------------
+// A pure function of the selection (see actions.js): only actions valid right now are shown.
+// It sits in a fixed strip above the viewport. Actions that do not fit move into "More".
+
+const FILTERS = [['auto', 'Auto'], ['body', 'Body'], ['face', 'Face'], ['edge', 'Edge'], ['vertex', 'Vertex']];
+const VIEWS = [['Front', [0, -1, 0]], ['Back', [0, 1, 0]], ['Left', [-1, 0, 0]], ['Right', [1, 0, 0]], ['Top', [0, 0, 1]], ['Bottom', [0, 0, -1]]];
+
+function setFilter(f) { S.filter = f; vp.filter = f; renderCtxBar(); }
+function toggleMeasure() {
   const on = !vp.measure.on;
-  $('btn-measure').classList.toggle('on', on);
   vp.setMeasure(on);
   $('measure-label').hidden = true;
   $('hud').textContent = on ? 'Measure: click two points' : hudStats();
-});
-$('btn-mesh').addEventListener('click', () => {
-  const on = !vp.meshOnly;
-  $('btn-mesh').classList.toggle('on', on);
-  vp.setMeshOnly(on);
-});
-$('btn-fit').addEventListener('click', () => vp.fit());
-$('sec-axis').addEventListener('change', () => {
-  const axis = $('sec-axis').value;
-  $('sec-off').disabled = !axis;
-  vp.setSection(axis, Number($('sec-off').value));
-});
-$('sec-off').addEventListener('input', () => vp.setSection($('sec-axis').value, Number($('sec-off').value)));
-$('btn-undo').addEventListener('click', doUndo);
-$('btn-redo').addEventListener('click', doRedo);
-$('level').addEventListener('change', async () => {
-  try { await api('level', { level: $('level').value }); } catch (e) { toast(e.message, 'bad'); }
-});
+  renderCtxBar();
+}
+function setSection(axis) { vp.setSection(axis, vp.section?.t ?? 0.5); renderCtxBar(); }
+function toggleMesh() { vp.setMeshOnly(!vp.meshOnly); renderCtxBar(); }
+
+let ctxKey = '';
+function renderCtxBar() {
+  const box = $('ctx-actions');
+  const sel = selectionContext(S.selection?.selectors ?? []);
+  const actions = actionsFor(sel);
+  // Modes that are switched on stay reachable whatever is selected.
+  const keep = [vp.measure?.on && 'measure', vp.section?.axis && 'section', vp.meshOnly && 'view'].filter(Boolean);
+  for (const id of keep) {
+    if (actions.some((a) => a.id === id)) continue;
+    const at = actions.findIndex((a) => a.group === 'destructive');
+    actions.splice(at < 0 ? actions.length : at, 0, ACTIONS.find((a) => a.id === id));
+  }
+  const key = `${sel.ctx}:${actions.map((a) => a.id).join()}`;
+  if (key !== ctxKey) { ctxKey = key; box.classList.remove('swap'); void box.offsetWidth; box.classList.add('swap'); }
+  const hidden = new Set();
+  const draw = () => {
+    const shown = actions.filter((a) => !hidden.has(a.id));
+    const more = hidden.size ? ctxMore(actions.filter((a) => hidden.has(a.id)), sel) : null;
+    const groups = groupRuns(shown).map((run) => h('div', { class: `cgroup ${run.group}`, role: 'group', 'aria-label': run.group },
+      ...run.items.map((a) => ctxButton(a, sel))));
+    // "More" sits before the destructive group, which always stays last and set apart.
+    if (more) { const i = groups.findIndex((g) => g.classList.contains('destructive')); groups.splice(i < 0 ? groups.length : i, 0, h('div', { class: 'cgroup' }, more)); }
+    box.replaceChildren(...groups);
+  };
+  draw();
+  // Overflow: move the least important actions into "More" until the bar fits. Non-primary
+  // actions go first (from the end); then primary ones, but never the mode control, Delete or
+  // a mode that is switched on.
+  const room = () => $('ctxbar').clientWidth - 24;          // padding; the readout shrinks first
+  while (box.scrollWidth > room() && hidden.size < actions.length) {
+    const open = actions.filter((a) => !hidden.has(a.id) && a.group !== 'destructive' && a.group !== 'mode' && !keep.includes(a.id));
+    const cand = [...open].reverse().find((a) => !a.primary) ?? open[open.length - 1];
+    if (!cand) break;
+    hidden.add(cand.id);
+    draw();
+  }
+}
+new ResizeObserver(() => { cancelAnimationFrame(S.ctxRaf); S.ctxRaf = requestAnimationFrame(renderCtxBar); }).observe($('ctxbar'));
+
+function ctxMore(list, sel) {
+  return h('button', { type: 'button', class: 'abtn', 'aria-haspopup': 'menu', title: 'More actions', onclick: (e) => {
+    showMenu({ el: e.currentTarget }, list.map((a) => ({ label: a.labelFor?.(sel) ?? a.label, icon: a.icon, danger: a.destructive,
+      run: () => triggerAction(a, sel, e.currentTarget) })));
+  } }, icon('more'), h('span', { class: 'lbl' }, 'More'));
+}
+
+function ctxButton(a, sel) {
+  const label = a.labelFor?.(sel) ?? a.label;
+  const popup = ['pick-mode', 'menu', 'section', 'view'].includes(a.kind);
+  let on = a.id === 'measure' ? vp.measure?.on : a.id === 'section' ? !!vp.section?.axis : a.id === 'view' ? !!vp.meshOnly : false;
+  const lbl = a.kind === 'pick-mode' ? [h('span', { class: 'k' }, 'Select: '), h('b', {}, FILTERS.find(([k]) => k === S.filter)?.[1] ?? 'Auto')]
+    : a.id === 'section' && vp.section?.axis ? [`Section · ${vp.section.axis}`] : [label];
+  const btn = h('button', { type: 'button', id: a.id === 'measure' ? 'btn-measure' : `act-${a.id}`, class: `abtn${a.kind === 'pick-mode' ? ' mode' : ''}${a.destructive ? ' destructive' : ''}${on ? ' on' : ''}`,
+    title: a.title ?? label, 'aria-haspopup': popup ? 'menu' : null, 'aria-pressed': a.kind === 'toggle' ? String(!!on) : null,
+    onclick: (e) => triggerAction(a, sel, e.currentTarget) },
+  icon(a.icon), h('span', { class: 'lbl' }, ...lbl), popup ? icon('down') : null);
+  if (popup) btn.lastChild.classList.add('caret');
+  if (a.id !== 'section' || !vp.section?.axis) return btn;
+  // The section offset is part of the bar, next to its control (never floating over the model).
+  const slider = h('input', { id: 'sec-off', type: 'range', min: '0', max: '1', step: '0.001', value: String(vp.section.t ?? 0.5), 'aria-label': 'Section offset',
+    oninput: (e) => vp.setSection(vp.section.axis, Number(e.target.value)) });
+  return h('span', { class: 'section-ctl' }, btn, slider);
+}
+
+function triggerAction(a, sel, anchor) {
+  const at = { el: anchor };
+  switch (a.kind) {
+    case 'pick-mode':
+      return showMenu(at, FILTERS.map(([k, label]) => ({ label, checked: S.filter === k, data: { filter: k }, run: () => setFilter(k) })));
+    case 'menu':
+      return showMenu(at, a.items.map(([tool, label, ic]) => ({ label, icon: ic, run: () => openToolForm(tool) })));
+    case 'section':
+      return showMenu(at, [{ label: 'Off', checked: !vp.section?.axis, data: { axis: '' }, run: () => setSection('') },
+        ...['X', 'Y', 'Z'].map((ax) => ({ label: `${ax} plane`, checked: vp.section?.axis === ax, data: { axis: ax }, run: () => setSection(ax) }))]);
+    case 'view':
+      return showMenu(at, [
+        { label: 'Mesh view', icon: 'mesh', checked: !!vp.meshOnly, data: { view: 'mesh' }, run: toggleMesh },
+        { sep: true }, { head: 'Standard views' },
+        ...VIEWS.map(([label, dir]) => ({ label, icon: 'view', run: () => vp.viewFrom(dir) })),
+        { sep: true },
+        { label: 'Play design', icon: 'play', data: { view: 'play' }, disabled: !S.state?.frames || S.playing, run: playDesign }]);
+    default:
+      return a.run?.(actionEnv, a, { currentTarget: anchor });
+  }
+}
+
+// What the actions can do. Everything that changes the model ends in a tool call.
+const selIds = () => selectionContext(S.selection?.selectors ?? []).features;
+
+async function callTool(name, args, label = name) {
+  try {
+    const o = await api('tool', { name, args });
+    toast(o.ok ? (o.committed ? `${label} applied` : o.changeset ? `${label} proposed: review it in the conversation` : `${label} ok`) : o.error, o.ok ? 'ok' : 'bad');
+    scheduleRefresh();
+    return o;
+  } catch (err) { toast(err.message, 'bad'); scheduleRefresh(); return null; }
+}
+
+function formDialog({ title, fields, ok = 'Apply' }) {
+  return new Promise((resolve) => {
+    const d = $('formdlg');
+    $('fd-title').textContent = title;
+    $('fd-ok').textContent = ok;
+    const inputs = fields.map((f) => {
+      const id = `fd-${f.key}`;
+      const input = f.options
+        ? h('select', { id }, ...f.options.map((o) => h('option', { value: o.value ?? o, selected: (o.value ?? o) === f.value }, o.label ?? o)))
+        : h('input', { id, type: 'number', step: 'any', value: String(f.value ?? 0), min: f.min });
+      return [f, input];
+    });
+    $('fd-fields').replaceChildren(...inputs.flatMap(([f, i]) => [h('label', { for: i.id }, f.label), i]));
+    d.hidden = false;
+    inputs[0][1].focus(); inputs[0][1].select?.();
+    const close = (v) => { d.hidden = true; $('fd-form').onsubmit = null; $('fd-cancel').onclick = null; resolve(v); };
+    $('fd-form').onsubmit = (e) => {
+      e.preventDefault();
+      const out = {};
+      for (const [f, i] of inputs) out[f.key] = f.options ? i.value : Number(i.value);
+      close(out);
+    };
+    $('fd-cancel').onclick = () => close(null);
+  });
+}
+
+const actionEnv = {
+  fit: () => vp.fit(),
+  toggleMeasure,
+  async transform(kind) {
+    const ids = selIds();
+    if (!ids.length) return;
+    if (kind === 'move') {
+      const v = await formDialog({ title: `Move ${ids.length > 1 ? ids.length + ' objects' : ids[0]} (mm)`, ok: 'Move',
+        fields: [{ key: 'dx', label: 'X', value: 0 }, { key: 'dy', label: 'Y', value: 0 }, { key: 'dz', label: 'Z', value: 0 }] });
+      if (!v) return;
+      for (const id of ids) await callTool('transform', { target: id, dx: v.dx, dy: v.dy, dz: v.dz, intent: `Move ${id}` }, 'Move');
+    } else {
+      const v = await formDialog({ title: `Rotate ${ids.length > 1 ? ids.length + ' objects' : ids[0]} about its centre`, ok: 'Rotate',
+        fields: [{ key: 'angle', label: 'Angle (deg)', value: 90 }, { key: 'axis', label: 'Axis', options: ['X', 'Y', 'Z'], value: 'Z' }] });
+      if (!v) return;
+      const cs = ids.map((id) => vp.bodyCenter(id)).filter(Boolean);
+      const o = cs.length ? [0, 1, 2].map((i) => cs.reduce((t, c) => t + c[i], 0) / cs.length) : [0, 0, 0];
+      const axis = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }[v.axis];
+      for (const id of ids) await callTool('transform', { target: id, angle_deg: v.angle, ax: axis[0], ay: axis[1], az: axis[2], ox: o[0], oy: o[1], oz: o[2], intent: `Rotate ${id}` }, 'Rotate');
+    }
+  },
+  async boolean(op) {
+    const ids = selIds();
+    if (ids.length !== 2) return;
+    let target = ids[0];
+    if (op === 'subtract') {
+      const v = await formDialog({ title: 'Subtract: which body keeps its volume?', ok: 'Subtract',
+        fields: [{ key: 'target', label: 'Keep', options: ids, value: ids[0] }] });
+      if (!v) return;
+      target = v.target;
+    }
+    await callTool('boolean', { op, target, tool: ids.find((i) => i !== target) }, op[0].toUpperCase() + op.slice(1));
+  },
+  async edgeOp(tool) {
+    const sels = S.selection?.selectors ?? [];
+    const edges = sels.filter((x) => x.startsWith('edge('));
+    const ids = edges.length ? [...new Set(edges.map(featureOf))] : selIds();
+    if (!ids.length) return;
+    const param = tool === 'fillet' ? 'radius' : 'distance';
+    const v = await formDialog({ title: `${tool === 'fillet' ? 'Fillet' : 'Chamfer'} ${edges.length ? `${edges.length} edge${edges.length > 1 ? 's' : ''}` : 'all edges'} (mm)`,
+      ok: tool === 'fillet' ? 'Fillet' : 'Chamfer', fields: [{ key: 'v', label: tool === 'fillet' ? 'Radius' : 'Distance', value: 1, min: 0.001 }] });
+    if (!v || !(v.v > 0)) return;
+    for (const id of ids) {
+      const args = { target: id, [param]: v.v };
+      const mine = edges.filter((x) => featureOf(x) === id);
+      if (mine.length) args.edges = mine;
+      await callTool(tool, args, tool === 'fillet' ? 'Fillet' : 'Chamfer');
+    }
+  },
+  toolDialog: (name) => openToolForm(name),
+  materialMenu(ev) {
+    const ids = selIds();
+    const hasMaterial = (S.state?.tree ?? []).some((t) => ids.includes(t.id) && t.appearance?.material_id);
+    showMenu({ el: ev.currentTarget }, materialMenu(materialCtx, ids, { hasMaterial, openPanel: openMaterialPanel }));
+  },
+  pickColor() {
+    const ids = selIds();
+    if (!ids.length) return;
+    let i = $('color-pop');
+    if (!i) { i = h('input', { id: 'color-pop', type: 'color', 'aria-label': 'Color', style: 'position:fixed;left:50%;top:40%;opacity:0;pointer-events:none;width:1px;height:1px' }); document.body.append(i); }
+    i.value = '#9fb2c8';
+    i.onchange = () => applyAppearance('set_color', ids, { color: i.value.toUpperCase() });
+    i.click();
+  },
+  hide: () => applyAppearance('set_visibility', selIds(), { visible: false }),
+  remove: () => deleteObjects(),
+};
+
+// The material picker lives in the Selection panel: make sure it is on screen.
+function openMaterialPanel() { panels.show('left'); materialCtx.rerender(); }
+
+// Tools without a dedicated form reuse the command palette's argument form, prefilled from
+// the selection.
+async function openToolForm(name) {
+  if (!S.paletteAll.length) { try { S.paletteAll = await api('palette'); } catch (e) { toast(e.message, 'bad'); return; } }
+  const e = S.paletteAll.find((x) => x.kind === 'tool' && x.id === name);
+  if (!e) { toast(`${name} is not available`, 'bad'); return; }
+  const tpl = JSON.parse(e.template || '{}');
+  const sels = S.selection?.selectors ?? [];
+  if (sels.some((x) => x.startsWith('face(')) && e.schema?.properties?.face !== undefined) tpl.face = '';
+  $('palette').hidden = false;
+  runPalette({ ...e, template: JSON.stringify(tpl) });
+}
 
 // ---- project dialogs ---------------------------------------------------------------------
 
@@ -623,13 +965,13 @@ function ask({ title, value = '', format = false, ok = 'OK', choices = null }) {
   });
 }
 
-$('btn-new').addEventListener('click', async () => {
+async function newProject() {
   const r = await ask({ title: 'New project name', value: 'untitled', ok: 'Create' });
   if (!r) return;
   try { await api('project/new', { name: r.value }); clearPreview(); vp.clear(); } catch (e) { toast(e.message, 'bad'); }
   scheduleRefresh();
-});
-$('btn-open').addEventListener('click', async () => {
+}
+async function openProject() {
   let projects = [];
   try { projects = await api('project/list'); } catch { /* fall back to typing a path */ }
   const choices = projects.map((p) => ({ label: p.name, value: p.path, detail: new Date(p.modified).toLocaleString() }));
@@ -637,7 +979,20 @@ $('btn-open').addEventListener('click', async () => {
   if (!r?.value) return;
   try { await api('project/open', { path: r.value }); clearPreview(); vp.clear(); } catch (e) { toast(e.message, 'bad'); }
   scheduleRefresh();
-});
+}
+// File actions live in the project-name menu; the rest of the bar is document-level.
+$('project').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
+  { label: 'New project…', icon: 'file-plus', run: newProject },
+  { label: 'Open project…', icon: 'folder', run: openProject }]));
+$('btn-more').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
+  { label: 'Command palette', icon: 'command', key: 'Ctrl+K', run: openPalette },
+  { sep: true }, { head: 'Agent level' },
+  { label: 'Review — preview every change', checked: S.level === 'review', data: { level: 'review' }, run: () => setLevel('review') },
+  { label: 'Auto — commit low-risk changes', checked: S.level === 'auto', data: { level: 'auto' }, run: () => setLevel('auto') }]));
+async function setLevel(level) {
+  try { await api('level', { level }); S.level = level; } catch (e) { toast(e.message, 'bad'); }
+  scheduleRefresh();
+}
 async function save() {
   try {
     let path = S.state?.path;
@@ -693,7 +1048,7 @@ function drawPalette() {
 
 async function runPalette(e) {
   if (e.kind === 'ask') { closePalette(); $('prompt').value = e.template; $('composer').requestSubmit(); return; }
-  if (e.kind === 'intent') { closePalette(); $('prompt').value = e.template; $('prompt').focus(); return; }
+  if (e.kind === 'intent') { closePalette(); $('prompt').value = e.template; autosize(); $('prompt').focus(); return; }
   if (e.kind === 'tool') {
     $('pal-list').hidden = true; $('pal-form').hidden = false;
     $('pal-form-title').textContent = `${e.title} — ${e.description}`;
@@ -702,11 +1057,7 @@ async function runPalette(e) {
       let args;
       try { args = JSON.parse($('pal-args').value || '{}'); } catch (err) { toast('Arguments are not valid JSON: ' + err.message, 'bad'); return; }
       closePalette();
-      try {
-        const o = await api('tool', { name: e.id, args });
-        toast(o.ok ? (o.committed ? `${e.id} applied` : o.changeset ? `${e.id} proposed: review it in the conversation` : `${e.id} ok`) : o.error, o.ok ? 'ok' : 'bad');
-      } catch (err) { toast(err.message, 'bad'); }
-      scheduleRefresh();
+      await callTool(e.id, args);
     };
     $('pal-back').onclick = () => { $('pal-form').hidden = true; $('pal-list').hidden = false; $('pal-input').focus(); };
     $('pal-args').focus();
@@ -718,8 +1069,8 @@ async function runPalette(e) {
     case 'redo': return doRedo();
     case 'save': return save();
     case 'export_step': case 'export_stl': return $('btn-export').click();
-    case 'playback': return $('btn-play').click();
-    case 'new': return $('btn-new').click();
+    case 'playback': return playDesign();
+    case 'new': return newProject();
   }
 }
 
@@ -735,10 +1086,12 @@ function withSelection(args, e) {
     args.edges = edges;
     args.target = featureOf(edges[0]);
   }
+  // A single selected object fills the feature the tool acts on.
+  const feats = [...new Set(sels.map(featureOf).filter(Boolean))];
+  if (feats.length === 1) for (const k of ['target', 'source']) if (args[k] === '') args[k] = feats[0];
   return args;
 }
 
-$('btn-palette').addEventListener('click', openPalette);
 $('pal-input').addEventListener('input', (e) => filterPalette(e.target.value));
 $('pal-input').addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') { e.preventDefault(); pal.idx = Math.min(pal.idx + 1, pal.items.length - 1); drawPalette(); }
@@ -750,7 +1103,7 @@ $('palette').addEventListener('mousedown', (e) => { if (e.target === $('palette'
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
-  const overlay = !$('palette').hidden || !$('dialog').hidden || !$('confirm').hidden;
+  const overlay = !$('palette').hidden || !$('dialog').hidden || !$('confirm').hidden || !$('formdlg').hidden;
   if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !mod && !overlay && !S.playing && S.selection?.selectors?.length) {
     e.preventDefault(); // Backspace must not navigate back
     deleteObjects();
@@ -758,13 +1111,15 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'Escape') {
     if (!$('ctxmenu').hidden) $('ctxmenu').hidden = true;
     else if (!$('confirm').hidden) $('confirm-cancel').click();
+    else if (!$('formdlg').hidden) $('fd-cancel').click();
     else if (!$('palette').hidden) closePalette();
     else if (!$('dialog').hidden) $('dialog-cancel').click();
-    else if (vp.measure.on) $('btn-measure').click();
+    else if (vp.measure.on) toggleMeasure();
     else if (S.selection?.selectors?.length) api('select', { selectors: [] }).then(applySelection).catch(() => {});
   } else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
   else if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
-  else if (!typing && e.key === 'f') vp.fit();
+  else if (!typing && !mod && !overlay && e.key === 'f') vp.fit();
+  else if (!typing && !mod && !overlay && e.key === 'm') toggleMeasure();
 });
 
 // ---- toast ---------------------------------------------------------------------------

@@ -61,21 +61,21 @@
 <section>
 <h2 id="tour" data-group="Getting started">Interface tour</h2>
 <div class="ui-map" aria-hidden="true">
-  <div class="hd"><b>Header</b> · project name · New / Open / Save / Export · Undo / Redo · Level · ⌘K · Help</div>
+  <div class="hd"><b>Header</b> · project menu (New / Open) · Undo / Redo · Save · Export · Help · ⋯ (palette, Level)</div>
   <div><b>Design tree</b><br>features, status, intent, parameters, appearance<br><br><b>Selection</b><br>what you picked</div>
-  <div><b>Toolbar</b> · pick filter · Measure · Section · Mesh · Fit · Play design<br><br><b>3D viewport</b><br>view cube, ghost preview</div>
-  <div><b>Conversation</b><br>agent chat, ChangeSet cards<br><br><b>Composer</b><br>chips, attach, prompt box</div>
-  <div class="tl"><b>Semantic timeline</b> · checkpoints with Restore / Compare</div>
+  <div><b>Action bar</b> · only what fits the selection<br><br><b>3D viewport</b><br>view cube, ghost preview</div>
+  <div><b>Simon Agent</b><br>agent chat, ChangeSet cards<br><br><b>Composer</b><br>chips, attach, prompt box</div>
+  <div class="tl"><b>History</b> · collapsible checkpoints; select one for Restore / Compare</div>
 </div>
 
 <table>
 <tr><th>Area</th><th>What it does</th></tr>
-<tr><td><b>Header</b></td><td><b>New</b> project; <b>Open</b> (lists projects in <code>projects_output</code>, or type a path); <b>Save</b>; <b>Export</b> STEP or STL; <b>Undo/Redo</b>; interaction <b>Level</b> (Review/Auto); <b>⌘K</b> command palette; <b>Help</b> (this page).</td></tr>
-<tr><td><b>Design tree</b></td><td>Every feature with a status dot, its intent, and user/agent provenance. Expand a row to edit parameters inline (each edit is a <code>modify_parameter</code> ChangeSet) and to set Appearance. The eye button toggles visibility. Right-click for the context menu.</td></tr>
+<tr><td><b>Header</b></td><td>The <b>project name</b> opens a menu with <b>New</b> and <b>Open</b> (Open lists projects in <code>projects_output</code>, or type a path); <b>Undo/Redo</b>; <b>Save</b>; <b>Export</b> STEP or STL; <b>Help</b> (this page); <b>⋯</b> for the <b>⌘K</b> command palette and the interaction <b>Level</b> (Review/Auto). The outer buttons show or hide the side panels, which you can also resize by dragging their edge.</tr>
+<tr><td><b>Design tree</b></td><td>Every feature with a status dot, its intent, and user/agent provenance. Click a row to select it and see its details, parameters (each edit is a <code>modify_parameter</code> ChangeSet) and Appearance; Shift/Ctrl-click selects several. The eye toggles visibility; double-click or F2 renames; right-click or press-and-hold for more. Right-click for the context menu.</td></tr>
 <tr><td><b>Selection panel</b></td><td>The faces / edges / vertices / bodies currently picked, plus shared appearance controls when several bodies are selected.</td></tr>
-<tr><td><b>Toolbar</b></td><td>Pick filter (Auto/Face/Edge/Vertex/Body), <b>Measure</b>, <b>Section</b> plane (X/Y/Z + offset), <b>Mesh</b> view, <b>Fit</b> (<kbd>F</kbd>), <b>▶ Play design</b>.</td></tr>
+<tr><td><b>Action bar</b></td><td>The strip above the viewport shows only what makes sense for the current selection. With nothing selected: <b>Select</b> mode, <b>Create</b>, <b>Measure</b> (<kbd>M</kbd>), <b>Section</b> plane (X/Y/Z + offset), <b>View</b> (mesh view, standard views, play design) and <b>Fit</b> (<kbd>F</kbd>). With a body: Move, Rotate, Mirror, Pattern, Fillet, Chamfer, Material, Color, Hide, Delete. With a face: Hole. With edges: Fillet, Chamfer. With two bodies: Union, Subtract, Intersect. Actions that do not fit move into <b>More</b>.</td></tr>
 <tr><td><b>Viewport</b></td><td>Orbit, pan, zoom; view cube (click a face/edge/corner to snap the view); hover highlight; ghost preview of proposed changes.</td></tr>
-<tr><td><b>Timeline</b></td><td>A semantic checkpoint after every committed ChangeSet. <b>Restore</b> proposes going back (never auto-committed). <b>Compare</b> shows features/parameters changed and the volume delta.</td></tr>
+<tr><td><b>History</b></td><td>A semantic checkpoint after every committed ChangeSet, in a collapsible strip. Select a step to get <b>Restore</b>, which proposes going back (never auto-committed). <b>Compare</b> shows features/parameters changed and the volume delta.</td></tr>
 <tr><td><b>Conversation</b></td><td>Your messages, the agent’s answers and ChangeSet cards (commands, affected features, warnings, validation, volume delta, Preview / Commit / Reject). <b>Clear</b> resets the chat and the attached documents.</td></tr>
 <tr><td><b>Composer</b></td><td>Selection chips, attached documents (📄) and images, <b>📎 Attach</b>, <b>Create from Image</b>, <b>Thinking mode</b> checkbox, prompt box (<kbd>Enter</kbd> sends, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line).</td></tr>
 </table>
@@ -226,7 +226,7 @@
 <div class="prompt">How far apart are the two selected faces?</div>
 <div class="prompt">What checkpoints do I have?</div>
 <div class="prompt">Which feature owns the selected face, and what depends on it?</div>
-<p>In the viewport, the <b>Measure</b> toolbar button gives a two-point measurement overlay: click two surface points.</p>
+<p>In the viewport, the <b>Measure</b> action gives a two-point measurement overlay: click two surface points.</p>
 </section>
 
 <section>
@@ -287,7 +287,7 @@
 <tr><th>Action</th><th>How</th></tr>
 <tr><td>Orbit / pan / zoom</td><td>Left-drag / right-drag (or shift-drag) / wheel</td></tr>
 <tr><td>Select</td><td>Click. <kbd>Shift</kbd>-click adds to the selection; click empty space clears it.</td></tr>
-<tr><td>Pick filter</td><td><b>Auto</b> picks the most specific thing under the cursor; <b>Face</b>, <b>Edge</b>, <b>Vertex</b>, <b>Body</b> force a kind. Edges and vertices are picked in screen space and only when not occluded.</td></tr>
+<tr><td>Pick filter (<b>Select: Auto ▾</b>)</td><td><b>Auto</b> picks the most specific thing under the cursor; <b>Face</b>, <b>Edge</b>, <b>Vertex</b>, <b>Body</b> force a kind. Edges and vertices are picked in screen space and only when not occluded.</td></tr>
 <tr><td>View cube</td><td>Click a face, edge or corner to snap the camera.</td></tr>
 <tr><td>Fit</td><td><b>Fit</b> button or <kbd>F</kbd></td></tr>
 <tr><td>Section plane</td><td>Choose X / Y / Z in <b>Section</b> and drag the offset slider to cut the view open.</td></tr>

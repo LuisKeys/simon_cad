@@ -6,7 +6,7 @@ import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { MaterialManager } from './materials/pbr.js';
 
-const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xffb347, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
+const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
 const PICK_PX = 7;
 const MAX_VERTEX_PICK = 4000;
 
@@ -38,9 +38,9 @@ export class Viewport {
     const key = new THREE.DirectionalLight(0xffffff, this.envMap ? 1.0 : 1.6);
     key.position.set(1, -1.5, 2.5);
     this.scene.add(key);
-    this.grid = new THREE.GridHelper(400, 40, 0x5a3a1a, 0x2a2018);
+    this.grid = new THREE.GridHelper(400, 40, 0x3a3a3a, 0x232323);
     this.grid.rotation.x = Math.PI / 2; // lie in XY, Z up
-    this.grid.material.transparent = true; this.grid.material.opacity = 0.5;
+    this.grid.material.transparent = true; this.grid.material.opacity = 0.45;
     this.scene.add(this.grid);
 
     this.appearance = {};       // body id -> {color, opacity, visible, material_id, texture_scale} from the CAD-IR
@@ -69,6 +69,15 @@ export class Viewport {
   }
 
   dirty() { this._dirty = true; }
+
+  /** Centre of a body's bounding box in model (CAD) coordinates, or null. */
+  bodyCenter(id) {
+    const g = this.bodies.get(id)?.mesh.geometry;
+    if (!g) return null;
+    g.computeBoundingBox();
+    const c = g.boundingBox.getCenter(new THREE.Vector3());
+    return [c.x, c.y, c.z];
+  }
 
   resize() {
     const p = this.canvas.parentElement;
@@ -395,19 +404,34 @@ export class Viewport {
     let down = null;
     const c = this.canvas;
     let rdown = null;
+    let lp = null;                       // long-press timer (touch / pen): the touch equivalent of right-click
+    const cancelLp = () => { clearTimeout(lp); lp = null; };
     c.addEventListener('pointerdown', (e) => {
       down = { x: e.clientX, y: e.clientY, t: performance.now() };
       if (e.button === 2) rdown = { x: e.clientX, y: e.clientY };
+      cancelLp();
+      if (e.pointerType !== 'mouse' && e.isPrimary && !this.measure.on) {
+        const at = { clientX: e.clientX, clientY: e.clientY };
+        lp = setTimeout(() => {
+          lp = null;
+          if (!down) return;
+          down = null; this._lpAt = performance.now();
+          this.hooks.onContext?.(this.pick(at), { x: at.clientX, y: at.clientY });
+        }, 500);
+      } else if (!e.isPrimary) cancelLp();
     });
     // Right-click without a drag opens the context menu; a right-drag is a pan.
     c.addEventListener('contextmenu', (e) => {
       e.preventDefault();
+      if (performance.now() - (this._lpAt ?? -1e9) < 900) return; // already handled by the long-press
       const moved = rdown ? Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y) : 0;
       rdown = null;
       if (moved > 4 || this.measure.on) return;
       this.hooks.onContext?.(this.pick(e), { x: e.clientX, y: e.clientY });
     });
+    c.addEventListener('pointercancel', cancelLp);
     c.addEventListener('pointerup', (e) => {
+      cancelLp();
       if (!down) return;
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
       down = null;
@@ -417,6 +441,7 @@ export class Viewport {
       this.hooks.onPick?.(p, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
     });
     c.addEventListener('pointermove', (e) => {
+      if (down && lp && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) cancelLp();
       if (down || this.measure.on) return;
       const p = this.pick(e);
       const same = (!p && !this.hover) || (p && this.hover && p.body === this.hover.body && p.kind === this.hover.kind && p.index === this.hover.index);
@@ -430,9 +455,9 @@ export class Viewport {
 
   // ---- highlight overlays ----------------------------------------------------------------
 
-  setSelection(picks) { this._drawOverlay(this.selGroup, picks, COLORS.select, 0.6); }
+  setSelection(picks) { this._drawOverlay(this.selGroup, picks, COLORS.select, 0.22, true); }
 
-  _drawOverlay(group, picks, color, opacity = 0.5) {
+  _drawOverlay(group, picks, color, opacity = 0.5, outline = false) {
     for (const c of [...group.children]) { group.remove(c); c.geometry?.dispose(); c.material?.dispose(); }
     for (const p of picks) {
       const b = this.bodies.get(p.body);
@@ -453,6 +478,13 @@ export class Viewport {
         const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false,
           polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide }));
         group.add(m);
+        if (outline) {
+          // Selected geometry reads as an orange outline over a light tint, not a solid fill.
+          const ol = new THREE.LineSegments(new THREE.EdgesGeometry(g, 25),
+            new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false }));
+          ol.renderOrder = 9;
+          group.add(ol);
+        }
       } else if (kind === 'edge') {
         const e = b.data.edges[p.index];
         if (!e) continue;
@@ -532,8 +564,8 @@ export class Viewport {
     const face = (txt, rot) => {
       const cv = document.createElement('canvas'); cv.width = cv.height = 128;
       const g = cv.getContext('2d');
-      g.fillStyle = '#1f1f1f'; g.fillRect(0, 0, 128, 128);
-      g.strokeStyle = '#ff7a00'; g.lineWidth = 6; g.strokeRect(3, 3, 122, 122);
+      g.fillStyle = '#242424'; g.fillRect(0, 0, 128, 128);
+      g.strokeStyle = '#4a4a4a'; g.lineWidth = 4; g.strokeRect(2, 2, 124, 124);
       g.fillStyle = '#e4e8ee'; g.font = 'bold 26px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.translate(64, 64); g.rotate(rot); g.fillText(txt, 0, 2);
       const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;

@@ -66,7 +66,7 @@ try {
   await page.locator('#ghost-bar').getByRole('button', { name: 'Commit' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.node').length === 2);
   await page.waitForFunction(() => window.simonViewport.bodies.size === 1);
-  const names = await page.locator('.node .type').allInnerTexts();
+  const names = await page.evaluate(() => [...document.querySelectorAll('.node')].map((n) => n.dataset.type));
   assert.deepEqual(names.map((n) => n.trim()).sort(), ['extrude', 'sketch'].sort());
   await page.screenshot({ path: join(shots, 'image-3-committed.png') });
   await page.locator('#viewport').click({ position: { x: 5, y: 5 } });

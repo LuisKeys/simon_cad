@@ -71,9 +71,27 @@ backlog item "round only the outer edges after pocketing".
 
 ## The interaction model
 
-- **Viewport:** orbit/pan/zoom, view cube, pick filter (Auto/Face/Edge/Vertex/Body), shift-click
-  multi-select, hover highlight, section plane (X/Y/Z + offset), two-point measurement overlay, fit.
-  Edges/vertices are picked in screen space and only when not occluded.
+- **Viewport:** orbit/pan/zoom, view cube, shift-click multi-select, hover highlight, section plane
+  (X/Y/Z + offset), two-point measurement overlay, fit. Selected geometry is an orange outline over
+  a light tint. Edges/vertices are picked in screen space and only when not occluded. Nothing floats
+  over the model; its controls live in the fixed action bar above it.
+- **Contextual action bar:** a fixed strip above the viewport that shows only the actions valid for
+  the current selection (none / body / face / edge / vertex / several bodies / mixed). It is a pure
+  function of the selection: `frontend/actions.js` maps each context to actions (id, label, icon,
+  group, `visible` rule, `destructive` flag, handler), so a new CAD tool is one registry entry.
+  The pick filter is the compact `Select: Auto ▾` control (Auto/Body/Face/Edge/Vertex). Actions
+  that do not fit move into *More ⋯*; Delete is always last and set apart. Only actions backed by
+  a tool are offered (move/rotate = `transform`, union/subtract/intersect = `boolean`,
+  fillet/chamfer, hole, mirror, patterns, material, color, hide, delete). Scale, duplicate,
+  face extrude/inset/offset, group and align have no tool yet and are not shown.
+- **Top bar:** project-name menu (New / Open), Undo, Redo, Save, Export, Help and an overflow menu
+  (command palette, agent level). Panels can be hidden from the bar's outer buttons.
+- **Panels:** the design tree (left) and Simon Agent (right) are resizable (drag the splitter,
+  arrow keys when focused, double-click to reset) and collapsible; sizes persist in `localStorage`.
+  The tree collapses first on narrow screens; below 760 px the panels become overlays.
+- **Touch:** controls are at least 40 px (44 px on coarse pointers). Press-and-hold opens the
+  context menu on tree rows and in the viewport (the touch equivalent of right-click); every tree
+  row also has a visible *⋯* button when selected.
 - **Selection → conversation:** the selection is shown as chips above the prompt and sent with every
   agent request. "Add four M3 holes here" resolves against the selected face.
 - **Interaction level:** *Review* (default) previews every ChangeSet; *Auto* commits low-risk
@@ -82,13 +100,17 @@ backlog item "round only the outer edges after pocketing".
   nothing applied) and draws the bodies it would add as a translucent ghost, with the bodies it
   would replace faded and outlined. The card lists commands, affected features, warnings, validation
   results and the volume delta.
-- **Design tree:** features with status dots, intent, user/agent provenance badges and inline
-  parameter editing (each edit is a `modify_parameter` ChangeSet).
+- **Design tree:** one dense row per feature: visibility toggle, type icon, name and a small
+  `agent` badge. Click selects the object (Shift adds, Ctrl/Cmd toggles) and shows its details
+  (intent, errors, appearance, parameters; each parameter edit is a `modify_parameter`
+  ChangeSet); double-click or F2 renames (`rename_feature`); the context menu offers hide,
+  rename, suppress and delete. Drag-reordering is not supported.
 - **Palette (Ctrl/Cmd+K):** intent verbs (natural-language openers for the agent until macros arrive
   in Phase 3), every registered tool (with an argument skeleton and the current selection prefilled),
   and commands (undo/redo, save, export, playback, new). Every entry ends in the tool registry.
-- **Semantic timeline:** checkpoints with Restore (proposed as a ChangeSet, never auto-committed) and
-  Compare (feature and parameter diff plus volume).
+- **Semantic timeline:** a compact, collapsible strip of checkpoints (number, title, author, change
+  count). Selecting one reveals Restore (proposed as a ChangeSet, never auto-committed) and Compare
+  (feature and parameter diff plus volume).
 - **Instant Design playback:** replays the committed ChangeSets one at a time, rebuilding the model
   after each, so geometry appears feature by feature.
 - **Concurrency:** the agent turn runs on its own goroutine and releases the service lock while it

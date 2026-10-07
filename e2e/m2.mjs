@@ -49,6 +49,7 @@ try {
   await page.screenshot({ path: join(shots, '1-plate.png') });
 
   // 2. Click the top face (pick filter: Face).
+  await page.click('#act-select-mode');
   await page.click('[data-filter="face"]');
   const target = await page.evaluate(() => {
     const vp = window.simonViewport;
@@ -61,7 +62,7 @@ try {
   await page.mouse.click(target.x, target.y);
   await page.waitForSelector('.chip');
   assert.match(await page.locator('.chip').first().getAttribute('title'), /^face\(feature=plate,side=\+Z\)$/);
-  assert.equal(await page.evaluate(() => window.simonViewport.selGroup.children.length), 1, 'selected face is highlighted');
+  assert.equal(await page.evaluate(() => window.simonViewport.selGroup.children.filter((c) => c.isMesh).length), 1, 'selected face is highlighted');
 
   // 3. Ask the agent; it sees the selection. At the Review level its step is applied as a
   //    draft the user keeps or discards.
@@ -100,12 +101,16 @@ try {
   assert.ok(Math.abs(dist - 60) < 0.5, `measured ${dist} mm, expected 60`);
   assert.match(await page.locator('#measure-label').innerText(), /^60\.\d+ mm/);
   await page.click('#btn-measure');
-  await page.selectOption('#sec-axis', 'Y');
+  await page.keyboard.press('Escape'); // no selection: the bar offers Section and View again
+  await page.click('#act-section');
+  await page.click('li[data-axis="Y"]');
   assert.equal(await page.evaluate(() => window.simonViewport.renderer.clippingPlanes.length), 1, 'section plane active');
-  await page.selectOption('#sec-axis', '');
-  await page.click('#btn-play');
+  await page.click('#act-section');
+  await page.click('li[data-axis=""]');
+  await page.click('#act-view');
+  await page.click('li[data-view="play"]');
   await page.waitForFunction(() => document.querySelector('#hud').textContent.includes('2/2'), null, { timeout: 15000 });
-  await page.waitForFunction(() => !document.querySelector('#btn-play').disabled && window.simonViewport.bodies.size === 1, null, { timeout: 15000 });
+  await page.waitForFunction(() => !/\d\/\d|Playback/.test(document.querySelector('#hud').textContent) && window.simonViewport.bodies.size === 1, null, { timeout: 15000 });
   await page.screenshot({ path: join(shots, '5-after-playback.png') });
 
   assert.deepEqual(errors, [], 'no browser errors: ' + errors.join(' | '));
