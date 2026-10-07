@@ -47,6 +47,10 @@ type Settings struct {
 	Provider  string                      `json:"provider"`
 	Providers map[string]ProviderSettings `json:"providers"`
 	Theme     string                      `json:"theme"`
+	// ComponentLibrary is the directory searched for reusable projects, on top of the ones
+	// next to the open project. It is a path, not a URL, and empty means "only the project's
+	// own neighbourhood".
+	ComponentLibrary string `json:"componentLibrary"`
 }
 
 // Env variable names per provider.
@@ -70,9 +74,13 @@ func DefaultBaseURL(provider string) string {
 }
 
 const (
-	keyProvider = "SIMONCAD_PROVIDER"
-	keyTheme    = "SIMONCAD_THEME"
+	keyProvider  = "SIMONCAD_PROVIDER"
+	keyTheme     = "SIMONCAD_THEME"
+	keyComponent = "SIMONCAD_COMPONENT_LIBRARY"
 )
+
+// ComponentLibrary is the configured component library root ("" when unset).
+func ComponentLibrary() string { return Get(keyComponent) }
 
 var (
 	mu        sync.RWMutex
@@ -160,6 +168,7 @@ func Current() Settings {
 	if GetOr(keyTheme, ThemeDark) == ThemeLight {
 		s.Theme = ThemeLight
 	}
+	s.ComponentLibrary = Get(keyComponent)
 	for _, p := range Providers {
 		k := envKeys[p]
 		ps := ProviderSettings{BaseURL: GetOr(k.baseURL, DefaultBaseURL(p)), Model: Get(k.model)}
@@ -185,7 +194,11 @@ func Save(s Settings) error {
 	if s.Theme != ThemeLight && s.Theme != ThemeDark {
 		return fmt.Errorf("unknown theme %q", s.Theme)
 	}
-	next := map[string]string{keyProvider: s.Provider, keyTheme: s.Theme}
+	lib := strings.TrimSpace(s.ComponentLibrary)
+	if lib != "" && !filepath.IsAbs(lib) {
+		return fmt.Errorf("the component library path must be absolute")
+	}
+	next := map[string]string{keyProvider: s.Provider, keyTheme: s.Theme, keyComponent: lib}
 	for _, p := range Providers {
 		ps, ok := s.Providers[p]
 		if !ok {

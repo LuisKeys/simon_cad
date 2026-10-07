@@ -35,6 +35,10 @@ var knownParams = map[string][]string{
 	"face_extrude":     {"distance"},
 	"face_inset":       {"inset", "depth"},
 	"face_offset":      {"distance"},
+	// A component instance exposes only its placement. The reference itself (component,
+	// version, content_hash) identifies what is being instantiated and is changed through
+	// insert_component / sync_component, which validate it, not by editing a field.
+	"component_instance": {"dx", "dy", "dz", "angle_deg", "ax", "ay", "az", "ox", "oy", "oz", "sx", "sy", "sz"},
 }
 
 // signedParams are exceptions to strictlyPositive: signed distances of face edits.

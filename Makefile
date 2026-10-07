@@ -65,6 +65,7 @@ e2e: build
 	node e2e/image.mjs
 	node e2e/materials.mjs
 	node e2e/modeling.mjs
+	node e2e/components.mjs
 	node e2e/visual.mjs
 
 # Pure frontend helpers (confidence bands, SVG geometry, ambiguity edits); needs Node >= 18.

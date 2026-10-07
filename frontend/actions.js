@@ -61,6 +61,10 @@ export const ACTIONS = [
   { id: 'intersect', label: 'Intersect', icon: 'intersect', group: 'boolean', contexts: ['multiBody'], visible: (s) => s.features.length === 2, run: (e) => e.boolean('intersect') },
   { id: 'group', label: 'Group', icon: 'group', group: 'organize', contexts: ['body', 'multiBody'], key: 'Ctrl+G', run: (e) => e.group() },
   { id: 'ungroup', label: 'Ungroup', icon: 'ungroup', group: 'organize', contexts: ['body', 'multiBody'], visible: (s) => !!s.grouped, key: 'Ctrl+Shift+G', run: (e) => e.ungroup() },
+  // Turning a selection into a reusable component: the geometry moves into its own project
+  // and is replaced here by a single reference.
+  { id: 'create-component', label: 'Component', icon: 'component', group: 'organize', contexts: ['body', 'multiBody'],
+    title: 'Turn the selection into a reusable component', run: (e) => e.createComponent() },
 
   // -- faces / edges -----------------------------------------------------------------------
   { id: 'hole', label: 'Hole', icon: 'hole', group: 'geometry', contexts: ['face'], visible: (s) => s.count === 1, primary: true, run: (e) => e.toolDialog('add_hole') },

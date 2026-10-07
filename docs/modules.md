@@ -236,6 +236,47 @@ turns a PDF into text on a document-capable model. Nothing is routed by provider
 The UI uses the workflow by default (`SIMONCAD_AUTONOMOUS=off` disables it); the CLI with
 `--autonomous`. Recorded evals keep using `Runtime.Run`.
 
+## `internal/components` — reusable projects
+
+Projects are composable. A **component is a project with `reusable` set**; an instance of one in
+another project is a `component_instance` node holding a reference and a placement, never a copy
+of the geometry. Four wheels are four references to one project.
+
+Three jobs, deliberately kept apart from rendering and UI logic:
+
+| File | Responsibility |
+|---|---|
+| `library.go` | Which reusable projects exist and where. Scans search roots, reading only `project.json` (cached on mtime+size). Also `Dependencies`/`Manifest`: the derived `components.json`. |
+| `resolver.go` | `ComponentInstance → geometry`. Implements `features.ComponentResolver`. |
+| `graph.go` | `DependencyGraph`: direct and transitive dependencies, cycle detection, traversal. Reads parameters only — a cycle check costs no kernel time. |
+
+Three properties are load-bearing:
+
+- **Search roots are anchored on the open project** (its parent, its `projects_output`) plus the
+  configured library root — never the process working directory. Resolving by CWD would make the
+  same `.scadproj` rebuild to different geometry from a different shell, breaking the determinism
+  contract.
+- **`rebuild.Engine` is not reentrant**: `Rebuild` holds its mutex across the builders. A component
+  is therefore never resolved on the engine asking for it — each `(project, content, overrides)`
+  frame gets its own engine, bounded by an LRU and reachable from the owning engine's `Close` so
+  no OCCT shape leaks. A cycle is detected *before* entering a nested engine, or `A → B → A` would
+  deadlock instead of returning an error.
+- **The content hash lives in the node's parameters**, not in a side channel. That single choice is
+  what makes a component edit visible to the rebuild cache key, `Graph.Hash()`, checkpoints,
+  ChangeSet staleness and the selection check at once, and makes "update to the latest component"
+  an ordinary undoable `SetParameter`.
+
+Tools (`internal/tools/components.go`, Geometry capability): `list_components`,
+`search_components`, `open_component` (queries); `create_component`, `insert_component`,
+`sync_component`, `detach_component` (plans). `create_component` requires a selection that is
+closed over `EffectiveDeps` in **both** directions — nothing outside may depend on it, and it may
+not depend on anything outside — because an open selection would either write a project that
+cannot be reopened or produce a ChangeSet that `RemoveFeature` rejects.
+
+Writing the new project to disk is the one part of "create component" that is not a ChangeSet. The
+directory is content-addressed so undo→redo lands on the same one; undoing without redoing leaves
+the library project behind, which the UI says plainly.
+
 ## `internal/visual` — deterministic visual measurement
 
 No language model and no geometry edits. `camera.go`: fixed cameras (left/right/front/rear/top

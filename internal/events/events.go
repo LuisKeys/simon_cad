@@ -27,6 +27,12 @@ const (
 	ProjectSaved        = "ProjectSaved"
 	ExportCompleted     = "ExportCompleted"
 	AgentResponseFinal  = "AgentResponseFinal"
+	// Component lifecycle. These are the only operations that touch a project other than the
+	// open one, so the trace would be blind to them without their own event types.
+	ComponentCreated  = "ComponentCreated"
+	ComponentInserted = "ComponentInserted"
+	ComponentDetached = "ComponentDetached"
+	ComponentSynced   = "ComponentSynced"
 )
 
 type Event struct {

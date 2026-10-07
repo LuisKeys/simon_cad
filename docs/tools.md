@@ -103,6 +103,17 @@ Create a rectangular block (e.g. a plate). Dimensions in mm; dx/dy/dz are the ex
 | `y` | number |  | Min-corner Y (mm), default 0 |
 | `z` | number |  | Min-corner Z (mm), default 0 |
 
+### `create_component`
+
+Turn the selected features (or the ones named in `features`) into a reusable component: they move into a new reusable project and are replaced in place by a single instance that references it. The selection must be self-contained — nothing outside it may depend on it, and it may not depend on anything outside.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `description` | string |  | what the component is for |
+| `features` | array of string |  | feature ids to move into the component (default: the selection) |
+| `name` | string | yes | the component's name |
+| `tags` | array of string |  | tags to find the component by |
+
 ### `create_cone`
 
 Create a cone or frustum (taper, funnel, chamfer cutter). The base circle (`radius`) is centered at (x,y,z) and the cone extends `height` along `axis` (default z), narrowing to `top_radius` (default 0 = a point).
@@ -209,6 +220,14 @@ Delete the selected objects ('delete this', 'remove the selected part', 'delete 
 | `cascade` | boolean |  | true also deletes every feature that depends on the targets; without it the call fails when dependents exist |
 | `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
 | `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
+
+### `detach_component`
+
+Replace a component instance with its own local copy of the geometry. After detaching, changes to the component no longer affect it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `instance` | string | yes | the component instance's feature id |
 
 ### `duplicate`
 
@@ -320,6 +339,27 @@ Put features/bodies into a named group in the design tree (organization only; ge
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 | `name` | string | yes | Group name |
+
+### `insert_component`
+
+Place an instance of a library component in the current project. Call it once per instance.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `angle_deg` | number |  | rotation about the axis (degrees) |
+| `ax` | number |  | rotation axis X (default 0) |
+| `ay` | number |  | rotation axis Y (default 0) |
+| `az` | number |  | rotation axis Z (default 1) |
+| `component` | string | yes | the component's project id, or its name when unambiguous |
+| `dx` | number |  | offset along X (mm) |
+| `dy` | number |  | offset along Y (mm) |
+| `dz` | number |  | offset along Z (mm) |
+| `ox` | number |  | rotation origin X |
+| `oy` | number |  | rotation origin Y |
+| `oz` | number |  | rotation origin Z |
+| `sx` | number > 0 |  | scale along X (default 1) |
+| `sy` | number > 0 |  | scale along Y (default 1) |
+| `sz` | number > 0 |  | scale along Z (default 1) |
 
 ### `linear_pattern`
 
@@ -485,6 +525,14 @@ Suppress or unsuppress a feature. A suppressed modifying feature (hole, fillet, 
 | `feature` | string | yes | Feature id |
 | `suppressed` | boolean | yes | true to suppress, false to restore |
 
+### `sync_component`
+
+Re-pin component instances to the current state of their component, after the component was edited. With no arguments it syncs every instance that has fallen behind.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `instances` | array of string |  | instance feature ids to sync (default: all out-of-date instances) |
+
 ### `transform`
 
 Move and/or rotate a feature: rotation by angle_deg about the axis (ax,ay,az) through (ox,oy,oz) is applied first, then translation by (dx,dy,dz).
@@ -630,6 +678,12 @@ Describe the visual refinement state: references (view, calibration, landmarks),
 
 _No arguments._
 
+### `list_components`
+
+List the reusable components in the library. A component is a project saved as reusable; insert_component places a reference to one in the current project.
+
+_No arguments._
+
 ### `list_materials`
 
 List the visual materials in the library (built-in plus project materials), optionally for one category (Metals, Plastics, Rubber, Carbon Fiber, Glass, Electronics, Wood, Generic).
@@ -655,6 +709,14 @@ Measure between two things. Each of `from`/`to` is a selector like face(feature=
 | `from` | string | yes | Selector or feature id |
 | `to` | string | yes | Selector or feature id |
 
+### `open_component`
+
+Look up one component and return its details and project path. It does not switch projects: opening a component for editing is something the user does in the Components panel.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `component` | string | yes | the component's project id or name |
+
 ### `render_model`
 
 Render the current model offscreen from fixed cameras (left, right, front, rear, top orthographic; front_3q, rear_3q perspective). mode=shaded for appearance, silhouette for a binary mask (object white, background black). Returns render ids; when references exist, each matching view also gets its silhouette score. Never assume the model looks right without rendering it.
@@ -664,6 +726,14 @@ Render the current model offscreen from fixed cameras (left, right, front, rear,
 | `mode` | shaded \| silhouette |  | Render mode (default shaded) (shaded \| silhouette) |
 | `resolution` | array of integer ≥ 64 ≤ 2048 |  | [width, height], default [1024, 1024] |
 | `views` | array of left \| right \| front \| rear \| top \| front_3q \| rear_3q |  | Default: left, front, top, front_3q |
+
+### `search_components`
+
+Search the component library by name, description or tag.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | yes | text to look for |
 
 ### `search_materials`
 

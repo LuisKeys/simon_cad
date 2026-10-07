@@ -41,6 +41,11 @@ export async function openSettings({ toast, onTheme }) {
   const base = h('input', { id: 'set-base', type: 'text', autocomplete: 'off', spellcheck: 'false' });
   const effort = sel('set-effort', EFFORTS, '');
   const theme = sel('set-theme', [['light', 'Light'], ['dark', 'Dark']], cfg.theme, () => applyTheme(theme.value, onTheme));
+  // Where reusable projects are looked up, on top of the ones next to the open project. It is
+  // never resolved relative to the working directory, so it has to be an absolute path.
+  const complib = h('input', { id: 'set-complib', type: 'text', autocomplete: 'off', spellcheck: 'false',
+    placeholder: 'Absolute path — empty searches next to the open project',
+    value: cfg.componentLibrary ?? '' });
   const status = h('span', { class: 'muted', role: 'status' });
   const rows = {
     key: h('div', { class: 'srow' }, h('label', { for: 'set-key' }, 'API Key'), h('div', { class: 'row' }, key, reveal)),
@@ -77,7 +82,8 @@ export async function openSettings({ toast, onTheme }) {
     e.preventDefault();
     stash();
     try {
-      const out = await api('settings', { provider: provider.value, providers: cfg.providers, theme: theme.value });
+      const out = await api('settings', { provider: provider.value, providers: cfg.providers, theme: theme.value,
+        componentLibrary: complib.value.trim() });
       try { localStorage.setItem(THEME_KEY, out.theme); } catch { /* ignore */ }
       el.hidden = true; el.replaceChildren();
       toast('Settings saved', 'ok');
@@ -92,6 +98,7 @@ export async function openSettings({ toast, onTheme }) {
     rows.effort,
     h('h2', null, 'UI Configuration'),
     h('div', { class: 'srow' }, h('label', { for: 'set-theme' }, 'Theme'), theme),
+    h('div', { class: 'srow' }, h('label', { for: 'set-complib' }, 'Component library'), complib),
     h('div', { class: 'row' }, h('button', { type: 'submit', class: 'primary' }, 'Save Settings'),
       h('button', { type: 'button', onclick: () => close(true) }, 'Cancel'), status));
   form.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(true); });

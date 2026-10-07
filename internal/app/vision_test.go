@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/accelone/simoncad/internal/cadir"
+	"github.com/accelone/simoncad/internal/persistence"
 )
 
 // attachImage stores a 400x300 PNG the way an upload would and returns its id.
@@ -617,7 +618,7 @@ func TestRetainedImagesAndInterpretationsPersist(t *testing.T) {
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "project.json"))
 	_ = json.Unmarshal(b, &meta)
-	if meta.V != 2 {
+	if meta.V != persistence.SchemaVersion {
 		t.Fatalf("schema version %d", meta.V)
 	}
 	a.Close()

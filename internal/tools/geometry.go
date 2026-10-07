@@ -20,6 +20,9 @@ func Default() *Registry {
 	for _, t := range visionTools() {
 		r.Register(t)
 	}
+	for _, t := range componentTools() {
+		r.Register(t)
+	}
 	for _, t := range modifyTools() {
 		r.Register(t)
 	}

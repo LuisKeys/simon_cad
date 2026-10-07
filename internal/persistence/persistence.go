@@ -3,6 +3,9 @@
 package persistence
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,16 +18,47 @@ import (
 )
 
 // SchemaVersion is the current on-disk format version. v2 adds assets/images/ (source
-// images, only when explicitly retained) and interpretations in agent-history.json; v1
-// projects load unchanged.
-const SchemaVersion = 2
+// images, only when explicitly retained) and interpretations in agent-history.json; v3 adds
+// the stable project id and the reusable-component metadata. Every addition is optional, so
+// v1 and v2 projects load unchanged.
+const SchemaVersion = 3
 
+// Meta is project.json. ID is the stable identity a ComponentInstance references: it survives
+// renaming the directory, and the directory name never does. A project with Reusable set is a
+// component — there is no separate "component" concept.
 type Meta struct {
 	SchemaVersion int    `json:"schema_version"`
+	ID            string `json:"id,omitempty"` // prj_<12 hex>
 	Name          string `json:"name"`
 	Units         string `json:"units"`
 	OCCTVersion   string `json:"occt_version"`
 	Created       string `json:"created,omitempty"`
+	// Reusable marks this project as a component: it appears in the component library and may
+	// be instantiated by other projects.
+	Reusable    bool     `json:"reusable,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	// Version counts saves of a reusable project. It is informational in v1 (instances pin a
+	// content hash, not a version) and is the hook for explicit version locking later.
+	Version int `json:"component_version,omitempty"`
+	// DerivedFrom records the project id this one was copied from by "save as".
+	DerivedFrom string `json:"derived_from,omitempty"`
+}
+
+// NewID mints a fresh stable project id.
+func NewID() string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err) // crypto/rand failure is unrecoverable
+	}
+	return "prj_" + hex.EncodeToString(b[:])
+}
+
+// DeriveID is the stable id of a project that predates schema v3: the same legacy project
+// always migrates to the same id, so re-migrating never churns its bytes.
+func DeriveID(name, created string) string {
+	sum := sha256.Sum256([]byte(name + "\x00" + created))
+	return "prj_" + hex.EncodeToString(sum[:6])
 }
 
 type Prompt struct {
@@ -267,11 +301,42 @@ func Load(dir string) (*Project, error) {
 	return p, nil
 }
 
-// migrate upgrades files from older schema versions. v1 → v2 only added optional content
-// (assets/images/, interpretations), so a v1 project is valid as it is; the next save writes v2.
+// LoadGraph reads only project.json and model.json. Resolving a component instance runs
+// several times per tool call (Propose evaluates twice, the commit refresh once more), so it
+// must never touch agent-history.json, which can be megabytes of trace.
+func LoadGraph(dir string) (Meta, *cadir.Graph, error) {
+	var m Meta
+	if err := readJSON(dir, "project.json", &m); err != nil {
+		return m, nil, fmt.Errorf("not a Simon CAD project (%s): %w", dir, err)
+	}
+	if m.SchemaVersion > SchemaVersion {
+		return m, nil, fmt.Errorf("project schema v%d is newer than this build supports (v%d)", m.SchemaVersion, SchemaVersion)
+	}
+	if m.ID == "" {
+		m.ID = DeriveID(m.Name, m.Created)
+	}
+	g := cadir.NewGraph()
+	if err := readJSON(dir, "model.json", g); err != nil {
+		return m, nil, err
+	}
+	if g.Nodes == nil {
+		g.Nodes = []*cadir.Node{}
+	}
+	if err := g.Validate(); err != nil {
+		return m, nil, fmt.Errorf("model.json: %w", err)
+	}
+	return m, g, nil
+}
+
+// migrate upgrades files from older schema versions. Every version bump so far only added
+// optional content (v2: assets/images/, interpretations; v3: the project id and component
+// metadata), so an older project is valid as it is; the next save writes the current version.
 func migrate(dir string, p *Project) error {
 	switch p.Meta.SchemaVersion {
-	case SchemaVersion, 1:
+	case SchemaVersion, 2, 1:
+		if p.Meta.ID == "" {
+			p.Meta.ID = DeriveID(p.Meta.Name, p.Meta.Created)
+		}
 		return nil
 	case 0:
 		return fmt.Errorf("project.json has no schema_version")

@@ -1359,6 +1359,13 @@ func (s *Service) Save(dir string) (string, error) {
 		return "", fmt.Errorf("this project has no location yet; give a path")
 	}
 	dir = resolveProjectPath(withProjectExt(dir))
+	if abs, err := filepath.Abs(dir); err == nil && s.path != "" {
+		if cur, err := filepath.Abs(s.path); err == nil && cur != abs {
+			// "Save as" produces a second project, not a second copy of the same one: two
+			// directories claiming one id would make component references ambiguous.
+			s.app.ReIdentify()
+		}
+	}
 	if err := s.app.Save(dir); err != nil {
 		return "", err
 	}
@@ -1424,6 +1431,12 @@ type TreeNode struct {
 	Params     map[string]any    `json:"params"`
 	Exprs      map[string]string `json:"expressions,omitempty"`
 	Group      string            `json:"group,omitempty"` // design-tree group (organization only)
+	// Component is the referenced project's id when this row is a component instance, which
+	// is what makes instances visually identifiable in the design tree. OutOfDate marks one
+	// whose component has changed on disk since the instance was pinned to it.
+	Component   string `json:"component,omitempty"`
+	OutOfDate   bool   `json:"out_of_date,omitempty"`
+	ComponentOK bool   `json:"component_resolved,omitempty"`
 }
 
 // State is everything the panels render.
@@ -1453,6 +1466,10 @@ type State struct {
 	AgentState  *workflow.Event  `json:"agent_state,omitempty"`
 	RefineState *refine.Event    `json:"refine_state,omitempty"` // while a visual refinement runs
 	Features    Features         `json:"features"`
+	// Reusable says the open project is itself a component; Stale counts the instances whose
+	// component has moved on, which is what the "Sync components" affordance keys off.
+	Reusable bool `json:"reusable"`
+	Stale    int  `json:"stale_components"`
 }
 
 // Features says which attachment workflows can work with the configured providers. It
@@ -1509,15 +1526,22 @@ func (s *Service) State() (*State, error) {
 	if s.refineCancel != nil {
 		st.RefineState = s.refineState
 	}
+	stale := s.app.ComponentsOutOfDate()
+	st.Reusable, st.Stale = s.app.Meta.Reusable, len(stale)
 	for _, n := range g.Nodes {
 		name := n.Metadata.Name
 		if name == "" {
 			name = n.ID
 		}
-		st.Tree = append(st.Tree, TreeNode{ID: n.ID, Name: name, Type: n.Type, Status: n.Status, Errors: nz(n.Errors),
+		row := TreeNode{ID: n.ID, Name: name, Type: n.Type, Status: n.Status, Errors: nz(n.Errors),
 			Intent: n.Intent, CreatedBy: n.Provenance.CreatedBy, Capability: n.Provenance.Capability,
 			Suppressed: n.Suppressed, Visible: leaf[n.ID], Appearance: n.Appearance, Deps: nz(n.Dependencies), Params: n.Parameters, Exprs: n.Expressions,
-			Group: n.Group})
+			Group: n.Group}
+		if c, _ := n.Parameters["component"].(string); c != "" && n.Type == "component_instance" {
+			row.Component, row.ComponentOK = c, n.Status == "ok"
+			_, row.OutOfDate = stale[n.ID]
+		}
+		st.Tree = append(st.Tree, row)
 	}
 	for _, cs := range s.app.Pending() {
 		st.Pending = append(st.Pending, app.CardOf(cs))

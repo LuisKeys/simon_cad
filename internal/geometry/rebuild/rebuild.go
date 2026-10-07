@@ -58,23 +58,32 @@ type entry struct {
 	gen  int
 }
 
+// Engine evaluates a graph. It is NOT reentrant: Rebuild holds mu for the whole pass, builders
+// included, so a builder must never call back into the engine it is running on. A
+// component_instance resolves through Components, which uses a separate engine per component.
 type Engine struct {
-	K     *api.Kernel
-	mu    sync.Mutex
-	cache map[string]*entry
-	gen   int
-	Stats Stats
+	K *api.Kernel
+	// Components resolves component_instance nodes. Nil means component instances fail with a
+	// clear error instead of being silently skipped.
+	Components features.ComponentResolver
+	mu         sync.Mutex
+	cache      map[string]*entry
+	gen        int
+	Stats      Stats
 }
 
 func New(k *api.Kernel) *Engine { return &Engine{K: k, cache: map[string]*entry{}} }
 
-// Close releases every cached shape.
+// Close releases every cached shape, and the component resolver's nested engines with it.
 func (e *Engine) Close() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	for k, en := range e.cache {
 		en.body.Shape.Release()
 		delete(e.cache, k)
+	}
+	e.mu.Unlock()
+	if c, ok := e.Components.(interface{ Close() }); ok {
+		c.Close()
 	}
 }
 
@@ -261,7 +270,7 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 	e.Stats.Misses++
 
 	ctx := &features.Ctx{
-		K: e.K, Node: n, P: params, Bodies: bodies,
+		K: e.K, Node: n, P: params, Bodies: bodies, Components: e.Components,
 		ParamsOf: func(id string) (features.Params, bool) { p, ok := resolved[id]; return p, ok },
 		NodeOf:   func(id string) *cadir.Node { return nodeByID[id] },
 	}

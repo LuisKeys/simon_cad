@@ -127,6 +127,19 @@ func (b *Body) Bounds() selectors.Bounds {
 	}
 }
 
+// ComponentResolver turns a reference to a reusable project into geometry. It is declared
+// here, in the leaf package, so the implementation (internal/components, which needs the
+// rebuild engine and the persistence layer) can depend on features without a cycle.
+type ComponentResolver interface {
+	// Shape builds the component identified by projectID at version, with the instance's
+	// parameter overrides applied. contentHash is the graph hash the instance is pinned to;
+	// an empty hash means "whatever is on disk now". The caller owns the shape and releases it.
+	Shape(projectID, version, contentHash string, overrides map[string]any) (*api.Shape, error)
+	// Hash is the current geometry hash of the component on disk, used to detect instances
+	// that have fallen behind their component.
+	Hash(projectID, version string) (string, error)
+}
+
 // Ctx is everything a builder may read. Bodies holds every already-built node.
 type Ctx struct {
 	K      *api.Kernel
@@ -136,6 +149,8 @@ type Ctx struct {
 	// ParamsOf returns the resolved parameters of an already-built node.
 	ParamsOf func(id string) (Params, bool)
 	NodeOf   func(id string) *cadir.Node
+	// Components resolves component_instance nodes. Nil when no library is configured.
+	Components ComponentResolver
 }
 
 func (c *Ctx) body(id string) (*Body, error) {

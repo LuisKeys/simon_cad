@@ -463,6 +463,58 @@ func (s *Server) routes() {
 		o, err := s.Svc.Export(in.Format, in.Path)
 		reply(w, o, err)
 	})
+	m.HandleFunc("/api/components", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Query string }
+		if r.Method == http.MethodPost {
+			if err := decode(r, &in); err != nil {
+				fail(w, err)
+				return
+			}
+		} else {
+			in.Query = r.URL.Query().Get("q")
+		}
+		writeJSON(w, http.StatusOK, s.Svc.Components(in.Query))
+	})
+	m.HandleFunc("/api/components/open", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Component string }
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		p, err := s.Svc.OpenComponent(in.Component)
+		reply(w, map[string]any{"ok": true, "path": p}, err)
+	})
+	m.HandleFunc("/api/components/rename", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Component, Name, Description string
+			Tags                         []string
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.RenameComponent(in.Component, in.Name, in.Description, in.Tags))
+	})
+	m.HandleFunc("/api/components/delete", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Component string }
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.DeleteComponent(in.Component))
+	})
+	m.HandleFunc("/api/components/publish", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Reusable    bool
+			Description string
+			Tags        []string
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.PublishProject(in.Reusable, in.Description, in.Tags))
+	})
 	m.HandleFunc("/api/events", s.events)
 
 	m.HandleFunc("/", s.static)

@@ -108,7 +108,8 @@ Every node carries the full schema from day one (even where unused yet):
 | `references` | Semantic selectors (e.g. `face` → `face(feature=plate,side=+Z)`) |
 | `constraints` | Reserved (symmetry, alignment, clearances…) |
 | `intent` | The engineering intent in natural language |
-| `manufacturing`, `component` | Reserved for Phases 3–4 |
+| `manufacturing` | Reserved for Phase 4 |
+| `component` | Reserved: tagging a node with the component it came from (see `component_instance` below) |
 | `selection_refs` | The selection context active when the node was created |
 | `provenance` | `created_by` (user/agent/cli), capability, tool call id, ChangeSet id, model |
 | `metadata` | Name, created/modified timestamps, tags |

@@ -13,6 +13,7 @@ import (
 
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
+	"github.com/accelone/simoncad/internal/components"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
@@ -36,6 +37,18 @@ type Env interface {
 	Images() *vision.ImageStore
 	// Materials is the visual material library (presentation only).
 	Materials() *materials.Library
+	// Components is the library of reusable projects; ComponentDeps answers dependency and
+	// cycle questions about them; ComponentResolver turns a reference into geometry.
+	Components() *components.Library
+	ComponentDeps() *components.DependencyGraph
+	ComponentResolver() *components.Resolver
+	// ProjectID is the open project's stable id ("" before it has one). A component instance
+	// references a project by this id, never by directory name.
+	ProjectID() string
+	// PublishComponent writes nodes out as a new reusable project and returns its id. It is a
+	// side effect outside the ChangeSet: the directory is content-addressed so that undo and
+	// redo land on the same one, but undoing the ChangeSet leaves the library project behind.
+	PublishComponent(name, description string, tags []string, nodes []*cadir.Node) (projectID string, err error)
 	// MeshDetail / SetMeshDetail: viewport mesh detail ("fine" | "normal" | "coarse").
 	// Display only; never CAD state.
 	MeshDetail() string

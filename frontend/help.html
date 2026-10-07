@@ -61,8 +61,8 @@
 <section>
 <h2 id="tour" data-group="Getting started">Interface tour</h2>
 <div class="ui-map" aria-hidden="true">
-  <div class="hd"><b>Header</b> · project menu (New / Open) · Undo / Redo · Save · Export · Help · ⋯ (palette, Level)</div>
-  <div><b>Design tree</b><br>features, status, intent, parameters, appearance<br><br><b>Selection</b><br>what you picked</div>
+  <div class="hd"><b>Header</b> · project menu (New / Open) · Undo / Redo · Save · Export · Components · Help · ⋯ (palette, Level)</div>
+  <div><b>Design tree</b><br>features, status, intent, parameters, appearance<br><br><b>Components</b><br>reusable projects<br><br><b>Selection</b><br>what you picked</div>
   <div><b>Action bar</b> · only what fits the selection<br><br><b>3D viewport</b><br>view cube, ghost preview</div>
   <div><b>Simon Agent</b><br>agent chat, ChangeSet cards<br><br><b>Composer</b><br>chips, attach, prompt box</div>
   <div class="tl"><b>History</b> · collapsible checkpoints; select one for Restore / Compare</div>
@@ -71,7 +71,8 @@
 <table>
 <tr><th>Area</th><th>What it does</th></tr>
 <tr><td><b>Header</b></td><td>The <b>project name</b> opens a menu with <b>New</b> and <b>Open</b> (Open lists projects in <code>projects_output</code>, or type a path); <b>Undo/Redo</b>; <b>Save</b>; <b>Export</b> STEP or STL; <b>Help</b> (this page); <b>⋯</b> for the <b>⌘K</b> command palette and the interaction <b>Level</b> (Review/Auto). The outer buttons show or hide the side panels, which you can also resize by dragging their edge.</tr>
-<tr><td><b>Design tree</b></td><td>Every feature with a status dot, its intent, and user/agent provenance. Click a row to select it and see its details, parameters (each edit is a <code>modify_parameter</code> ChangeSet) and Appearance; Shift/Ctrl-click selects several. The eye toggles visibility; double-click or F2 renames; right-click or press-and-hold for more (Duplicate, Group, Suppress, Delete…). <b>Groups</b> appear as folders: click one to select all its bodies, use its arrow to fold it, its eye to hide it, and ⋯ to rename, duplicate or ungroup it.</td></tr>
+<tr><td><b>Design tree</b></td><td>Every feature with a status dot, its intent, and user/agent provenance. Click a row to select it and see its details, parameters (each edit is a <code>modify_parameter</code> ChangeSet) and Appearance; Shift/Ctrl-click selects several. The eye toggles visibility; double-click or F2 renames; right-click or press-and-hold for more (Duplicate, Group, Suppress, Delete…, and <b>Create component…</b>). A row marked <b>Component</b> is an <i>instance</i> of a reusable project rather than geometry of its own; its menu offers Open, Update, Replace and Detach, and the badge turns amber when its component has changed since. <b>Groups</b> appear as folders: click one to select all its bodies, use its arrow to fold it, its eye to hide it, and ⋯ to rename, duplicate or ungroup it.</td></tr>
+<tr><td><b>Components panel</b></td><td>The component library: every reusable project it can find. Search it, and per entry <b>Insert</b> an instance, <b>Open</b> it for editing, <b>Rename</b> its library details or <b>Delete</b> it. When instances in the open project have fallen behind their component, a button at the top offers to update them, and the <b>Components</b> header button turns amber. The button at the bottom publishes the project you are in as a component. See <a href="#components">Components</a>.</td></tr>
 <tr><td><b>Selection panel</b></td><td>The faces / edges / vertices / bodies currently picked, plus shared appearance controls when several bodies are selected.</td></tr>
 <tr><td><b>Action bar</b></td><td>The strip above the viewport shows only what makes sense for the current selection. With nothing selected: <b>Select</b> mode, <b>Create</b>, <b>Measure</b> (<kbd>M</kbd>), <b>Section</b> plane (X/Y/Z + offset), <b>View</b> (mesh view, standard views, play design) and <b>Fit</b> (<kbd>F</kbd>). With a body: Move, Rotate, Scale, Duplicate, Align, Mirror, Pattern, Fillet, Chamfer, Group (Ungroup when it is in one), Material, Color, Hide, Delete. With a face: Hole, Extrude, Inset, Offset. With edges: Fillet, Chamfer. With two bodies: Union, Subtract, Intersect, plus Align and Group for any number of bodies. Actions that do not fit move into <b>More</b>.</td></tr>
 <tr><td><b>Viewport</b></td><td>Orbit, pan, zoom; view cube (click a face/edge/corner to snap the view); hover highlight; ghost preview of proposed changes.</td></tr>
@@ -222,6 +223,46 @@
 <div class="prompt">Group the base plate and the bosses as “Chassis”.</div>
 <div class="prompt">Rename the Chassis group to “Frame”.</div>
 <div class="prompt">Ungroup Frame.</div>
+</section>
+
+<section>
+<h2 id="components" data-group="Prompt cookbook">Components: reusable projects</h2>
+<p>A <b>component is a reusable project</b>. There is no second kind of thing to learn: you save a project as reusable, and other projects can place <b>instances</b> of it. An instance is a <i>reference</i>, not a copy — four wheels on a car are four references to one wheel project. Edit the wheel once and every car that uses it can pick the change up.</p>
+<p>Open the <b>Components</b> panel from the header to browse, search, insert, open, rename and delete them.</p>
+
+<h3>Create one from what you already modelled</h3>
+<p>Select the objects and use <b>Component</b> in the action bar, <b>Create component…</b> in the right-click menu, or just ask. The geometry <i>moves</i> into a new reusable project and is replaced in place by a single instance.</p>
+<div class="prompt">Turn the selected brake assembly into a reusable component called “Brake”.</div>
+<div class="prompt">Make this wheel a component named Wheel, tagged chassis.</div>
+<p>The selection has to be <b>self-contained</b>: nothing outside it may depend on it, and it may not depend on anything outside. If it is not, the refusal names the features that cross the line so you can add them to the selection or detach them first.</p>
+
+<h3>Place instances</h3>
+<p><b>Insert</b> from the Components panel, or ask for them. Each instance has its own placement — position, rotation and scale — which stays editable in the design tree like any other parameter.</p>
+<div class="prompt">Use the Wheel component from my library and place four instances on the car.</div>
+<div class="prompt">Insert the Engine component at x=0, y=120, z=40.</div>
+<div class="prompt">Move Wheel FL 10 mm along X.</div>
+
+<h3>Edit a component</h3>
+<p><b>Open component</b> opens its project normally — the same tree, the same tools, the same agent. There is no separate component editor. Save it, reopen the project that uses it, and the instances are flagged <b>out of date</b>: the design tree badge turns amber and the Components panel offers to update them.</p>
+<div class="prompt">Update all component instances to the latest version.</div>
+<p>Updating is an ordinary ChangeSet, so you can review it, see it in the history, and undo it. Undoing restores the <i>old reference</i>, which simply puts the instances back to “out of date” — it does not bring back the old geometry, because only the latest saved version of a component is kept.</p>
+
+<h3>Components inside components</h3>
+<p>A component may contain other components, to any depth — a wheel assembly made of a tire, a rim (itself containing a hub) and a brake assembly. There is no nesting limit. What is refused is a <b>circular reference</b>: if A uses B and B uses C, then C cannot use A. The refusal spells out the chain it would have closed.</p>
+
+<h3>Detach</h3>
+<p><b>Detach component</b> replaces an instance with its own local copy of the geometry, as ordinary features in your tree. After detaching, changes to the component no longer reach it. Detaching is refused while other features are built on the instance — remove or re-point them first.</p>
+<div class="prompt">Detach Wheel FL so I can modify just that one.</div>
+
+<h3>Publish the project you are in</h3>
+<p>The button at the bottom of the Components panel marks the <i>current</i> project as reusable, so other projects can instantiate it. Save afterwards to publish it. Use it when a project <i>is</i> the part, rather than containing it.</p>
+
+<table>
+<tr><th>Instead of…</th><th>Use…</th></tr>
+<tr><td>The same shape repeated, each copy free to differ</td><td><b>Duplicate</b> — a linked copy inside one project, following its source’s parameters</td></tr>
+<tr><td>Tidying the design tree without changing geometry</td><td><b>Groups</b> — presentation only</td></tr>
+<tr><td>A part you want to reuse across <i>different</i> projects, and maintain in one place</td><td><b>Components</b></td></tr>
+</table>
 </section>
 
 <section>
@@ -396,6 +437,8 @@
 <tr><td><b>Save</b> (<kbd>Ctrl</kbd>+<kbd>S</kbd>)</td><td>First time asks for a name. Relative names are saved under <code>projects_output/</code> with the <code>.scadproj</code> extension.</td></tr>
 <tr><td><b>Open</b></td><td>Lists saved projects (name + modified date); click one or type a path.</td></tr>
 <tr><td><b>Export</b></td><td>STEP (CAD interchange) or STL (3D printing). Extension is added for you.</td></tr>
+<tr><td><b>Reusable projects</b></td><td>A project marked reusable is a <b>component</b>: it shows up in the Components panel and other projects can place instances of it. Nothing else distinguishes it. See <a href="#components">Components</a>.</td></tr>
+<tr><td><b>Save as</b></td><td>Saving to a different path makes a <i>separate</i> project with its own identity, so component references can never point at two directories at once.</td></tr>
 </table>
 <div class="prompt">Export the model as STEP to out/bracket.step.</div>
 <div class="prompt">Export an STL for printing at out/bracket.stl with a fine deflection of 0.05 mm.</div>
@@ -463,7 +506,9 @@
 <tr><td><code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_MODEL</code>, <code>ANTHROPIC_BASE_URL</code></td><td>Claude provider</td></tr>
 <tr><td><code>OPENAI_API_KEY</code>, <code>OPENAI_MODEL</code>, <code>OPENAI_REASONING_EFFORT</code>, <code>OPENAI_BASE_URL</code></td><td>OpenAI provider (model is required)</td></tr>
 <tr><td><code>OLLAMA_MODEL</code>, <code>OLLAMA_BASE_URL</code></td><td>Local models, no key</td></tr>
+<tr><td><code>SIMONCAD_COMPONENT_LIBRARY</code></td><td>A folder of shared components, searched on top of the ones next to the open project. Must be an absolute path. Also editable in <b>Settings → Component library</b>.</td></tr>
 </table>
+<p>Components are found next to the open project (its folder, its parent, their <code>projects_output/</code>) and in the configured library — never relative to the directory you started the program from, so the same project always rebuilds to the same geometry.</p>
 <p>Launch options: <code>--project file.scadproj</code> opens or creates a project; <code>--no-browser</code> does not open a tab; <code>--recording file.json</code> runs a scripted agent without an API key.</p>
 </section>
 
@@ -475,7 +520,11 @@
   <li><code>index=</code> selectors are valid only for the model they were picked on.</li>
   <li>Patterns repeat holes and cut features only.</li>
   <li>Scale, align and face edits apply to visible bodies (not to features a later feature consumes). Face extrude and inset need planar faces; non-uniform scaling turns cylinders into free-form surfaces.</li>
-  <li>No robotics catalog, assemblies or macros yet; intent verbs are natural-language openers.</li>
+  <li>A component instance is one body with one appearance: per-feature colours and materials inside a component are not kept when it is instantiated.</li>
+  <li>Only the latest saved version of a component is kept. Instances record which version they are on and report when they are behind, but cannot be pinned back to an older one yet.</li>
+  <li>Creating a component writes its project to disk outside the undoable change. Undoing leaves that project in the library; delete it from the Components panel if you do not want it.</li>
+  <li>A component can only be made from a self-contained selection, and an instance can only be detached while nothing is built on it.</li>
+  <li>No robotics catalog or macros yet; intent verbs are natural-language openers.</li>
   <li>Edits are refused while the agent is working on a turn (the UI keeps updating).</li>
 </ul>
 <h3>Troubleshooting</h3>
@@ -488,6 +537,11 @@
 <tr><td>Fillet / chamfer failed</td><td>The distance is larger than the available geometry. Use a smaller value or select only the edges you want.</td></tr>
 <tr><td>My selection disappeared</td><td>It is cleared whenever the model changes (index-based selectors would be stale). Select again.</td></tr>
 <tr><td>Edit is refused with “busy” (409)</td><td>The agent is still working. Wait for the answer.</td></tr>
+<tr><td>“the selection depends on features outside it”</td><td>A component has to be self-contained. Add the named features to the selection, or build the component from a part of the model that stands on its own.</td></tr>
+<tr><td>“circular component reference”</td><td>The component you are inserting already uses this project, directly or through another component. The message shows the chain.</td></tr>
+<tr><td>“component project … not found”</td><td>Its folder moved or was deleted. Put it back next to this project, or set <b>Settings → Component library</b> to where it now lives.</td></tr>
+<tr><td>Instances show a <b>Component</b> badge in amber</td><td>Their component changed since they were placed. Use <b>Update</b> in the Components panel or the row’s menu.</td></tr>
+<tr><td>“save the project first” when creating a component</td><td>A component is written next to the project it came from, so the project needs a location. Save it, or set a component library folder in Settings.</td></tr>
 <tr><td>The mesh looks faceted or heavy</td><td>Ask for <i>fine</i> or <i>coarse</i> mesh detail. It is display-only.</td></tr>
 <tr><td>Image dimensions look wrong</td><td>Confirm or correct them in the interpretation panel; give a known length for scale.</td></tr>
 </table>

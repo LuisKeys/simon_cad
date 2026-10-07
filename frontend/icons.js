@@ -72,6 +72,7 @@ const ICONS = {
   inset: [R(3, 3, 18, 18), R(8, 8, 8, 8, 1), P('m3 3 5 5'), P('m21 3-5 5'), P('m3 21 5-5'), P('m21 21-5-5')],
   offset: [P('M4 20V9a5 5 0 0 1 5-5h11'), P('M8 20v-9a3 3 0 0 1 3-3h9'), P('m14 14 3 3'), P('m17 14-3 3')],
   restore: [P('M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8'), P('M3 3v5h5'), P('M12 7v5l4 2')],
+  component: [P('M12 2 4 6v12l8 4 8-4V6z'), P('M12 11 4 7'), P('m12 11 8-4'), P('M12 11v11'), C(12, 6.5, 1.6)],
   compare: [P('M16 3h5v5'), P('M8 3H3v5'), P('M12 22v-8.3a4 4 0 0 0-1.17-2.87L3 3'), P('m15 9 6-6'), P('M21 16v5h-5'), P('m15 15 6 6')],
 };
 
@@ -86,7 +87,8 @@ export function icon(name) {
 /** Feature type (as shown in the design tree) -> icon name. */
 export function featureIcon(type = '') {
   const t = type.toLowerCase();
-  const exact = { copy: 'duplicate', scale: 'scale', face_extrude: 'extrude', face_inset: 'inset', face_offset: 'offset' };
+  const exact = { copy: 'duplicate', scale: 'scale', face_extrude: 'extrude', face_inset: 'inset', face_offset: 'offset',
+    component_instance: 'component' };
   if (exact[t]) return exact[t];
   for (const k of ['cylinder', 'cone', 'sphere', 'torus', 'hole', 'mirror', 'fillet', 'chamfer', 'sketch', 'union', 'subtract', 'intersect']) if (t.includes(k)) return k;
   if (t.includes('pattern')) return 'pattern';

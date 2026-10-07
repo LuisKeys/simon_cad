@@ -14,6 +14,8 @@ import (
 
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
+	"github.com/accelone/simoncad/internal/components"
+	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/export"
 	"github.com/accelone/simoncad/internal/geometry/api"
@@ -74,8 +76,18 @@ type App struct {
 	// it is not CAD state, is not saved and never changes geometry.
 	meshDetail string
 
-	// Raw preserved files not interpreted in Phase 1.
-	components, constraints, materials json.RawMessage
+	// Raw preserved files not interpreted here. components.json is derived on save from the
+	// graph's component instances, so it is no longer carried through.
+	constraints, materials json.RawMessage
+	// Lib is the component library (which reusable projects exist and where); Resolver turns
+	// a component instance into geometry. Both are kept out of rendering and UI logic.
+	Lib      *components.Library
+	Resolver *components.Resolver
+	Deps     *components.DependencyGraph
+	dir      string // the project's directory, "" until saved or opened; anchors the library
+	// savedHash is the graph hash as of the last save; it decides whether a reusable project's
+	// component_version advances, so save → load → save stays byte-identical.
+	savedHash string
 
 	Clock     func() time.Time
 	actor     Actor
@@ -90,10 +102,14 @@ func newApp(clock func() time.Time) *App {
 		clock = time.Now
 	}
 	k := api.New()
+	lib := components.NewLibrary()
 	a := &App{K: k, Engine: rebuild.New(k), Graph: cadir.NewGraph(), Hist: &history.Log{}, Bus: events.NewBus(),
 		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI},
 		Vision: vision.NewStore(), Images: vision.NewImageStore(), Visual: visual.NewState(),
-		Materials: materials.New(materialsdata.FS())}
+		Materials: materials.New(materialsdata.FS()),
+		Lib:       lib, Resolver: components.NewResolver(lib, k), Deps: components.NewDependencyGraph(lib)}
+	a.Engine.Components = a.Resolver
+	a.useLibraryRoots("")
 	a.Bus.Now = clock
 	a.Mgr = commands.NewManager(a.Graph, a, a.Bus)
 	a.Mgr.Now = clock
@@ -103,8 +119,8 @@ func newApp(clock func() time.Time) *App {
 // New starts an empty project.
 func New(name string, clock func() time.Time) *App {
 	a := newApp(clock)
-	a.Meta = persistence.Meta{SchemaVersion: persistence.SchemaVersion, Name: name, Units: "mm",
-		OCCTVersion: a.K.Version(), Created: a.Clock().UTC().Format(time.RFC3339)}
+	a.Meta = persistence.Meta{SchemaVersion: persistence.SchemaVersion, ID: persistence.NewID(),
+		Name: name, Units: "mm", OCCTVersion: a.K.Version(), Created: a.Clock().UTC().Format(time.RFC3339)}
 	return a
 }
 
@@ -117,7 +133,8 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 	a := newApp(clock)
 	a.Meta, a.AH = p.Meta, p.History
 	a.useProjectMaterials(dir)
-	a.components, a.constraints, a.materials = p.Components, p.Constraints, p.Materials
+	a.useLibraryRoots(dir)
+	a.constraints, a.materials = p.Constraints, p.Materials
 	*a.Graph = *p.Graph
 	if len(a.AH.Interpretations) > 0 {
 		if err := json.Unmarshal(a.AH.Interpretations, a.Vision); err != nil {
@@ -148,6 +165,7 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 			a.trackForCheckpoint(cs)
 		}
 	}
+	a.savedHash = a.Graph.Hash()
 	return a, nil
 }
 
@@ -155,6 +173,22 @@ func (a *App) Close() {
 	a.Engine.Close()
 	a.K.Close()
 }
+
+// useLibraryRoots points the component library at the project's own neighbourhood plus the
+// configured library root. The roots are never derived from the process working directory: a
+// component resolved by where the binary happens to run would make the same .scadproj rebuild
+// to different geometry from a different shell.
+func (a *App) useLibraryRoots(dir string) {
+	a.dir = dir
+	a.Lib.SetRoots(components.RootsFor(dir, configComponentLibrary())...)
+}
+
+// configComponentLibrary is the configured library root, indirected so tests can point the
+// library somewhere else without touching the user's settings.
+var configComponentLibrary = config.ComponentLibrary
+
+// Dir is the project's directory ("" until it is saved or opened).
+func (a *App) Dir() string { return a.dir }
 
 // ProjectMaterialsDir is where a project keeps its own materials.
 const ProjectMaterialsDir = "assets/materials"
@@ -220,6 +254,9 @@ func (a *App) Save(dir string) error {
 	if _, err := a.Model(); err != nil { // refresh derived status before writing
 		return err
 	}
+	if h := a.Graph.Hash(); a.Meta.Reusable && h != a.savedHash {
+		a.Meta.Version++ // a reusable project's version advances only when its content changed
+	}
 	a.AH.Interpretations = nil
 	if len(a.Vision.List()) > 0 {
 		b, err := json.Marshal(a.Vision)
@@ -246,15 +283,36 @@ func (a *App) Save(dir string) error {
 	}
 	if err := persistence.Save(dir, &persistence.Project{
 		Meta: a.Meta, Graph: a.Graph, History: a.AH, Events: a.Bus.Events(),
-		Components: a.components, Constraints: a.constraints, Materials: a.materials, Images: imgs,
+		Components: components.Manifest(a.Graph), Constraints: a.constraints, Materials: a.materials, Images: imgs,
 	}); err != nil {
 		return err
 	}
-	return a.carryProjectMaterials(dir)
+	a.savedHash = a.Graph.Hash()
+	if err := a.carryProjectMaterials(dir); err != nil {
+		return err
+	}
+	a.useLibraryRoots(dir)
+	return nil
 }
 
 // SetActor sets who is driving subsequent tool calls.
 func (a *App) SetActor(ac Actor) { a.actor = ac }
+
+// ReIdentify mints a new stable project id, recording the one it was copied from. "Save as"
+// calls it so two directories never claim the same id and component references stay unambiguous.
+// A plain Save never does: copying a project directory by hand keeps it the same project.
+func (a *App) ReIdentify() {
+	a.Meta.DerivedFrom, a.Meta.ID = a.Meta.ID, persistence.NewID()
+}
+
+// SetReusable marks the project as a reusable component (or stops it being one) and sets its
+// library description and tags.
+func (a *App) SetReusable(reusable bool, description string, tags []string) {
+	a.Meta.Reusable, a.Meta.Description, a.Meta.Tags = reusable, description, tags
+	if !reusable {
+		a.Meta.Description, a.Meta.Tags, a.Meta.Version = "", nil, 0
+	}
+}
 
 // ---- model access -----------------------------------------------------------------
 
@@ -350,9 +408,17 @@ func (e toolEnv) Checkpoints() *history.Log      { return e.a.Hist }
 func (e toolEnv) Vision() *vision.Store          { return e.a.Vision }
 func (e toolEnv) Images() *vision.ImageStore     { return e.a.Images }
 func (e toolEnv) Materials() *materials.Library  { return e.a.Materials }
-func (e toolEnv) MeshDetail() string             { return e.a.MeshDetail() }
-func (e toolEnv) SetMeshDetail(level string)     { e.a.meshDetail = level }
-func (e toolEnv) Visual() *visual.State          { return e.a.Visual }
+
+func (e toolEnv) Components() *components.Library            { return e.a.Lib }
+func (e toolEnv) ComponentDeps() *components.DependencyGraph { return e.a.Deps }
+func (e toolEnv) ComponentResolver() *components.Resolver    { return e.a.Resolver }
+func (e toolEnv) ProjectID() string                          { return e.a.Meta.ID }
+func (e toolEnv) PublishComponent(name, description string, tags []string, nodes []*cadir.Node) (string, error) {
+	return e.a.PublishComponent(name, description, tags, nodes)
+}
+func (e toolEnv) MeshDetail() string         { return e.a.MeshDetail() }
+func (e toolEnv) SetMeshDetail(level string) { e.a.meshDetail = level }
+func (e toolEnv) Visual() *visual.State      { return e.a.Visual }
 func (e toolEnv) Render(views []string, w, h int, mode string) ([]*visual.Render, error) {
 	return e.a.Render(views, w, h, mode)
 }

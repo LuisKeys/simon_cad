@@ -12,6 +12,7 @@ import { icon, featureIcon } from './icons.js';
 import { selectionContext, actionsFor, groupRuns, ACTIONS } from './actions.js';
 import { openSettings, loadTheme } from './settings.js';
 import { initPanels, getPref, setPref } from './panels.js';
+import { initComponents, openComponent, createComponent, replaceComponent, publishProject } from './components.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
@@ -212,6 +213,7 @@ function render(st) {
   renderTimeline(st);
   renderChat(st);
   renderCtxBar();
+  components.render(st);
   vision.onState(st);
 }
 
@@ -261,6 +263,9 @@ function renderTree(st) {
       h('span', { class: 'ficon' }, icon(featureIcon(n.type))),
       n.suppressed || n.status !== 'ok' ? h('span', { class: `dot ${n.suppressed ? 'suppressed' : n.status}`, title: n.suppressed ? 'suppressed' : n.status }) : null,
       renaming ? renameInput(n) : h('span', { class: 'name' }, n.name),
+      n.component ? h('span', { class: `src component${n.out_of_date ? ' stale' : ''}`,
+        title: n.out_of_date ? `references the component ${n.component}, which has changed since` : `references the component ${n.component}` },
+        n.out_of_date ? 'Component ·' : 'Component') : null,
       n.created_by === 'agent' ? h('span', { class: 'src agent', title: n.capability ? `agent · ${n.capability}` : 'created by the agent' }, 'agent') : null,
       n.visible ? null : h('span', { class: 'src', title: 'Consumed by a later feature' }, 'input'),
       selected ? h('button', { type: 'button', class: 'more', 'aria-haspopup': 'menu', 'aria-label': `Actions for ${n.name}`,
@@ -395,6 +400,14 @@ function treeMenu(n, at) {
     n.visible && { label: hiddenApp ? 'Show' : 'Hide', icon: hiddenApp ? 'eye' : 'eye-off', run: () => applyAppearance('set_visibility', ids, { visible: hiddenApp }) },
     { label: 'Rename', icon: 'pencil', key: 'F2', disabled: ids.length > 1, run: () => startRename(n) },
     { label: n.suppressed ? 'Unsuppress' : 'Suppress', icon: 'ban', run: async () => { for (const t of nodes) await callTool('suppress_feature', { feature: t.id, suppressed: !n.suppressed }); } },
+    { sep: true },
+    // Component instances are references: they are opened, re-pinned, swapped or turned into
+    // local geometry. Everything else can become a component.
+    n.component && { label: 'Open component', icon: 'folder', run: () => openComponent(n.component) },
+    n.component && n.out_of_date && { label: 'Update to latest', icon: 'restore', run: () => callTool('sync_component', { instances: [n.id] }, 'Update component') },
+    n.component && { label: 'Replace component…', icon: 'component', run: () => replaceComponent(n) },
+    n.component && { label: 'Detach component', icon: 'ungroup', run: () => callTool('detach_component', { instance: n.id }, 'Detach component') },
+    !n.component && n.visible && { label: 'Create component…', icon: 'component', run: () => withSelected(ids, () => createComponent(ids)) },
     { sep: true },
     n.visible && { label: 'Duplicate…', icon: 'duplicate', key: 'Ctrl+D', run: () => withSelected(ids, actionEnv.duplicate) },
     { label: 'Group…', icon: 'group', key: 'Ctrl+G', run: () => withSelected(ids, actionEnv.group) },
@@ -936,6 +949,12 @@ function triggerAction(a, sel, anchor) {
 }
 
 // What the actions can do. Everything that changes the model ends in a tool call.
+// The component library panel. It only browses and does library bookkeeping; everything that
+// changes the model goes through callTool like every other mutation.
+const components = initComponents({ callTool, toast, formDialog, confirm: (title, body) => confirmBox({ title, body, ok: 'Delete' }), refresh: scheduleRefresh });
+$('comp-sync')?.addEventListener('click', () => callTool('sync_component', {}, 'Update components'));
+$('comp-publish')?.addEventListener('click', (e) => publishProject(e.currentTarget.dataset.reusable !== 'true'));
+
 const selIds = () => selectionContext(S.selection?.selectors ?? []).features;
 const groupOf = (id) => S.state?.tree?.find((t) => t.id === id)?.group ?? '';
 const nameOf = (ids) => (ids.length > 1 ? `${ids.length} objects` : ids[0]);
@@ -978,6 +997,7 @@ function formDialog({ title, fields, ok = 'Apply' }) {
 
 const actionEnv = {
   fit: () => vp.fit(),
+  createComponent: () => { const ids = selIds(); if (ids.length) createComponent(ids); },
   toggleMeasure,
   async transform(kind) {
     const ids = selIds();

@@ -1,6 +1,9 @@
 package tools
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -64,5 +67,54 @@ func TestRegistryInvariants(t *testing.T) {
 	}
 	if _, err := r.Invoke(nil, "rm_rf", nil); err == nil || !strings.Contains(err.Error(), "unknown tool") {
 		t.Errorf("unknown tool must be refused: %v", err)
+	}
+}
+
+// The Help page's tool reference (frontend/help.js) is written by hand, so nothing stops it
+// drifting from the registry — a tool shipped without a Help entry is invisible to users who
+// read the reference rather than the schemas. This pins the two together in both directions.
+func TestHelpReferenceCoversEveryTool(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "frontend", "help.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Entries look like: ['tool_name', 'edit'|'query', …]
+	entry := regexp.MustCompile(`\['([a-z0-9_]+)',\s*'(edit|query)'`)
+	documented := map[string]string{}
+	for _, m := range entry.FindAllStringSubmatch(string(b), -1) {
+		documented[m[1]] = m[2]
+	}
+	// Pre-existing gaps, from before this check existed. The list may shrink, never grow: a
+	// new tool must come with its Help entry.
+	undocumented := map[string]bool{
+		"define_parameters": true, "bind_parameters": true, "set_parameter": true,
+		"define_region": true, "lock_region": true, "unlock_region": true,
+		"render_model": true, "get_visual_state": true, "calibrate_reference_image": true,
+	}
+	reg := Default()
+	for _, name := range reg.Names() {
+		kind, ok := documented[name]
+		if !ok {
+			if !undocumented[name] {
+				t.Errorf("tool %q has no entry in frontend/help.js (the Help page's tool reference)", name)
+			}
+			continue
+		}
+		if undocumented[name] {
+			t.Errorf("tool %q is documented now: remove it from the undocumented list", name)
+		}
+		tool, _ := reg.Get(name)
+		want := "query"
+		if tool.Mutating() {
+			want = "edit"
+		}
+		if kind != want {
+			t.Errorf("tool %q is listed as %q in frontend/help.js but is %q", name, kind, want)
+		}
+	}
+	for name := range documented {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("frontend/help.js documents %q, which is not a registered tool", name)
+		}
 	}
 }
