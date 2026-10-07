@@ -64,8 +64,7 @@ func (ag *Agent) Run(ctx context.Context, a *app.App, intent string, policy app.
 	ag.emit(Event{State: StatePlanning, Message: "Planning…"})
 	_, defs := toolDefs(rt, a)
 	plan, usage, err := Planner{Provider: rt.Provider, NoThinking: rt.NoThinking, Tools: defs}.Plan(ctx, c.Msgs, c.Context(), intent)
-	c.Res.Usage.InputTokens += usage.InputTokens
-	c.Res.Usage.OutputTokens += usage.OutputTokens
+	c.Res.Usage.Add(usage)
 	if err != nil {
 		ag.fail(out, err)
 		return out, err

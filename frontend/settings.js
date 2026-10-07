@@ -3,7 +3,10 @@
 import { api, h } from './api.js';
 
 const PROVIDERS = [['openai', 'OpenAI'], ['claude', 'Anthropic'], ['ollama', 'Ollama']];
-const EFFORTS = [['', 'Model default'], ['none', 'None'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
+// Reasoning levels, weakest first. Not every model accepts every level: one that refuses the
+// level asked for is sent the closest it does accept, so no choice here can break a turn.
+const EFFORTS = [['', 'Model default'], ['none', 'None'], ['minimal', 'Minimal'], ['low', 'Low'],
+  ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']];
 const THEME_KEY = 'simon.theme';
 
 /** Applies a theme to the interface; `onTheme` lets the viewport recolor its 3D scene. */
@@ -40,6 +43,15 @@ export async function openSettings({ toast, onTheme }) {
   const model = h('input', { id: 'set-model', type: 'text', autocomplete: 'off', spellcheck: 'false' });
   const base = h('input', { id: 'set-base', type: 'text', autocomplete: 'off', spellcheck: 'false' });
   const effort = sel('set-effort', EFFORTS, '');
+  // Token prices are optional: left empty, consumption is reported in tokens only.
+  const price = (id, label) => h('input', { id, type: 'text', inputmode: 'decimal', autocomplete: 'off',
+    spellcheck: 'false', placeholder: `Per 1M ${label} tokens — empty = tokens only` });
+  const inPrice = price('set-price-in', 'input');
+  const outPrice = price('set-price-out', 'output');
+  const cachedPrice = h('input', { id: 'set-price-cached', type: 'text', inputmode: 'decimal', autocomplete: 'off',
+    spellcheck: 'false', placeholder: 'Per 1M cached input tokens — empty = full input price' });
+  const currency = h('input', { id: 'set-currency', type: 'text', autocomplete: 'off', spellcheck: 'false',
+    maxlength: '8', placeholder: 'USD', value: cfg.currency ?? '' });
   const theme = sel('set-theme', [['light', 'Light'], ['dark', 'Dark']], cfg.theme, () => applyTheme(theme.value, onTheme));
   // Where reusable projects are looked up, on top of the ones next to the open project. It is
   // never resolved relative to the working directory, so it has to be an absolute path.
@@ -61,6 +73,8 @@ export async function openSettings({ toast, onTheme }) {
     p.model = model.value.trim(); p.baseUrl = base.value.trim();
     if (shown !== 'ollama') p.apiKey = key.value;
     if (shown === 'openai') p.reasoningEffort = effort.value;
+    p.inputPrice = inPrice.value.trim(); p.outputPrice = outPrice.value.trim();
+    p.cachedInputPrice = cachedPrice.value.trim();
   };
   function fill() {
     stash();
@@ -69,6 +83,8 @@ export async function openSettings({ toast, onTheme }) {
     model.value = p.model ?? ''; base.value = p.baseUrl ?? '';
     key.value = p.apiKey ?? ''; key.type = 'password'; reveal.textContent = 'Show';
     effort.value = p.reasoningEffort ?? '';
+    inPrice.value = p.inputPrice ?? ''; outPrice.value = p.outputPrice ?? '';
+    cachedPrice.value = p.cachedInputPrice ?? '';
     rows.key.hidden = shown === 'ollama';
     rows.effort.hidden = shown !== 'openai';
     status.textContent = '';
@@ -83,7 +99,7 @@ export async function openSettings({ toast, onTheme }) {
     stash();
     try {
       const out = await api('settings', { provider: provider.value, providers: cfg.providers, theme: theme.value,
-        componentLibrary: complib.value.trim() });
+        componentLibrary: complib.value.trim(), currency: currency.value.trim() });
       try { localStorage.setItem(THEME_KEY, out.theme); } catch { /* ignore */ }
       el.hidden = true; el.replaceChildren();
       toast('Settings saved', 'ok');
@@ -96,6 +112,15 @@ export async function openSettings({ toast, onTheme }) {
     h('div', { class: 'srow' }, h('label', { for: 'set-model' }, 'Model'), model),
     h('div', { class: 'srow' }, h('label', { for: 'set-base' }, 'Base URL'), base),
     rows.effort,
+    h('h2', null, 'Token Prices (optional)'),
+    h('div', { class: 'shint muted' },
+      'What this provider\u2019s model costs per million tokens. Leave empty to report consumption in tokens only; '
+      + 'with prices loaded, each turn and the session also show an estimated cost. Cached input is the reduced rate '
+      + 'for prompt the provider served from its cache \u2014 left empty it is charged at the full input price.'),
+    h('div', { class: 'srow' }, h('label', { for: 'set-price-in' }, 'Input price'), inPrice),
+    h('div', { class: 'srow' }, h('label', { for: 'set-price-cached' }, 'Cached input price'), cachedPrice),
+    h('div', { class: 'srow' }, h('label', { for: 'set-price-out' }, 'Output price'), outPrice),
+    h('div', { class: 'srow' }, h('label', { for: 'set-currency' }, 'Currency'), currency),
     h('h2', null, 'UI Configuration'),
     h('div', { class: 'srow' }, h('label', { for: 'set-theme' }, 'Theme'), theme),
     h('div', { class: 'srow' }, h('label', { for: 'set-complib' }, 'Component library'), complib),

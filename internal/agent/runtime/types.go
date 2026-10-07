@@ -6,6 +6,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"sort"
 )
 
 // Block is one content block of a message (provider-neutral, Messages-API shaped).
@@ -84,9 +85,93 @@ type Request struct {
 	NoThinking bool
 }
 
+// Usage counts the tokens of one or more model calls. Totals are what every caller needs;
+// ByModel keeps the per-model breakdown a turn needs to be costed, because one turn can
+// span several models (the vision router, the planner and the CAD agent).
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	// InputTokens is every input token the call was billed for, cached ones included.
+	InputTokens int `json:"input_tokens"`
+	// CachedInputTokens is the part of InputTokens the provider served from its prompt
+	// cache. Providers bill those at a lower rate, so costing them at the full input price
+	// overstates the spend; it is always a subset of InputTokens, never an extra.
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+	OutputTokens      int `json:"output_tokens"`
+	// ByModel is keyed "<provider>/<model>"; it is nil for usage no provider attributed.
+	ByModel map[string]ModelUsage `json:"by_model,omitempty"`
+}
+
+// ModelUsage is what one model consumed.
+type ModelUsage struct {
+	Provider          string `json:"provider"`
+	Model             string `json:"model"`
+	InputTokens       int    `json:"input_tokens"`
+	CachedInputTokens int    `json:"cached_input_tokens,omitempty"`
+	OutputTokens      int    `json:"output_tokens"`
+	Calls             int    `json:"calls"`
+}
+
+// FreshInputTokens is the input that was not served from the cache.
+func (m ModelUsage) FreshInputTokens() int { return m.InputTokens - m.CachedInputTokens }
+
+// ModelKey identifies a model for costing and reporting.
+func ModelKey(provider, model string) string { return provider + "/" + model }
+
+// usageFor is what a provider returns for one call: totals plus their attribution. in counts
+// every input token (cached included) and cached is the part of it the cache served.
+func usageFor(provider, model string, in, cached, out int) Usage {
+	if cached > in {
+		cached = in // a provider that reports them separately is normalized by the caller
+	}
+	return Usage{InputTokens: in, CachedInputTokens: cached, OutputTokens: out, ByModel: map[string]ModelUsage{
+		ModelKey(provider, model): {Provider: provider, Model: model, InputTokens: in,
+			CachedInputTokens: cached, OutputTokens: out, Calls: 1}}}
+}
+
+// Add accumulates another Usage, merging the per-model breakdown.
+func (u *Usage) Add(o Usage) {
+	u.InputTokens += o.InputTokens
+	u.CachedInputTokens += o.CachedInputTokens
+	u.OutputTokens += o.OutputTokens
+	for k, m := range o.ByModel {
+		if u.ByModel == nil {
+			u.ByModel = map[string]ModelUsage{}
+		}
+		cur, ok := u.ByModel[k]
+		if !ok {
+			cur = ModelUsage{Provider: m.Provider, Model: m.Model}
+		}
+		cur.InputTokens += m.InputTokens
+		cur.CachedInputTokens += m.CachedInputTokens
+		cur.OutputTokens += m.OutputTokens
+		cur.Calls += m.Calls
+		u.ByModel[k] = cur
+	}
+}
+
+// FreshInputTokens is the input that was not served from the cache.
+func (u Usage) FreshInputTokens() int { return u.InputTokens - u.CachedInputTokens }
+
+// Tokens is the total of input and output tokens.
+func (u Usage) Tokens() int { return u.InputTokens + u.OutputTokens }
+
+// Models lists the per-model breakdown, heaviest first (ties broken by key for stability).
+func (u Usage) Models() []ModelUsage {
+	keys := make([]string, 0, len(u.ByModel))
+	for k := range u.ByModel {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := u.ByModel[keys[i]], u.ByModel[keys[j]]
+		if ta, tb := a.InputTokens+a.OutputTokens, b.InputTokens+b.OutputTokens; ta != tb {
+			return ta > tb
+		}
+		return keys[i] < keys[j]
+	})
+	out := make([]ModelUsage, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, u.ByModel[k])
+	}
+	return out
 }
 
 type Response struct {

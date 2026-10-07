@@ -155,12 +155,22 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 		var out struct {
 			Content    []Block `json:"content"`
 			StopReason string  `json:"stop_reason"`
-			Usage      Usage   `json:"usage"`
+			Usage      struct {
+				// Anthropic reports cache tokens *beside* input_tokens, not inside it, so the
+				// billed input is their sum. Cache writes cost more than fresh input rather
+				// than less; this agent never writes a cache, so they join the fresh side.
+				InputTokens   int `json:"input_tokens"`
+				CacheRead     int `json:"cache_read_input_tokens"`
+				CacheCreation int `json:"cache_creation_input_tokens"`
+				OutputTokens  int `json:"output_tokens"`
+			} `json:"usage"`
 		}
 		if err := json.Unmarshal(data, &out); err != nil {
 			return nil, fmt.Errorf("decode anthropic response: %w", err)
 		}
-		return &Response{Content: out.Content, StopReason: out.StopReason, Usage: out.Usage}, nil
+		in := out.Usage.InputTokens + out.Usage.CacheRead + out.Usage.CacheCreation
+		return &Response{Content: out.Content, StopReason: out.StopReason,
+			Usage: usageFor(ProviderClaude, model, in, out.Usage.CacheRead, out.Usage.OutputTokens)}, nil
 	}
 	return nil, fmt.Errorf("anthropic API unavailable after retries: %w", lastErr)
 }

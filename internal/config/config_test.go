@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,64 @@ func TestSaveRejectsBadValues(t *testing.T) {
 	s.Providers[ProviderOpenAI] = ProviderSettings{BaseURL: "ftp://x"}
 	if Save(s) == nil {
 		t.Fatal("bad base URL accepted")
+	}
+}
+
+// A field cleared in the Settings screen must fall back to the environment instead of
+// shadowing it: the first save from the UI used to write "" for every untouched field,
+// which silently disabled whatever the user had configured in .env.
+func TestClearedSettingFallsBackToTheEnvironment(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "settings.json")
+	t.Setenv("SIMONCAD_COMPONENT_LIBRARY", "/from/env")
+	t.Setenv("OPENAI_MODEL", "model-from-env")
+	if err := LoadFrom(file); err != nil {
+		t.Fatal(err)
+	}
+	s := Current()
+	s.ComponentLibrary = "" // never touched in the UI
+	ps := s.Providers[ProviderOpenAI]
+	ps.Model = ""
+	s.Providers[ProviderOpenAI] = ps
+	if err := Save(s); err != nil {
+		t.Fatal(err)
+	}
+	if got := ComponentLibrary(); got != "/from/env" {
+		t.Fatalf("component library = %q, want the environment value", got)
+	}
+	if got := Get("OPENAI_MODEL"); got != "model-from-env" {
+		t.Fatalf("model = %q, want the environment value", got)
+	}
+	// And it survives a reload: the empty key is not written to the file at all.
+	if err := LoadFrom(file); err != nil {
+		t.Fatal(err)
+	}
+	if got := ComponentLibrary(); got != "/from/env" {
+		t.Fatalf("after reload: %q", got)
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"SIMONCAD_COMPONENT_LIBRARY"`) {
+		t.Fatalf("the empty key was persisted: %s", b)
+	}
+}
+
+// A non-empty saved value still wins over the environment.
+func TestSavedValueStillOverridesTheEnvironment(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "settings.json")
+	t.Setenv("OPENAI_MODEL", "model-from-env")
+	if err := LoadFrom(file); err != nil {
+		t.Fatal(err)
+	}
+	s := Current()
+	ps := s.Providers[ProviderOpenAI]
+	ps.Model = "model-from-ui"
+	s.Providers[ProviderOpenAI] = ps
+	if err := Save(s); err != nil {
+		t.Fatal(err)
+	}
+	if got := Get("OPENAI_MODEL"); got != "model-from-ui" {
+		t.Fatalf("model = %q", got)
 	}
 }

@@ -300,3 +300,59 @@ func TestModifyingFeaturesKeepAppearance(t *testing.T) {
 		t.Fatal("restyling the visible body must not touch its inputs")
 	}
 }
+
+// Scaling about an explicit point: giving ox/oy/oz is enough. The agent used to be refused
+// with "ox/oy/oz need about=point" and had no way to read what to do instead, so the whole
+// turn failed on a request the tool could perfectly well serve.
+func TestScaleAboutAPointInfersTheAnchor(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	mustOK(t, a.ApplyTool("create_box", []byte(`{"id":"b","dx":10,"dy":20,"dz":30}`), PolicyAuto))
+	// Box spans x 0..10; doubling X about x=0 must keep the near face put and send max to 20.
+	mustOK(t, a.ApplyTool("scale", []byte(`{"target":"b","sx":2,"ox":0,"oy":0,"oz":0,"id":"s"}`), PolicyAuto))
+	_, min, max := leafProps(t, a, "s")
+	if !approx(min[0], 0) || !approx(max[0], 20) {
+		t.Fatalf("scaled about (0,0,0): min=%v max=%v", min, max)
+	}
+	// The inferred anchor is recorded on the feature, not left to the default.
+	n := a.Snapshot().Get("s")
+	if n == nil {
+		t.Fatal("feature s is missing")
+	}
+	if got, _ := n.Parameters["about"].(string); got != "point" {
+		t.Fatalf("about = %q, want the inferred point", got)
+	}
+}
+
+// An explicit anchor computes its own fixed point, so coordinates passed alongside it have
+// nothing to do. That reading is unambiguous, so the call succeeds instead of failing a turn
+// over a redundant argument — but the explanation says what was disregarded, and the unused
+// coordinates are not stored where a later parameter edit would appear to honour them.
+func TestScaleIgnoresCoordinatesUnderAnExplicitAnchor(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	mustOK(t, a.ApplyTool("create_box", []byte(`{"id":"b","dx":10,"dy":20,"dz":30}`), PolicyAuto))
+	o := mustOK(t, a.ApplyTool("scale", []byte(`{"target":"b","sx":2,"about":"center","ox":5,"oy":10,"oz":15,"id":"s"}`), PolicyAuto))
+	// Scaled about the bounding-box center (x 0..10 → -5..15), not about x=5.
+	_, min, max := leafProps(t, a, "s")
+	if !approx(min[0], -5) || !approx(max[0], 15) {
+		t.Fatalf("scaled about the center: min=%v max=%v", min, max)
+	}
+	for _, want := range []string{"about its center", "(5, 10, 15) was not used"} {
+		if !strings.Contains(o.ChangeSet.Explanation, want) {
+			t.Fatalf("the explanation does not say %q: %s", want, o.ChangeSet.Explanation)
+		}
+	}
+	n := a.Snapshot().Get("s")
+	if n == nil {
+		t.Fatal("feature s is missing")
+	}
+	for _, k := range []string{"ox", "oy", "oz"} {
+		if _, ok := n.Parameters[k]; ok {
+			t.Fatalf("the unused %s was stored on the feature: %v", k, n.Parameters)
+		}
+	}
+	// about=point with coordinates stays valid, and so does an anchor with no coordinates.
+	mustOK(t, a.ApplyTool("scale", []byte(`{"target":"s","sx":1.5,"about":"point","ox":5,"id":"p"}`), PolicyAuto))
+	mustOK(t, a.ApplyTool("scale", []byte(`{"target":"p","sx":1.5,"about":"center","id":"c"}`), PolicyAuto))
+}

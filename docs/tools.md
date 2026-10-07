@@ -437,15 +437,15 @@ Return the model to an earlier semantic checkpoint, given by id (cp_002), number
 
 ### `scale`
 
-Scale a body. Give `factor` for uniform scaling (2 = twice as big, 0.5 = half) or per-axis sx/sy/sz (each defaults to `factor`, else 1). `about` is the fixed point: center (default, the bounding-box center), base (center of the bottom face, keeps a part on the print bed), origin, or point (ox,oy,oz). Non-uniform scaling turns cylinders and other analytic faces into free-form surfaces.
+Scale a body. Give `factor` for uniform scaling (2 = twice as big, 0.5 = half) or per-axis sx/sy/sz (each defaults to `factor`, else 1). `about` is the fixed point: center (default, the bounding-box center), base (center of the bottom face, keeps a part on the print bed), origin, or point (ox,oy,oz). Passing ox/oy/oz is enough — it means about=point. With about=center/base/origin they are not used, because those compute the fixed point from the body. Non-uniform scaling turns cylinders and other analytic faces into free-form surfaces.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `about` | center \| base \| origin \| point |  | Fixed point of the scaling (center \| base \| origin \| point) |
+| `about` | center \| base \| origin \| point |  | Fixed point of the scaling; defaults to point when ox/oy/oz are given, else center. It wins over ox/oy/oz (center \| base \| origin \| point) |
 | `factor` | number > 0 |  | Uniform scale factor |
-| `ox` | number |  | Fixed point X (about=point) |
-| `oy` | number |  | Fixed point Y (about=point) |
-| `oz` | number |  | Fixed point Z (about=point) |
+| `ox` | number |  | Fixed point X; giving it implies about=point. Omit it unless you want that anchor |
+| `oy` | number |  | Fixed point Y; giving it implies about=point. Omit it unless you want that anchor |
+| `oz` | number |  | Fixed point Z; giving it implies about=point. Omit it unless you want that anchor |
 | `sx` | number > 0 |  | Scale factor along X |
 | `sy` | number > 0 |  | Scale factor along Y |
 | `sz` | number > 0 |  | Scale factor along Z |

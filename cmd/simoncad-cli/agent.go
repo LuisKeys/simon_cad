@@ -58,7 +58,7 @@ func runAgentTurn(a *app.App, intent string, f *agentFlags, pol app.Policy, quie
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	rt := &runtime.Runtime{Provider: prov, Caps: []runtime.Capability{geo.New(), vis.New()}}
+	rt := &runtime.Runtime{Provider: prov, Caps: runtime.SelectCaps(a, nil, geo.New(), vis.New())}
 	if !quiet && !jsonOut {
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			fmt.Printf("  → %s %s\n", name, strings.TrimSpace(string(args)))
@@ -133,6 +133,14 @@ func finishTurn(a *app.App, path, intent string, f *agentFlags, res *runtime.Res
 	fmt.Fprintf(&sb, "\n%s\n\n", res.Final)
 	fmt.Fprintf(&sb, "project: %s   tool calls: %d   committed: %v   pending approval: %v\n", path, res.ToolCalls, res.Committed, pending)
 	fmt.Fprintf(&sb, "model volume: %.3f mm³", vol)
+	fmt.Fprintf(&sb, "\nusage: %s", runtime.Report(res.Usage))
+	for _, m := range res.Usage.Models() {
+		fmt.Fprintf(&sb, "\n  %s/%s: %d in", m.Provider, m.Model, m.InputTokens)
+		if m.CachedInputTokens > 0 {
+			fmt.Fprintf(&sb, " (%d cached)", m.CachedInputTokens)
+		}
+		fmt.Fprintf(&sb, " / %d out over %d call(s)", m.OutputTokens, m.Calls)
+	}
 	if cpID != "" {
 		fmt.Fprintf(&sb, "   checkpoint: %s", cpID)
 	}
@@ -142,7 +150,10 @@ func finishTurn(a *app.App, path, intent string, f *agentFlags, res *runtime.Res
 	emit(map[string]any{
 		"project": path, "final": res.Final, "tool_calls": res.ToolCalls, "committed": res.Committed,
 		"pending": pending, "checkpoint": cpID, "volume_mm3": vol,
-		"usage": map[string]int{"input_tokens": res.Usage.InputTokens, "output_tokens": res.Usage.OutputTokens},
+		"usage": map[string]any{"input_tokens": res.Usage.InputTokens, "output_tokens": res.Usage.OutputTokens,
+			"cached_input_tokens": res.Usage.CachedInputTokens, "total_tokens": res.Usage.Tokens(),
+			"by_model": res.Usage.Models()},
+		"cost": runtime.Estimate(res.Usage),
 	}, sb.String())
 	return nil
 }

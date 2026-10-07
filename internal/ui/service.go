@@ -84,6 +84,11 @@ type Service struct {
 	// draft holds the ChangeSets an agent turn committed at the Review level; the user keeps
 	// or discards them as one batch.
 	draft []string
+	// turnUsage is the last turn's token consumption; sessionUsage accumulates every turn
+	// since the service started (it outlives Clear and reopening a project, like a meter).
+	turnUsage    runtime.Usage
+	sessionUsage runtime.Usage
+	turns        int
 }
 
 // ChatMessage is one entry of the conversation panel.
@@ -714,7 +719,8 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		// The lock is held for the turn, except while waiting on the model (see unlocking).
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: []runtime.Capability{geo.New(), vis.New(), visualcap.New()}, History: prior, NoThinking: !thinking,
+		caps := runtime.SelectCaps(s.app, images, geo.New(), vis.New(), visualcap.New())
+		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: caps, History: prior, NoThinking: !thinking,
 			ImageIDs: images, Interpreter: interp, Reference: s.specContext()}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
@@ -754,6 +760,9 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		case res.Final != "":
 			s.say("agent", res.Final, "", true, "")
 		}
+		// Usage is reported even when the turn failed: the tokens were spent either way.
+		s.recordUsage(res.Usage)
+		s.sayUsage(res.Usage)
 		if len(s.draft) > 0 {
 			s.say("draft", fmt.Sprintf("%d step(s) applied as a draft — keep or discard them.", len(s.draft)), "", true, "")
 		} else if cp := s.app.Checkpoint(text, false); cp != nil {
@@ -1470,6 +1479,8 @@ type State struct {
 	// component has moved on, which is what the "Sync components" affordance keys off.
 	Reusable bool `json:"reusable"`
 	Stale    int  `json:"stale_components"`
+	// Usage is token consumption (last turn and session) with its cost estimate.
+	Usage UsageView `json:"usage"`
 }
 
 // Features says which attachment workflows can work with the configured providers. It
@@ -1523,6 +1534,7 @@ func (s *Service) State() (*State, error) {
 		st.Provider = p
 	}
 	st.AgentState, st.Features = s.agentState, s.features()
+	st.Usage = s.usageView()
 	if s.refineCancel != nil {
 		st.RefineState = s.refineState
 	}

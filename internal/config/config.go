@@ -27,6 +27,25 @@ var Providers = []string{ProviderOpenAI, ProviderClaude, ProviderOllama}
 // DefaultClaudeModel is used when ANTHROPIC_MODEL is not set.
 const DefaultClaudeModel = "claude-sonnet-5-5"
 
+// ReasoningEfforts are the OpenAI reasoning levels that may be configured, weakest first.
+// Which of them a given model accepts varies per model and changes over time, so this is the
+// set the application knows how to send, not a promise that every model takes all of them;
+// the provider adapts when a model names the subset it accepts.
+var ReasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// ValidReasoningEffort reports whether s is a configurable effort ("" = the model default).
+func ValidReasoningEffort(s string) bool {
+	if s == "" {
+		return true
+	}
+	for _, e := range ReasoningEfforts {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
 // Themes selectable in the UI.
 const (
 	ThemeLight = "light"
@@ -40,6 +59,13 @@ type ProviderSettings struct {
 	Model           string `json:"model"`
 	BaseURL         string `json:"baseUrl"`
 	ReasoningEffort string `json:"reasoningEffort"`
+	// InputPrice and OutputPrice are the cost per million tokens, in Settings.Currency.
+	// They are optional: empty means the provider's spend is reported in tokens only.
+	// CachedInputPrice is the reduced rate for input served from the provider's prompt
+	// cache; empty charges cached input at InputPrice.
+	InputPrice       string `json:"inputPrice"`
+	OutputPrice      string `json:"outputPrice"`
+	CachedInputPrice string `json:"cachedInputPrice"`
 }
 
 // Settings is the view of the configuration the Settings screen edits.
@@ -51,6 +77,8 @@ type Settings struct {
 	// next to the open project. It is a path, not a URL, and empty means "only the project's
 	// own neighbourhood".
 	ComponentLibrary string `json:"componentLibrary"`
+	// Currency labels the per-provider token prices; it is a label, not a conversion.
+	Currency string `json:"currency"`
 }
 
 // Env variable names per provider.
@@ -169,6 +197,7 @@ func Current() Settings {
 		s.Theme = ThemeLight
 	}
 	s.ComponentLibrary = Get(keyComponent)
+	s.Currency = Currency()
 	for _, p := range Providers {
 		k := envKeys[p]
 		ps := ProviderSettings{BaseURL: GetOr(k.baseURL, DefaultBaseURL(p)), Model: Get(k.model)}
@@ -181,6 +210,9 @@ func Current() Settings {
 		if p == ProviderClaude && ps.Model == "" {
 			ps.Model = DefaultClaudeModel
 		}
+		pr, _ := PriceFor(p)
+		ps.InputPrice, ps.OutputPrice = formatPrice(pr.Input), formatPrice(pr.Output)
+		ps.CachedInputPrice = formatPrice(pr.CachedInput)
 		s.Providers[p] = ps
 	}
 	return s
@@ -198,17 +230,22 @@ func Save(s Settings) error {
 	if lib != "" && !filepath.IsAbs(lib) {
 		return fmt.Errorf("the component library path must be absolute")
 	}
-	next := map[string]string{keyProvider: s.Provider, keyTheme: s.Theme, keyComponent: lib}
+	cur := strings.ToUpper(strings.TrimSpace(s.Currency))
+	if cur == "" {
+		cur = DefaultCurrency
+	}
+	if len(cur) > 8 {
+		return fmt.Errorf("currency %q is too long (use a short code such as USD)", s.Currency)
+	}
+	next := map[string]string{keyProvider: s.Provider, keyTheme: s.Theme, keyComponent: lib, keyCurrency: cur}
 	for _, p := range Providers {
 		ps, ok := s.Providers[p]
 		if !ok {
 			continue
 		}
 		k := envKeys[p]
-		switch ps.ReasoningEffort {
-		case "", "none", "low", "medium", "high":
-		default:
-			return fmt.Errorf("unknown reasoning effort %q", ps.ReasoningEffort)
+		if !ValidReasoningEffort(ps.ReasoningEffort) {
+			return fmt.Errorf("unknown reasoning effort %q (use one of: %s)", ps.ReasoningEffort, strings.Join(ReasoningEfforts, ", "))
 		}
 		if u := strings.TrimSpace(ps.BaseURL); u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 			return fmt.Errorf("%s base URL must start with http:// or https://", p)
@@ -221,6 +258,20 @@ func Save(s Settings) error {
 		if k.effort != "" {
 			next[k.effort] = ps.ReasoningEffort
 		}
+		in, err := validatePrice(p, "input", ps.InputPrice)
+		if err != nil {
+			return err
+		}
+		out, err := validatePrice(p, "output", ps.OutputPrice)
+		if err != nil {
+			return err
+		}
+		cached, err := validatePrice(p, "cached input", ps.CachedInputPrice)
+		if err != nil {
+			return err
+		}
+		pk := priceKeys[p]
+		next[pk.in], next[pk.out], next[pk.cached] = in, out, cached
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -228,7 +279,16 @@ func Save(s Settings) error {
 	for k, v := range overrides {
 		merged[k] = v
 	}
+	// A field left empty in the Settings screen means "not set here", not "set to empty":
+	// it is removed rather than stored, so the value falls back to the environment (.env)
+	// the way an unsaved installation behaves. Storing "" would shadow the environment for
+	// good, and the first save from the UI would silently disable every variable the user
+	// had only ever configured in .env.
 	for k, v := range next {
+		if strings.TrimSpace(v) == "" {
+			delete(merged, k)
+			continue
+		}
 		merged[k] = v
 	}
 	if path != "" {

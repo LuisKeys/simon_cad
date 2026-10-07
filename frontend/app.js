@@ -212,6 +212,7 @@ function render(st) {
   renderSelection(st.selection);
   renderTimeline(st);
   renderChat(st);
+  renderUsage(st.usage);
   renderCtxBar();
   components.render(st);
   vision.onState(st);
@@ -652,6 +653,28 @@ function renderChat(st) {
   if (st.busy) nodes.push(h('div', { id: 'agent-state', class: 'msg system' }, st.refine_state ? refineText(st.refine_state) : agentStateText(st.agent_state)));
   el.replaceChildren(...nodes);
   if (stick) el.scrollTop = el.scrollHeight;
+}
+
+// Token meter: the session total, with the last turn and the per-model split in the tooltip.
+// Cost is only shown when prices are configured in Settings; otherwise tokens stand alone.
+function renderUsage(u) {
+  const el = $('usage');
+  if (!el) return;
+  if (!u || !u.session?.total_tokens) { el.hidden = true; el.replaceChildren(); return; }
+  const n = (v) => v.toLocaleString();
+  const amount = (c) => `${c.currency} ${c.amount < 0.01 ? c.amount.toFixed(4) : c.amount.toFixed(2)}`;
+  const parts = [`${n(u.session.total_tokens)} tokens`];
+  if (u.session.cost.known) parts.push(`≈ ${amount(u.session.cost)}${u.session.cost.partial ? '*' : ''}`);
+  // Cached input is billed at a lower rate, so it is worth showing next to the raw counts.
+  const cached = (c) => (c ? `, ${n(c)} cached` : '');
+  const lines = [`Session (${u.turns} turn${u.turns === 1 ? '' : 's'}): ${n(u.session.input_tokens)} in${cached(u.session.cached_input_tokens)} / ${n(u.session.output_tokens)} out`];
+  if (u.turn.total_tokens) lines.push(`Last turn: ${n(u.turn.input_tokens)} in${cached(u.turn.cached_input_tokens)} / ${n(u.turn.output_tokens)} out`);
+  for (const m of u.session.models) lines.push(`${m.provider}/${m.model}: ${n(m.input_tokens)} in${cached(m.cached_input_tokens)} / ${n(m.output_tokens)} out (${m.calls} calls)`);
+  if (!u.session.cost.known) lines.push('No token prices configured — set them in Settings to estimate cost.');
+  else if (u.session.cost.partial) lines.push(`* no price for: ${u.session.cost.unpriced.join(', ')}`);
+  el.hidden = false;
+  el.title = lines.join('\n');
+  el.replaceChildren(h('span', { class: 'muted' }, parts.join('  ·  ')));
 }
 
 // Workflow progress: Planning… / Creating base… (2/5) / Validating model… / Correcting… / Done.

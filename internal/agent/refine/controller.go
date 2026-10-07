@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/app"
 	"github.com/accelone/simoncad/internal/tools"
 	"github.com/accelone/simoncad/internal/visual"
@@ -84,6 +85,26 @@ type Result struct {
 	Iterations int    `json:"iterations"`
 	Stage      string `json:"stage"`
 	Final      map[string]float64
+	// Usage is what the whole run consumed across the analyzer, planner, builder and critic.
+	Usage runtime.Usage `json:"usage"`
+}
+
+// Usage totals what the run's four model roles have consumed so far.
+func (c *Controller) Usage() runtime.Usage {
+	var u runtime.Usage
+	if c.Analyzer != nil {
+		u.Add(c.Analyzer.Usage)
+	}
+	if c.Planner != nil {
+		u.Add(c.Planner.Usage)
+	}
+	if c.Builder != nil {
+		u.Add(c.Builder.Usage)
+	}
+	if c.Critic != nil {
+		u.Add(c.Critic.Usage)
+	}
+	return u
 }
 
 func (c *Controller) emit(ev Event) {
@@ -135,6 +156,7 @@ func (c *Controller) Run(ctx context.Context, goal string, imageIDs []string) (*
 	a.RecordPromptImages(pid, imageIDs)
 	finish := func(state, summary string) (*Result, error) {
 		res.State, res.Summary, res.Stage = state, summary, visual.Stages[min(vs.Stage, len(visual.Stages)-1)].Name
+		res.Usage = c.Usage()
 		a.SetPromptSummary(summary)
 		c.emit(Event{State: state, Message: summary, Stage: res.Stage, Scores: res.Final})
 		return res, nil

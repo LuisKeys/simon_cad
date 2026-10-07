@@ -22,6 +22,28 @@ type Capability interface {
 	BuildContext(a *app.App) (string, error)
 }
 
+// Conditional is implemented by a capability that is only worth loading in some projects.
+// Tool definitions are resent on every step of the tool loop and dominate the input of a
+// turn, so a capability with nothing to contribute is paid for on every single call.
+type Conditional interface {
+	// Relevant reports whether this capability has anything to contribute to a turn that
+	// attaches images (ids into App.Images; empty when none are attached).
+	Relevant(a *app.App, images []string) bool
+}
+
+// SelectCaps keeps the capabilities worth sending for this turn. A capability that does not
+// implement Conditional is always kept, so adding one is opt-in.
+func SelectCaps(a *app.App, images []string, caps ...Capability) []Capability {
+	out := make([]Capability, 0, len(caps))
+	for _, c := range caps {
+		if cond, ok := c.(Conditional); ok && !cond.Relevant(a, images) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 // ImageInterpreter turns attached images into text for a provider without vision: the
 // attachment processor routes them to a vision-capable model, whose structured result the
 // main agent then works from.
@@ -204,8 +226,7 @@ func (rt *Runtime) Begin(ctx context.Context, a *app.App, intent string, policy 
 		if err != nil {
 			return c, fmt.Errorf("image interpretation: %w", err)
 		}
-		c.Res.Usage.InputTokens += in.Usage.InputTokens
-		c.Res.Usage.OutputTokens += in.Usage.OutputTokens
+		c.Res.Usage.Add(in.Usage)
 		for _, id := range rt.ImageIDs {
 			im, _ := a.Images.Get(id)
 			attached = append(attached, fmt.Sprintf("Attached image id=%s (%dx%d px) — you cannot see it; %s interpreted it for you (see below).", im.ID, im.Width, im.Height, in.Provider))
@@ -269,8 +290,7 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 			return turn, err
 		}
 		res.Steps++
-		res.Usage.InputTokens += resp.Usage.InputTokens
-		res.Usage.OutputTokens += resp.Usage.OutputTokens
+		res.Usage.Add(resp.Usage)
 		c.Msgs = append(c.Msgs, Message{Role: "assistant", Content: resp.Content})
 		uses := resp.ToolUses()
 		if len(uses) == 0 {

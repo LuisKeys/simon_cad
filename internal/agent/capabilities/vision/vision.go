@@ -41,6 +41,13 @@ Results from image-derived tools are previews until the user commits them; if a 
 
 func (Capability) ToolSubset(reg *tools.Registry) []*tools.Tool { return reg.Subset(tools.CapVision) }
 
+// Relevant: this capability only has work to do once an image is in play. Its tool schemas
+// are among the largest in the catalog, so a project with no image never pays for them.
+// The condition mirrors BuildContext: nothing to report means nothing to act on.
+func (Capability) Relevant(a *app.App, images []string) bool {
+	return len(images) > 0 || len(a.Images.All()) > 0 || len(a.Vision.List()) > 0
+}
+
 // BuildContext lists the open interpretations and what each still needs, in a stable order.
 func (Capability) BuildContext(a *app.App) (string, error) {
 	items := a.Vision.List()

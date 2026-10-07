@@ -112,6 +112,9 @@ func (s *Service) RunRefinement(req RefineRequest) error {
 		default:
 			s.say("agent", res.Summary, "", true, "")
 		}
+		u := ctrl.Usage() // also counted when the run failed or was stopped part-way
+		s.recordUsage(u)
+		s.sayUsage(u)
 		s.app.SetActor(app.Actor{CreatedBy: "user"})
 		s.changed()
 	}()

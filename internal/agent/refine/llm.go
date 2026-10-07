@@ -39,8 +39,7 @@ func structured(ctx context.Context, p runtime.Provider, system string, content 
 			return nil, err
 		}
 		if usage != nil {
-			usage.InputTokens += resp.Usage.InputTokens
-			usage.OutputTokens += resp.Usage.OutputTokens
+			usage.Add(resp.Usage)
 		}
 		for _, u := range resp.ToolUses() {
 			if u.Name == tool.Name {

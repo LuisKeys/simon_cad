@@ -143,14 +143,15 @@ func modifyTools() []*Tool {
 			Name: "scale",
 			Description: "Scale a body. Give `factor` for uniform scaling (2 = twice as big, 0.5 = half) or per-axis sx/sy/sz (each defaults to `factor`, else 1). " +
 				"`about` is the fixed point: center (default, the bounding-box center), base (center of the bottom face, keeps a part on the print bed), origin, or point (ox,oy,oz). " +
+				"Passing ox/oy/oz is enough — it means about=point. With about=center/base/origin they are not used, because those compute the fixed point from the body. " +
 				"Non-uniform scaling turns cylinders and other analytic faces into free-form surfaces.",
 			Capability: capGeometry,
 			Schema: object(withMeta(props{
 				"target": text("Visible body to scale"),
 				"factor": positive("Uniform scale factor"),
 				"sx":     positive("Scale factor along X"), "sy": positive("Scale factor along Y"), "sz": positive("Scale factor along Z"),
-				"about": enum("Fixed point of the scaling", features.ScaleAnchors...),
-				"ox":    number("Fixed point X (about=point)"), "oy": number("Fixed point Y (about=point)"), "oz": number("Fixed point Z (about=point)"),
+				"about": enum("Fixed point of the scaling; defaults to point when ox/oy/oz are given, else center. It wins over ox/oy/oz", features.ScaleAnchors...),
+				"ox":    number("Fixed point X; giving it implies about=point. Omit it unless you want that anchor"), "oy": number("Fixed point Y; giving it implies about=point. Omit it unless you want that anchor"), "oz": number("Fixed point Z; giving it implies about=point. Omit it unless you want that anchor"),
 			}), "target"),
 			Plan: func(env Env, a Args) (*Plan, error) {
 				if _, err := requireLeaf(env, a.Str("target")); err != nil {
@@ -171,21 +172,40 @@ func modifyTools() []*Tool {
 				if desc[0] == "1" && desc[1] == "1" && desc[2] == "1" {
 					return nil, fmt.Errorf("the scale factors are all 1, so nothing would change")
 				}
-				if (a.Has("ox") || a.Has("oy") || a.Has("oz")) && a.Str("about") != "point" {
-					return nil, fmt.Errorf("ox/oy/oz need about=point")
+				// Coordinates are only meaningful for about=point. Both ways of over-specifying
+				// the anchor have one clear reading, so neither fails the call: coordinates on
+				// their own mean about=point, and an explicit anchor that computes its own fixed
+				// point wins over coordinates that would then go unused. What was disregarded is
+				// stated in the explanation, so nothing is dropped quietly.
+				about, unused := a.Str("about"), ""
+				if a.Has("ox") || a.Has("oy") || a.Has("oz") {
+					switch about {
+					case "":
+						about = "point"
+					case "point":
+					default:
+						unused = fmt.Sprintf(" The fixed point (%s, %s, %s) was not used: about=%s sets it from the body.",
+							fmtMM(a.NumOr("ox", 0)), fmtMM(a.NumOr("oy", 0)), fmtMM(a.NumOr("oz", 0)), about)
+					}
 				}
 				id, err := uniqueID(env.Graph(), a, "scale")
 				if err != nil {
 					return nil, err
 				}
 				p := map[string]any{"target": a.Str("target")}
-				copyOpt(p, a, "factor", "sx", "sy", "sz", "about", "ox", "oy", "oz")
+				copyOpt(p, a, "factor", "sx", "sy", "sz")
+				if about != "" { // an implied point anchor is recorded, never left to a default
+					p["about"] = about
+				}
+				if about == "point" { // unused coordinates are not stored: they would mislead a later edit
+					copyOpt(p, a, "ox", "oy", "oz")
+				}
 				what := "x" + desc[0]
 				if desc[0] != desc[1] || desc[1] != desc[2] {
 					what = "x" + strings.Join(desc, " / ")
 				}
 				return addPlan(intentOr(a, "Scale "+a.Str("target")+" "+what),
-					fmt.Sprintf("Scales %q %s about its %s.", a.Str("target"), what, orDefault(a.Str("about"), "center")),
+					fmt.Sprintf("Scales %q %s about its %s.%s", a.Str("target"), what, orDefault(about, "center"), unused),
 					newNode(env, a, id, "scale", p, a.Str("target"))), nil
 			},
 		},

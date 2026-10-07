@@ -44,6 +44,19 @@ Visual capability — reference-driven modeling with design parameters, regions 
 
 func (Capability) ToolSubset(reg *tools.Registry) []*tools.Tool { return reg.Subset(tools.CapVisual) }
 
+// Relevant: reference-driven modeling starts from an image, and its state (design
+// parameters, regions, references) persists once it has. The condition mirrors
+// BuildContext, so a capability that would report "nothing yet" sends no tools either.
+func (Capability) Relevant(a *app.App, images []string) bool {
+	if len(images) > 0 || len(a.Images.All()) > 0 || len(tools.ParameterValues(a.Graph)) > 0 {
+		return true
+	}
+	vs := a.Visual
+	vs.Lock()
+	defer vs.Unlock()
+	return len(vs.Regions) > 0 || len(vs.References) > 0
+}
+
 // BuildContext lists parameters, regions, references and the latest scores (deterministic).
 func (Capability) BuildContext(a *app.App) (string, error) {
 	params := tools.ParameterValues(a.Graph)

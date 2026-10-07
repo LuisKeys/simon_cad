@@ -42,6 +42,7 @@ func runEval(args []string) error {
 	var suite runtime.Suite
 	var sb strings.Builder
 	var rows []map[string]any
+	var total runtime.Usage
 	for _, c := range cases {
 		var p runtime.Provider
 		var rec *runtime.Recorder
@@ -59,8 +60,9 @@ func runEval(args []string) error {
 		for _, f := range rep.Failures {
 			fmt.Fprintf(&sb, "      %s\n", f)
 		}
+		total.Add(rep.Tokens)
 		rows = append(rows, map[string]any{"name": rep.Name, "pass": rep.Pass, "failures": rep.Failures, "tool_calls": rep.Calls,
-			"input_tokens": rep.Tokens.InputTokens, "output_tokens": rep.Tokens.OutputTokens})
+			"input_tokens": rep.Tokens.InputTokens, "output_tokens": rep.Tokens.OutputTokens, "by_model": rep.Tokens.Models()})
 		if rec != nil && *record != "" {
 			c.Recorded = rec.Recording()
 			_ = c.Recorded.Save(filepath.Join(*record, c.Name+".recording.json"))
@@ -71,7 +73,11 @@ func runEval(args []string) error {
 		mode = "live (" + liveProv.Name() + ")"
 	}
 	fmt.Fprintf(&sb, "\n%s eval: %d/%d passed (%.0f%%)", mode, suite.Passed(), len(suite.Reports), suite.PassRate()*100)
-	emit(map[string]any{"mode": mode, "passed": suite.Passed(), "total": len(suite.Reports), "pass_rate": suite.PassRate(), "cases": rows}, sb.String())
+	fmt.Fprintf(&sb, "\nusage: %s", runtime.Report(total))
+	emit(map[string]any{"mode": mode, "passed": suite.Passed(), "total": len(suite.Reports), "pass_rate": suite.PassRate(), "cases": rows,
+		"usage": map[string]any{"input_tokens": total.InputTokens, "output_tokens": total.OutputTokens,
+			"cached_input_tokens": total.CachedInputTokens, "total_tokens": total.Tokens(), "by_model": total.Models()},
+		"cost": runtime.Estimate(total)}, sb.String())
 	if suite.Passed() != len(suite.Reports) {
 		return fmt.Errorf("%d eval case(s) failed", len(suite.Reports)-suite.Passed())
 	}

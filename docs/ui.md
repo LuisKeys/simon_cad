@@ -156,6 +156,48 @@ backlog item "round only the outer edges after pocketing".
 - **Live LLM** use in the UI is unverified (no key was available); the UI path is covered with the
   same recorded-provider mechanism the evals use.
 
+## Token consumption and cost
+
+Every model call is metered. Providers attribute each response's input/output tokens to the model
+that produced them (`runtime.Usage.ByModel`, keyed `<provider>/<model>`), so a turn that spans
+several models — vision routing, the planner, the CAD agent, the refinement critic — is accounted
+per model rather than lumped together. `Service` keeps a per-turn figure and a running session
+total (`State.Usage`), which survive **Clear** and reopening a project: the meter measures the
+session, not the conversation.
+
+The agent panel shows the session total above the composer (`#usage`, with the per-model split and
+the last turn in its tooltip) and a one-line note under each answer. The CLI prints a `usage:` line
+and carries `usage` (with `by_model`) and `cost` in `--json`; `eval` reports the suite total.
+
+Input the provider served from its prompt cache is tracked as `CachedInputTokens`, a subset of
+`InputTokens` (Anthropic reports cache tokens *beside* `input_tokens`, OpenAI *inside* them; the
+providers normalize both to "cached is part of the input"). It is costed at the cached rate when
+one is configured, and at the full input rate otherwise — never at a guessed discount.
+
+Prices are optional and configured per provider — Settings → *Token Prices*, or the
+`*_INPUT_PRICE` / `*_CACHED_INPUT_PRICE` / `*_OUTPUT_PRICE` variables — as cost per million
+tokens, labelled by `SIMONCAD_CURRENCY`. With prices loaded the estimate accompanies the tokens; with the slots empty
+only tokens are reported. A cost is never invented: a model with no configured price contributes
+nothing to the amount and is listed in `cost.unpriced`, which marks the estimate partial, and usage
+with no model attribution (recorded runs, stubs) is not costed at all.
+
+## What a turn sends
+
+Tool definitions dominate the input of an agent turn: they are resent on every step of the tool
+loop, and the whole catalog is ~18k tokens against ~2.8k for the system prompt and ~100 for the
+project state. A capability whose tools cannot be used is therefore paid for on every call.
+
+`runtime.SelectCaps` keeps only the capabilities worth sending. A capability opts in by
+implementing `runtime.Conditional`; one that does not is always loaded, so the geometry
+capability needs no change. `vision` and `visual` declare themselves relevant when the turn
+attaches an image, the project has one uploaded, an interpretation exists, or (for `visual`)
+design parameters, regions or references exist — the same condition each one already used to
+decide its `BuildContext` had nothing to report. A plain modeling project therefore sends ~14.5k
+tokens per call instead of ~21k, and nothing is lost: the image tools reappear with the image.
+
+The eval suite keeps the full catalog deliberately, so its numbers stay comparable across
+projects.
+
 ## Attached specification documents
 
 **Attach** (or drop) also accepts a text document (`.txt`, `.md`, `.json`, `.csv`, …, ≤ 200 KB each,

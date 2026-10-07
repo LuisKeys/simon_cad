@@ -507,7 +507,28 @@
 <tr><td><code>OPENAI_API_KEY</code>, <code>OPENAI_MODEL</code>, <code>OPENAI_REASONING_EFFORT</code>, <code>OPENAI_BASE_URL</code></td><td>OpenAI provider (model is required)</td></tr>
 <tr><td><code>OLLAMA_MODEL</code>, <code>OLLAMA_BASE_URL</code></td><td>Local models, no key</td></tr>
 <tr><td><code>SIMONCAD_COMPONENT_LIBRARY</code></td><td>A folder of shared components, searched on top of the ones next to the open project. Must be an absolute path. Also editable in <b>Settings → Component library</b>.</td></tr>
+<tr><td><code>ANTHROPIC_INPUT_PRICE</code>, <code>ANTHROPIC_CACHED_INPUT_PRICE</code>, <code>ANTHROPIC_OUTPUT_PRICE</code> (and the <code>OPENAI_*</code> / <code>OLLAMA_*</code> sets)</td><td>Optional cost per million tokens. Also editable in <b>Settings → Token Prices</b>.</td></tr>
+<tr><td><code>SIMONCAD_CURRENCY</code></td><td>Label for the amounts (default <code>USD</code>). It is a label only — no conversion is performed.</td></tr>
 </table>
+
+<h3>Token consumption and cost</h3>
+<p>Every request to the model is metered. Under each answer you get the tokens that turn consumed
+(input and output), and above the message box a running total for the session — hover it for the
+split per model and for the last turn. Clearing the conversation does not reset the meter.</p>
+<p>Cost estimation is opt-in: fill <b>Settings → Token Prices</b> with what your model costs per
+million input and output tokens (the figures from your provider's pricing page) and pick a currency.
+From then on each turn and the session also show an estimated cost. Leave the fields empty and only
+tokens are reported — Simon never guesses a price. If a turn used a model you have not priced (for
+example a vision model that read your image), its tokens are still counted and the estimate is
+marked partial rather than silently understated.</p>
+<p>Part of what you send is usually served from the provider’s cache and billed cheaper: the
+system prompt and the tool list repeat on every step, which is exactly what caches well. The
+tooltip shows how much was cached, and <b>Cached input price</b> makes the estimate reflect it.
+Leave that field empty and cached tokens are charged at the full input price — the estimate
+errs high rather than flattering itself.</p>
+<p>Simon also keeps the request small: the image and reference-modeling tools are only sent when
+there is an image in the project, which cuts about a third of the tokens off a plain modeling
+turn. Attach an image and they come back automatically.</p>
 <p>Components are found next to the open project (its folder, its parent, their <code>projects_output/</code>) and in the configured library — never relative to the directory you started the program from, so the same project always rebuilds to the same geometry.</p>
 <p>Launch options: <code>--project file.scadproj</code> opens or creates a project; <code>--no-browser</code> does not open a tab; <code>--recording file.json</code> runs a scripted agent without an API key.</p>
 </section>

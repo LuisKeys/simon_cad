@@ -98,6 +98,28 @@ values are ignored. `.env` is git-ignored; `.env.example` documents everything.
 | `OLLAMA_MODEL`, `OLLAMA_BASE_URL` | Local Ollama (no key; default URL `http://localhost:11434`) |
 | `OLLAMA_VISION` | `true`/`false` overrides whether the Ollama model accepts images (default: detected from the model name) |
 | `SIMONCAD_AUTONOMOUS` | `off` disables the plan → execute → validate → correct workflow in the UI (default on) |
+| `ANTHROPIC_INPUT_PRICE`, `ANTHROPIC_CACHED_INPUT_PRICE`, `ANTHROPIC_OUTPUT_PRICE` | Optional cost per million tokens; same pattern for `OPENAI_*` and `OLLAMA_*` |
+| `SIMONCAD_CURRENCY` | Label for the price amounts (default `USD`); it performs no conversion |
+
+**Token consumption and cost.** Every model call is metered: input and output tokens are counted
+per model, per turn and per session, and reported in the agent panel (session meter above the
+composer, a note under each answer) and by the CLI (`usage:` line, `usage`/`cost` in `--json`).
+Prices are optional and live next to each provider in Settings (or in the `*_PRICE` variables
+above), as cost per million tokens. With prices loaded, each turn and the session also carry an
+estimated cost; with the slots empty, consumption is reported in tokens only — no cost is ever
+guessed. A turn that spans several models (vision routing, the planner) is costed per model, and
+a mix of priced and unpriced models is reported as a partial estimate.
+
+Input served from the provider's prompt cache is counted and costed separately: the repeated part
+of a turn (system prompt and tool definitions) is what gets cached, so on a long session most of
+the input is billed at the cheaper cached rate. Fill *Cached input price* to see that reflected;
+left empty, cached input is charged at the full input price rather than at a guessed discount.
+
+**What a turn costs.** Tool definitions dominate the input: they are resent on every step of the
+tool loop, and the full catalog is ~18k tokens against ~2.8k for the system prompt. The agent
+therefore loads only the capabilities a turn can use — a project with no image gets the geometry
+catalog alone (~14.5k tokens per call instead of ~21k), and the image and reference-driven tools
+appear as soon as an image is attached, uploaded or design parameters exist.
 
 **Visual refinement** (toolbar → Visual): attach reference images (side, front, top views work
 best), describe the object and run it. The model is built coarse to fine (blockout → primary →

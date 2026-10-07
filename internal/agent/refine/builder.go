@@ -97,8 +97,7 @@ func (b *Builder) run(ctx context.Context, a *app.App, directive string, maxStru
 		return nil, nil, err
 	}
 	turn, err := c.Send(ctx, "")
-	b.Usage.InputTokens += c.Res.Usage.InputTokens
-	b.Usage.OutputTokens += c.Res.Usage.OutputTokens
+	b.Usage.Add(c.Res.Usage)
 	return turn, c.Res.Committed, err
 }
 
