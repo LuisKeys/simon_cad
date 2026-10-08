@@ -426,6 +426,7 @@ export function initVision(ctx) {
     if (V.open) {
       if (!find(st, V.open)) closePanel();
       else if (!V.busy && !isTyping()) renderPanel();
+      else syncCreate(); // the form stays as is, but Create follows the agent finishing
     }
   }
 

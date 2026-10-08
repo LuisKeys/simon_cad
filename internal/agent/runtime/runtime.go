@@ -57,6 +57,7 @@ type ImageInterpreter interface {
 type Interpretation struct {
 	Text     string // structured description for the main agent
 	Provider string // the model that looked at the images
+	Proposed bool   // it left an interpretation for the user to review
 	Usage    Usage
 }
 
@@ -164,6 +165,7 @@ type Conversation struct {
 	opening []Block // image blocks for the first message
 	intent  string
 	started bool
+	review  bool // an interpreter left an image interpretation for the user to review
 	Msgs    []Message
 	Res     *Result
 }
@@ -182,7 +184,13 @@ type Turn struct {
 	Final     string
 	Calls     []TurnCall
 	Exhausted bool // stopped at MaxSteps without a text answer
+	// AwaitingReview: the turn stopped because an image interpretation waits for the user
+	// to review, adjust and approve it (the agent does not go on until then).
+	AwaitingReview bool
 }
+
+// reviewNotice is what a turn that stops for an image interpretation tells the user.
+const reviewNotice = "I read the image. Review the interpretation (Review interpretation), adjust the values and press Create & preview; I'll wait for your approval before going on."
 
 // Begin records the intent and prepares the opening request. Nothing is sent to the model
 // and nothing is recorded if it fails.
@@ -227,6 +235,7 @@ func (rt *Runtime) Begin(ctx context.Context, a *app.App, intent string, policy 
 			return c, fmt.Errorf("image interpretation: %w", err)
 		}
 		c.Res.Usage.Add(in.Usage)
+		c.review = in.Proposed
 		for _, id := range rt.ImageIDs {
 			im, _ := a.Images.Get(id)
 			attached = append(attached, fmt.Sprintf("Attached image id=%s (%dx%d px) — you cannot see it; %s interpreted it for you (see below).", im.ID, im.Width, im.Height, in.Provider))
@@ -283,6 +292,13 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 		c.Msgs = append(c.Msgs, Message{Role: "user", Content: []Block{{Type: "text", Text: directive}}})
 	}
 	rt, res, turn := c.rt, c.Res, &Turn{}
+	if c.review {
+		// an interpreter already read the image: the proposal waits for the user
+		c.review = false
+		turn.Final, turn.AwaitingReview = reviewNotice, true
+		c.Msgs = append(c.Msgs, Message{Role: "assistant", Content: []Block{{Type: "text", Text: turn.Final}}})
+		return turn, nil
+	}
 	structural := 0
 	for step := 0; step < rt.MaxSteps; step++ {
 		resp, err := rt.Provider.Complete(ctx, Request{System: c.system, Messages: c.Msgs, Tools: c.defs, NoThinking: rt.NoThinking})
@@ -332,10 +348,30 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 			results = append(results, Block{Type: "tool_result", ToolUseID: u.ID, Content: content, IsError: !o.OK})
 		}
 		c.Msgs = append(c.Msgs, Message{Role: "user", Content: results})
+		if proposed(turn.Calls[len(turn.Calls)-len(uses):]) {
+			// A fresh interpretation is the user's to review and approve: stop here instead of
+			// letting the agent build on values the user has not seen.
+			turn.Final, turn.AwaitingReview = reviewNotice, true
+			if t := strings.TrimSpace(resp.Text()); t != "" {
+				turn.Final = t + "\n\n" + reviewNotice
+			}
+			c.Msgs = append(c.Msgs, Message{Role: "assistant", Content: []Block{{Type: "text", Text: turn.Final}}})
+			return turn, nil
+		}
 	}
 	turn.Exhausted = true
 	turn.Final = fmt.Sprintf("(stopped after %d steps without a final answer)", rt.MaxSteps)
 	return turn, nil
+}
+
+// proposed reports whether calls produced an image interpretation proposal.
+func proposed(calls []TurnCall) bool {
+	for _, c := range calls {
+		if c.Name == "analyze_image" && c.Outcome.OK && !c.Refused {
+			return true
+		}
+	}
+	return false
 }
 
 // Finish closes the turn: the transcript and the final summary are recorded.

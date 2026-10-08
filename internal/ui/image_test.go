@@ -141,6 +141,14 @@ func TestImageSketchToPreviewToCommitThroughTheUI(t *testing.T) {
 	}
 	waitIdle(t, s)
 
+	// the agent stops once the interpretation exists: the user reviews and approves it
+	if len(spy.Reqs) != 1 {
+		t.Fatalf("the agent must pause for the review, it made %d model calls", len(spy.Reqs))
+	}
+	if st, _ := s.State(); st.Busy {
+		t.Fatal("the agent is idle while the interpretation waits for the user")
+	}
+
 	// the model got the image first, then the text naming it
 	msg := spy.Reqs[0].Messages[len(spy.Reqs[0].Messages)-1]
 	if msg.Content[0].Type != "image" || !strings.Contains(msg.Content[len(msg.Content)-1].Text, "Attached image id="+info.ID) {

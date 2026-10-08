@@ -144,7 +144,11 @@ func (ii imageInterpreter) Interpret(ctx context.Context, a *app.App, intent str
 	if err != nil {
 		return nil, err
 	}
-	return &runtime.Interpretation{Text: strings.TrimSpace(turn.Final), Provider: prov.Name(), Usage: c.Res.Usage}, nil
+	proposed := false
+	for _, call := range turn.Calls {
+		proposed = proposed || (call.Name == "analyze_image" && call.Outcome.OK && !call.Refused)
+	}
+	return &runtime.Interpretation{Text: strings.TrimSpace(turn.Final), Provider: prov.Name(), Usage: c.Res.Usage, Proposed: proposed}, nil
 }
 
 // interpreter is the vision capability narrowed to reading images for another agent.
