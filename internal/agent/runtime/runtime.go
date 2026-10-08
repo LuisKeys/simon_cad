@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/accelone/simoncad/internal/app"
-	"github.com/accelone/simoncad/internal/persistence"
 	"github.com/accelone/simoncad/internal/tools"
 )
 
