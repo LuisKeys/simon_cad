@@ -73,7 +73,7 @@
 <tr><td><b>Header</b></td><td>The <b>project name</b> opens a menu with <b>New</b> and <b>Open</b> (Open lists projects in <code>projects_output</code>, or type a path); <b>Undo/Redo</b>; <b>Save</b>; <b>Export</b> STEP or STL; <b>Help</b> (this page); <b>⋯</b> for the <b>⌘K</b> command palette and the interaction <b>Level</b> (Review/Auto). The outer buttons show or hide the side panels, which you can also resize by dragging their edge.</tr>
 <tr><td><b>Design tree</b></td><td>Every feature with a status dot, its intent, and user/agent provenance. Click a row to select it and see its details, parameters (each edit is a <code>modify_parameter</code> ChangeSet) and Appearance; Shift/Ctrl-click selects several. The eye toggles visibility; double-click or F2 renames; right-click or press-and-hold for more (Duplicate, Group, Suppress, Delete…, and <b>Create component…</b>). A row marked <b>Component</b> is an <i>instance</i> of a reusable project rather than geometry of its own; its menu offers Open, Update, Replace and Detach, and the badge turns amber when its component has changed since. <b>Groups</b> appear as folders: click one to select all its bodies, use its arrow to fold it, its eye to hide it, and ⋯ to rename, duplicate or ungroup it.</td></tr>
 <tr><td><b>Components panel</b></td><td>The component library: every reusable project it can find. Search it, and per entry <b>Insert</b> an instance, <b>Open</b> it for editing, <b>Rename</b> its library details or <b>Delete</b> it. When instances in the open project have fallen behind their component, a button at the top offers to update them, and the <b>Components</b> header button turns amber. The button at the bottom publishes the project you are in as a component. See <a href="#components">Components</a>.</td></tr>
-<tr><td><b>Selection panel</b></td><td>The faces / edges / vertices / bodies currently picked, plus shared appearance controls when several bodies are selected.</td></tr>
+<tr><td><b>Selection panel</b></td><td>The faces / edges / vertices / bodies currently picked, plus shared appearance controls when several bodies are selected. With one object selected, its <b>Dimensions</b>: width, height, depth, Lock proportions and the resize anchor.</td></tr>
 <tr><td><b>Action bar</b></td><td>The strip above the viewport shows only what makes sense for the current selection. With nothing selected: <b>Select</b> mode, <b>Create</b>, <b>Measure</b> (<kbd>M</kbd>), <b>Section</b> plane (X/Y/Z + offset), <b>View</b> (mesh view, standard views, play design) and <b>Fit</b> (<kbd>F</kbd>). With a body: Move, Rotate, Scale, Duplicate, Align, Mirror, Pattern, Fillet, Chamfer, Group (Ungroup when it is in one), Material, Color, Hide, Delete. With a face: Hole, Extrude, Inset, Offset. With edges: Fillet, Chamfer. With two bodies: Union, Subtract, Intersect, plus Align and Group for any number of bodies. Actions that do not fit move into <b>More</b>.</td></tr>
 <tr><td><b>Viewport</b></td><td>Orbit, pan, zoom; view cube (click a face/edge/corner to snap the view); hover highlight; ghost preview of proposed changes.</td></tr>
 <tr><td><b>History</b></td><td>A semantic checkpoint after every committed ChangeSet, in a collapsible strip. Select a step to get <b>Restore</b>, which proposes going back (never auto-committed). <b>Compare</b> shows features/parameters changed and the volume delta.</td></tr>
@@ -203,12 +203,19 @@
 </section>
 
 <section>
-<h2 id="body-edit" data-group="Prompt cookbook">Scale, duplicate, align and groups</h2>
+<h2 id="body-edit" data-group="Prompt cookbook">Scale, dimensions, duplicate, align and groups</h2>
 <h3>Scale</h3>
 <p>Uniform with a factor, or per axis. The fixed point is the body’s centre by default; <i>base</i> keeps the bottom on the print bed.</p>
 <div class="prompt">Make the bracket 50% bigger, keeping it on the bed.</div>
 <div class="prompt">Scale the lid to 80% along X only.</div>
 <div class="prompt">Scale this part by 2 about the origin.</div>
+<h3>Dimensions</h3>
+<p>Select an object to see its <b>width, depth and height</b> in the viewport (along the object’s own axes, so a rotated part keeps its width), in every view of the Quad layout. <b>Click a number</b> to type a new size: <kbd>Enter</kbd> applies it, <kbd>Esc</kbd> cancels, <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it. The same values are editable in the Selection panel’s <b>Dimensions</b> section. Only the dimension you change changes, unless <b>Lock proportions</b> is on; the <b>anchor</b> (center or object origin) is the point that stays put. It is a scale of the body, not a parametric edit: a cylinder made wider becomes elliptical and holes scale with the part.</p>
+<div class="prompt">Increase the width of this part to 150 mm without changing its height or depth.</div>
+<div class="prompt">Incrementá el ancho de esta pieza a 150 mm sin modificar su altura ni profundidad.</div>
+<div class="prompt">Make the lid 60 mm tall keeping its proportions.</div>
+<div class="prompt">Resize the bracket to 80 × 40 × 12 mm about its origin.</div>
+<div class="prompt">What are the dimensions of the selected part?</div>
 <h3>Duplicate</h3>
 <p>A copy is <b>linked</b>: it follows later parameter edits of its source (change the source’s size and the copy changes too). It keeps the source’s colour, material and group. <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates the selection.</p>
 <div class="prompt">Duplicate the standoff 20 mm along +X.</div>

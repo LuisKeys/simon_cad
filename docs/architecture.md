@@ -115,6 +115,7 @@ Every node carries the full schema from day one (even where unused yet):
 | `metadata` | Name, created/modified timestamps, tags |
 | `suppressed` | Authoritative suppress flag |
 | `appearance` | Optional `{color "#RRGGBB", opacity 0–1, visible}`; presentation only (see below) |
+| `lock_proportions` | Optional dimension-editing preference (see §6a); never an input to geometry |
 | `status`, `errors` | **Derived** by rebuild: `ok / failed / stale / suppressed` + cause chain |
 
 **Effective dependencies** are the union of explicit `dependencies`, nodes referenced from
@@ -171,7 +172,7 @@ feature names a `target` (a node whose body it modifies) and produces a new body
 - **Tool features** (`hole`, `extrude`) expose a *tool generator* (the cutter or the added solid)
   and a `subtract` flag; their build is `target ∘ tool`.
 - **Body edits** `scale` (uniform or per axis, about the centre / base / origin / a point, resolved at
-  build time from the target's bounds) and the face edits `face_extrude`, `face_inset`, `face_offset`
+  build time from the target's bounds; optionally along a rotated local frame, `frame_*`, see §6a) and the face edits `face_extrude`, `face_inset`, `face_offset`
   (`references.face` on the target; push/pull results have coplanar seams merged) are ordinary
   modifying features. Tools refuse them on a feature that a later one already consumes (that would
   fork the chain); the error names the visible body to use instead.
@@ -194,6 +195,42 @@ feature names a `target` (a node whose body it modifies) and produces a new body
 - **Hole placement** works on a face selector: tools are authored along +Z with `z=0` at the face and
   oriented onto the face normal; positions are world coordinates where the component along the
   normal is ignored.
+
+### 6a. Dimensions: measuring and resizing objects
+
+SimonCAD stays a feature/B-Rep modeler; dimensions are **not** a parametric constraint engine.
+Three categories are kept apart:
+
+| Category | What it is | Where |
+|---|---|---|
+| Informational | Width, depth and height of an object, measured from its geometry; read only | `internal/dimensions` (DimensionService), `get_object_dimensions` |
+| Editable | Typing a new width/depth/height scales the object along that local axis | `set_object_dimension`, `resize_object`, `set_object_proportional_scaling` |
+| Parametric (future) | Constraints and relations that re-solve the model | reserved (`Node.constraints`); not implemented |
+
+- **Local axes.** Width, depth and height are the extents along the object's local X, Y and Z (Z up).
+  The local frame is the composition of the rotations of the object's own chain (`transform` and
+  `component_instance` placements, followed through `target` / a copy's `source`), so a rotated
+  part keeps its width as its width. The extents are the tight box of the body rotated into that
+  frame (`Body.BoundsInFrame`), not the world bounding box.
+- **Object origin** is the creating feature's placement point (a primitive's `x/y/z`, a component's
+  origin) carried through every move, rotation, copy offset and scale of the chain; a body with no
+  placement point uses the center of its first body.
+- **Resize** (MeshResizeService = `dimensions.Factors` + `tools.resizePlan`): `factor = target /
+  current` on the requested axis only (all three with Lock Proportions and a single dimension);
+  flat axes (< 1e-6 mm), non-positive values and factors beyond 1000× are refused. The result is a
+  `scale` feature in the object's frame (`frame_*` parameters: rotate into the frame, scale, rotate
+  back), about the box center or the object origin (resolved at plan time into `about=point`, so a
+  replay never re-derives it). The orientation and the anchor are preserved and nothing else is
+  touched. Consecutive edits fold into the object's own resize feature (tag `resize`) when it is the
+  visible body, nothing builds on it and the anchor and frame match; the composition of two scales
+  about the same fixed point is one scale, and a resize that cancels out is removed. Each edit is
+  still its own ChangeSet, so undo/redo step through them.
+- **Not repaired.** A non-uniform scale deforms features: a cylinder resized across its axis becomes
+  elliptical (its wall a B-spline), holes and wall thicknesses scale. That is expected; nothing is
+  rebuilt or preserved.
+- **Lock Proportions** is `Node.lock_proportions`, an editing preference committed through the
+  invertible `SetLockProportions` command. Like appearance and group it is presentation (excluded
+  from the content key and `GeometryHash`) and follows the visible body onto new features.
 
 ### Sketches and image-derived geometry
 
@@ -225,7 +262,7 @@ ChangeSet ids. Geometry rebuilds from the CAD-IR alone; `geometry`/`cadir` never
 Commands are small, serializable and **exactly invertible**:
 `AddFeature`, `RemoveFeature`, `SetParameter`, `SetExpression`, `Reorder`, `Suppress`, `Rename`,
 the presentation commands (`SetColor`, `SetOpacity`, `SetVisibility`, `SetMaterial`, `RemoveMaterial`,
-`SetMaterialScale`, `ResetAppearance`, `SetGroup`) and `RestoreSnapshot` (checkpoint restore). `Apply(graph)` mutates the graph and returns its
+`SetMaterialScale`, `ResetAppearance`, `SetGroup`, `SetLockProportions`) and `RestoreSnapshot` (checkpoint restore). `Apply(graph)` mutates the graph and returns its
 inverse; failed commands leave the graph untouched.
 
 A `ChangeSet` records commands, their inverses (the rollback info), affected features, expected

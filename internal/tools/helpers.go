@@ -64,10 +64,12 @@ func newNode(env Env, a Args, id, typ string, params map[string]any, deps ...str
 		SelectionRefs: env.SelectionRefs(),
 	}
 	// A feature that modifies a body becomes the visible body in its place, so it carries on
-	// that body's appearance (color, material, opacity, visibility) and group.
+	// that body's appearance (color, material, opacity, visibility), group and dimension
+	// editing preference.
 	if up := env.Graph().Get(modifiedBody(params, deps)); up != nil {
 		n.Appearance = up.Appearance.Clone()
 		n.Group = up.Group
+		n.LockProportions = up.LockProportions
 	}
 	return n
 }

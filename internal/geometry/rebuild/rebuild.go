@@ -19,6 +19,7 @@ import (
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/features"
 	"github.com/accelone/simoncad/internal/selectors"
+	"github.com/accelone/simoncad/internal/xform"
 )
 
 // builderVersion invalidates caches if builder semantics change.
@@ -344,6 +345,16 @@ func (m *Model) Bounds(id string) (selectors.Bounds, bool) {
 		return selectors.Bounds{}, false
 	}
 	return r.Body.Bounds(), true
+}
+
+// BoundsInFrame returns a node's bounding box measured along the axes of r (world = r·local).
+func (m *Model) BoundsInFrame(id string, r xform.Rot) (selectors.Bounds, bool) {
+	n := m.Nodes[id]
+	if n == nil || n.Body == nil {
+		return selectors.Bounds{}, false
+	}
+	b, err := n.Body.BoundsInFrame(r)
+	return b, err == nil
 }
 
 // Topology returns a feature's face/edge/vertex descriptors for selector resolution.

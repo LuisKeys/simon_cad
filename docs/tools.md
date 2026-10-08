@@ -427,6 +427,18 @@ Reset color, opacity and visibility of features/bodies to their defaults. Defaul
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 
+### `resize_object`
+
+Resize an object to the given width/depth/height in mm (local X/Y/Z); dimensions you omit keep their size. With a single dimension and Lock Proportions on, the other two follow proportionally. Non-parametric (a scale of the body).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `anchor` | center \| object_origin |  | Fixed point of the resize: center (default, the center of the object's box) or object_origin (the object's own origin, e.g. a box's placement corner) (center \| object_origin) |
+| `depth` | number > 0 |  | New depth in mm (local Y) |
+| `height` | number > 0 |  | New height in mm (local Z) |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+| `width` | number > 0 |  | New width in mm (local X) |
+
 ### `restore_checkpoint`
 
 Return the model to an earlier semantic checkpoint, given by id (cp_002), number, 'previous', or part of its label (e.g. 'before we reinforced the shoulder' means the checkpoint preceding the one labelled 'Reinforced shoulder'). Use get_model_summary to list checkpoints.
@@ -488,6 +500,27 @@ Set the texture scale multiplier (>0; 1 = the material's natural scale) of featu
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 | `scale` | number | yes | Texture scale multiplier, > 0 |
+
+### `set_object_dimension`
+
+Set one dimension of an object (e.g. 'make it 150 mm wide'). Only that dimension changes, unless the object has proportional scaling locked (then the other two follow; `proportional` overrides the lock for this call). Non-parametric: the body is scaled along its local axis, so a cylinder resized across its axis becomes elliptical, and holes or wall thicknesses scale with it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `anchor` | center \| object_origin |  | Fixed point of the resize: center (default, the center of the object's box) or object_origin (the object's own origin, e.g. a box's placement corner) (center \| object_origin) |
+| `axis` | width \| depth \| height \| x \| y \| z | yes | Which dimension: width (local X), depth (local Y) or height (local Z); x/y/z are accepted (width \| depth \| height \| x \| y \| z) |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+| `proportional` | boolean |  | Scale the other two dimensions proportionally; defaults to the object's Lock Proportions setting |
+| `value` | number > 0 | yes | New size in mm |
+
+### `set_object_proportional_scaling`
+
+Turn Lock Proportions on or off for an object: when on, changing one of its dimensions scales the other two by the same factor. An editing preference stored with the object; it never changes geometry.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Lock proportions |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
 
 ### `set_opacity`
 
@@ -663,6 +696,14 @@ Read one library material's properties (color, metalness, roughness, opacity, ta
 Describe the current model: every feature (id, type, key parameters, status), bounding boxes and volumes of the resulting bodies, and recent checkpoints. Call this before editing an unfamiliar model.
 
 _No arguments._
+
+### `get_object_dimensions`
+
+Measure an object: width, depth and height in mm along its local X, Y and Z axes (Z up; the axes follow the object's own rotation), its local axes, box, center, origin and whether proportional scaling is locked. Use it to check a resize.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
 
 ### `get_sketch_proposal`
 

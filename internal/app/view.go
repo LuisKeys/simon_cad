@@ -6,7 +6,9 @@ import (
 
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
+	"github.com/accelone/simoncad/internal/dimensions"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
+	"github.com/accelone/simoncad/internal/tools"
 )
 
 // Read-only views for front ends. The UI never touches App.Graph or App.Mgr directly: it
@@ -15,6 +17,12 @@ import (
 
 // Snapshot returns a deep copy of the live graph; changing it has no effect on the model.
 func (a *App) Snapshot() *cadir.Graph { return a.Graph.Clone() }
+
+// ObjectDimensions measures a visible body (width, depth, height along its local axes), the
+// same measurement the get_object_dimensions tool returns.
+func (a *App) ObjectDimensions(id string) (*dimensions.Dimensions, error) {
+	return tools.ObjectDimensions(toolEnv{a}, id)
+}
 
 // CanUndo and CanRedo report the ChangeSet undo/redo stacks.
 func (a *App) CanUndo() bool { return a.Mgr.CanUndo() }

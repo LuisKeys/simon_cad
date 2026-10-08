@@ -69,7 +69,8 @@ project. `component_version` advances on a save that changed the content.
 }
 ```
 Optional fields appear only when set: `expressions`, `references`, `constraints`,
-`manufacturing`, `component`, `selection_refs`, `suppressed`, `appearance`, `group`, `errors`.
+`manufacturing`, `component`, `selection_refs`, `suppressed`, `appearance`, `group`,
+`lock_proportions`, `errors`.
 
 A **component instance** is an ordinary node of type `component_instance`. Its geometry is not
 stored here: the node holds a reference and a placement, and the geometry is resolved from the
@@ -96,7 +97,15 @@ the limitation explicit version locking (`"version": "v3"`) will lift.
 Resolution is recursive and has no depth limit: a component may contain components. Circular
 references are refused, both when inserting and when resolving.
 `group` is a design-tree group label (organization only, like `appearance` never an input to
-geometry); older projects simply have none. `status` and `errors` are
+geometry); older projects simply have none. `lock_proportions` (`true` when set) is the object's
+dimension-editing preference: a width/depth/height edit then scales all three. It is never an
+input to geometry either and is excluded from `GeometryHash`.
+
+A dimension edit (`set_object_dimension`, `resize_object`) is stored as an ordinary `scale` node
+tagged `"tags": ["resize"]` in its metadata, with literal `sx`/`sy`/`sz`, its anchor
+(`about: center`, or `about: point` with the object origin resolved into `ox`/`oy`/`oz`) and, for
+a rotated object, its local frame as an axis-angle rotation (`frame_ax`, `frame_ay`, `frame_az`,
+`frame_angle_deg`): the scale acts along the frame's axes. `status` and `errors` are
 **derived** by rebuild and refreshed on every save; they are excluded from the content hash.
 
 ## `agent-history.json`

@@ -164,7 +164,7 @@ func planCreateComponent(env Env, a Args) (*Plan, error) {
 		features.TypeComponentInstance, params)
 	// The instance stands in for the geometry it replaces, so it keeps its look and grouping.
 	if last := g.Get(moved[len(moved)-1].ID); last != nil {
-		node.Appearance, node.Group = last.Appearance.Clone(), last.Group
+		node.Appearance, node.Group, node.LockProportions = last.Appearance.Clone(), last.Group, last.LockProportions
 	}
 
 	cmds := make([]commands.Command, 0, len(moved)+1)
@@ -387,8 +387,9 @@ func planDetachComponent(env Env, a Args) (*Plan, error) {
 		c.Status, c.Errors = "", nil
 		if i == len(order)-1 { // the body that replaces the instance keeps its look
 			c.Appearance = inst.Appearance.Clone()
+			c.LockProportions = inst.LockProportions
 		} else {
-			c.Appearance = nil
+			c.Appearance, c.LockProportions = nil, false
 		}
 		cmds = append(cmds, &commands.AddFeature{Node: c, Index: at + i})
 	}

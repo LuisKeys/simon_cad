@@ -70,6 +70,8 @@ func Decode(r Record) (Command, error) {
 		c = &ResetAppearance{}
 	case "SetGroup":
 		c = &SetGroup{}
+	case "SetLockProportions":
+		c = &SetLockProportions{}
 	case "RestoreSnapshot":
 		c = &RestoreSnapshot{}
 	default:
@@ -336,7 +338,8 @@ func (c *Rename) Apply(g *cadir.Graph) (Command, error) {
 // and design-tree grouping).
 func IsAppearance(t string) bool {
 	switch t {
-	case "SetColor", "SetOpacity", "SetVisibility", "ResetAppearance", "SetMaterial", "RemoveMaterial", "SetMaterialScale", "SetGroup":
+	case "SetColor", "SetOpacity", "SetVisibility", "ResetAppearance", "SetMaterial", "RemoveMaterial", "SetMaterialScale", "SetGroup",
+		"SetLockProportions":
 		return true
 	}
 	return false
@@ -555,4 +558,24 @@ func (c *RestoreSnapshot) Apply(g *cadir.Graph) (Command, error) {
 	}
 	g.Units, g.Nodes = next.Units, next.Nodes
 	return &RestoreSnapshot{Graph: old, From: c.From}, nil
+}
+
+// ---- SetLockProportions (dimension-editing preference; never affects geometry) ------
+
+// SetLockProportions turns proportional dimension editing of a body on or off.
+type SetLockProportions struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+
+func (*SetLockProportions) Type() string { return "SetLockProportions" }
+
+func (c *SetLockProportions) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	old := n.LockProportions
+	n.LockProportions = c.Enabled
+	return &SetLockProportions{ID: c.ID, Enabled: old}, nil
 }

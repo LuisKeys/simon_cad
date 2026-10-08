@@ -6,6 +6,7 @@ import (
 
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/selectors"
+	"github.com/accelone/simoncad/internal/xform"
 )
 
 func init() {
@@ -20,8 +21,8 @@ func init() {
 // ScaleAnchors are the accepted values of a scale feature's `about` parameter.
 var ScaleAnchors = []string{"center", "base", "origin", "point"}
 
-// scaleFactors reads `factor` (uniform) or per-axis sx/sy/sz (each defaulting to factor or 1).
-func scaleFactors(p Params) ([3]float64, error) {
+// ScaleFactors reads `factor` (uniform) or per-axis sx/sy/sz (each defaulting to factor or 1).
+func ScaleFactors(p Params) ([3]float64, error) {
 	f, err := p.NumOr("factor", 1)
 	if err != nil {
 		return [3]float64{}, err
@@ -43,9 +44,9 @@ func scaleFactors(p Params) ([3]float64, error) {
 	return out, nil
 }
 
-// scaleAnchor is the fixed point of a scale: the body's bounding-box center (default), the
+// ScaleAnchor is the fixed point of a scale: the body's bounding-box center (default), the
 // center of its base (min Z, so a part on the print bed stays on it), the world origin, or (ox,oy,oz).
-func scaleAnchor(p Params, b selectors.Bounds) ([3]float64, error) {
+func ScaleAnchor(p Params, b selectors.Bounds) ([3]float64, error) {
 	c := b.Center()
 	switch p.Str("about") {
 	case "", "center":
@@ -68,20 +69,98 @@ func scaleAnchor(p Params, b selectors.Bounds) ([3]float64, error) {
 	return [3]float64{}, fmt.Errorf("about must be center, base, origin or point (got %q)", p.Str("about"))
 }
 
+// ScaleFrame reads the optional local frame of a scale: the rotation (frame_ax, frame_ay,
+// frame_az, frame_angle_deg) that maps the frame's axes onto the world. sx/sy/sz then act
+// along the frame's axes, which is how a rotated object is resized along its own width,
+// depth and height. No frame (or a zero angle) is the world frame.
+func ScaleFrame(p Params) (xform.Rot, error) {
+	deg, err := p.NumOr("frame_angle_deg", 0)
+	if err != nil || deg == 0 {
+		return xform.Identity, err
+	}
+	var axis [3]float64
+	for i, k := range []string{"frame_ax", "frame_ay", "frame_az"} {
+		if axis[i], err = p.NumOr(k, 0); err != nil {
+			return xform.Identity, err
+		}
+	}
+	if axis == [3]float64{} {
+		return xform.Identity, fmt.Errorf("frame_angle_deg needs a non-zero frame axis (frame_ax, frame_ay, frame_az)")
+	}
+	return xform.AxisAngle(axis, deg), nil
+}
+
+// BoundsInFrame is the bounding box of the body measured along the axes of r (world = r·local):
+// the box of the body rotated into that frame. The world frame is the ordinary bounding box.
+func (b *Body) BoundsInFrame(r xform.Rot) (selectors.Bounds, error) {
+	if r.IsIdentity(1e-12) {
+		return b.Bounds(), nil
+	}
+	l, err := rotateShape(b.Shape, r.T())
+	if err != nil {
+		return selectors.Bounds{}, err
+	}
+	defer l.Release()
+	return shapeBounds(l)
+}
+
+func rotateShape(s *api.Shape, r xform.Rot) (*api.Shape, error) {
+	ax, deg := r.ToAxisAngle()
+	return s.Rotate(0, 0, 0, ax[0], ax[1], ax[2], degToRad(deg))
+}
+
+func shapeBounds(s *api.Shape) (selectors.Bounds, error) {
+	p, err := s.Props()
+	if err != nil {
+		return selectors.Bounds{}, err
+	}
+	return selectors.Bounds{Min: [3]float64{p.MinX, p.MinY, p.MinZ}, Max: [3]float64{p.MaxX, p.MaxY, p.MaxZ}}, nil
+}
+
 func buildScale(c *Ctx) (*api.Shape, error) {
 	t, err := c.body(c.P.Str("target"))
 	if err != nil {
 		return nil, err
 	}
-	f, err := scaleFactors(c.P)
+	f, err := ScaleFactors(c.P)
 	if err != nil {
 		return nil, err
 	}
-	o, err := scaleAnchor(c.P, t.Bounds())
+	fr, err := ScaleFrame(c.P)
 	if err != nil {
 		return nil, err
 	}
-	return t.Shape.Scale(o[0], o[1], o[2], f[0], f[1], f[2])
+	if fr.IsIdentity(1e-12) {
+		o, err := ScaleAnchor(c.P, t.Bounds())
+		if err != nil {
+			return nil, err
+		}
+		return t.Shape.Scale(o[0], o[1], o[2], f[0], f[1], f[2])
+	}
+	// In a local frame: rotate the body into the frame, scale along its axes there (the
+	// anchor computed from the body's box in that frame) and rotate back.
+	local, err := rotateShape(t.Shape, fr.T())
+	if err != nil {
+		return nil, err
+	}
+	defer local.Release()
+	lb, err := shapeBounds(local)
+	if err != nil {
+		return nil, err
+	}
+	o, err := ScaleAnchor(c.P, lb)
+	if err != nil {
+		return nil, err
+	}
+	if a := c.P.Str("about"); a == "origin" || a == "point" { // world points: express them in the frame
+		o = fr.T().Apply(o)
+	}
+	scaled, err := local.Scale(o[0], o[1], o[2], f[0], f[1], f[2])
+	if err != nil {
+		return nil, err
+	}
+	defer scaled.Release()
+	return rotateShape(scaled, fr)
 }
 
 // buildCopy is a linked duplicate: the source body moved by (dx,dy,dz). It follows later

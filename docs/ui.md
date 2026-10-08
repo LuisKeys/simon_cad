@@ -96,6 +96,22 @@ backlog item "round only the outer edges after pocketing".
   View shows the active pane, so its configuration carries over between layouts. Layout,
   split and cameras are saved per project path in `localStorage` (`simon.views.v1:<path>`),
   never in the project file or its history.
+- **Dimensions:** when an object is selected (its body, or any face/edge/vertex of it) the
+  viewport shows its exterior dimensions — width, depth and height along the object's own axes —
+  as lines in the shared scene (so every Single/Quad view shows them) with one label per view,
+  placed with that view's camera; a dimension seen end-on (height in TOP) has no label there.
+  Hovering a label shows a text cursor; clicking it turns it into a number field: **Enter**
+  confirms, **Escape** (or leaving the field) cancels, and an invalid value is refused in place.
+  The edit is a `set_object_dimension` tool call applied at once even in Review (like an inline
+  parameter edit) and undoable with Ctrl+Z; the object stays selected and its dimensions
+  recompute. The Selection panel (object properties) has a **Dimensions** section — Width,
+  Height, Depth, **Lock proportions** (`set_object_proportional_scaling`, stored with the object)
+  and **Anchor** (Center / Object origin, a per-user preference in `localStorage`) — always in
+  sync with the viewport labels, both rendered from `selection.dimensions` (the server's
+  measurement). Fit frames the dimension lines with the object. Pieces: `frontend/dimensions.js`
+  (DimensionRenderer, DimensionEditor) and `frontend/dimensions-model.js` (line placement,
+  parsing; unit tested). See [architecture.md §6a](architecture.md) for the measurement and the
+  resize.
 - **Coordinate axes:** X red `#E05252`, Y green `#56B870`, Z blue `#4A90E2`, defined once in
   `frontend/axes.js` and shared by the two places that show them: the axes through the true origin
   (both directions, the negative half fainter, labels at the positive ends) and the axis gizmo in a
@@ -165,6 +181,7 @@ backlog item "round only the outer edges after pocketing".
 | The local server is not reachable cross-site | `TestServerRejectsMissingTokenAndForeignHost` (token + loopback Host check) |
 | Selection context with a non-extreme face | eval `08_hole_in_pocket_floor`; dogfood `TestDogfoodElbowClevis` |
 | Selective fillet removes exactly the expected material | `TestSelectiveFilletOfSelectedEdges` (analytic volume to 1e-6) |
+| Dimension edits: only the edited dimension changes, local axes, anchors, lock, undo/redo, replay | `app.TestSetObjectDimensionChangesOnlyThatDimension` and the other tests in `internal/app/dimensions_test.go`; `ui.TestDimensionEditInReviewKeepsTheObjectSelected`; `e2e/dimensions.mjs` (real browser, Single and Quad) |
 
 ## Not done / not verified
 

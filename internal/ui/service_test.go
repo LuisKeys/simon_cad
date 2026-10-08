@@ -392,3 +392,42 @@ func TestAgentDeletesSelectedObjects(t *testing.T) {
 		t.Fatalf("discard must restore both objects, tree=%d", len(st.Tree))
 	}
 }
+
+// A typed dimension is applied at once even in Review (like an inline parameter edit), stays
+// undoable, and the object stays selected with its updated dimensions for the next edit.
+func TestDimensionEditInReviewKeepsTheObjectSelected(t *testing.T) {
+	s := newSvc(t)
+	s.CallTool("create_box", json.RawMessage(`{"id":"plate","dx":120,"dy":80,"dz":40}`))
+	st, _ := s.State()
+	if _, err := s.Commit(st.Pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := s.Pick(PickRequest{Body: "plate", Kind: "face", Index: 0, Triangle: -1})
+	if err != nil || len(sel.Dimensions) != 1 || sel.Dimensions[0].Width != 120 {
+		t.Fatalf("a selected face shows its object's dimensions: %+v %v", sel.Dimensions, err)
+	}
+	o, err := s.CallTool("set_object_dimension", json.RawMessage(`{"axis":"width","value":150}`))
+	if err != nil || !o.OK || !o.Committed {
+		t.Fatalf("a dimension edit should commit at Review level: %+v %v", o, err)
+	}
+	v := s.Selection()
+	if len(v.Selectors) != 1 || v.Selectors[0] != "body(feature=resize)" || len(v.Dimensions) != 1 {
+		t.Fatalf("the resized object stays selected: %+v", v)
+	}
+	if d := v.Dimensions[0]; d.Width != 150 || d.Depth != 80 || d.Height != 40 {
+		t.Fatalf("dimensions after the edit: %+v", d)
+	}
+	// The next edit folds into the same resize feature: the object is still selected.
+	if o, _ := s.CallTool("set_object_dimension", json.RawMessage(`{"object_id":"resize","axis":"height","value":25}`)); !o.Committed {
+		t.Fatalf("second edit: %+v", o)
+	}
+	if v = s.Selection(); len(v.Dimensions) != 1 || v.Dimensions[0].Height != 25 || v.Dimensions[0].Width != 150 {
+		t.Fatalf("after a folded edit: %+v", v)
+	}
+	if _, err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.State(); st.CanUndo != true || len(st.Pending) != 0 {
+		t.Fatalf("undo: %+v", st)
+	}
+}

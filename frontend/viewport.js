@@ -63,6 +63,8 @@ export class Viewport {
     this.hoverGroup = new THREE.Group(); this.scene.add(this.hoverGroup);
     this.selGroup = new THREE.Group(); this.scene.add(this.selGroup);
     this.measureGroup = new THREE.Group(); this.scene.add(this.measureGroup);
+    this.fitOverlays = [];      // annotation groups Fit also frames (dimensions)
+    this.paneHooks = [];        // called with each view just before it is drawn (per-view overlay visibility)
     this.filter = 'auto';
     this.measure = { on: false, pts: [] };
     this.section = { axis: '', t: 0.5 };
@@ -283,12 +285,15 @@ export class Viewport {
     return box;
   }
 
-  /** Fit to scene in the active view only (each view fits independently). */
+  /** Fit to scene in the active view only (each view fits independently). Overlays that
+   *  annotate the model (the dimensions) are framed with it, never counted as model bounds. */
   fit() {
     const box = this.bounds();
     if (box.isEmpty()) return;
     this._updateHelpers(box);
-    this.layout.active.fit(box);
+    const framed = box.clone();
+    for (const o of this.fitOverlays) if (o.visible && o.children.length) framed.expandByObject(o);
+    this.layout.active.fit(framed);
     this.layout.changed();
   }
 
@@ -733,6 +738,7 @@ export class Viewport {
       const by = H - y - h; // WebGL rectangles start at the bottom left
       r.setViewport(x, by, w, h); r.setScissor(x, by, w, h);
       this._placeGrid(pane, !mo);
+      for (const hook of this.paneHooks) hook(pane);
       if (this.axes.visible) this.axes.update(pane.camera, h);
       r.render(this.scene, pane.camera);
       // The cube and the gizmo take the view's camera orientation as is: one source of truth,

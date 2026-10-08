@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/accelone/simoncad/internal/app"
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/config"
+	"github.com/accelone/simoncad/internal/dimensions"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
@@ -285,10 +287,17 @@ type SelectionView struct {
 	Entities   []selection.Entity `json:"entities"`
 	Selectors  []string           `json:"selectors"`
 	Highlights []rendering.Pick   `json:"highlights"`
+	// Dimensions of the selected objects (the visible bodies the selection is on), for the
+	// viewport's editable dimensions and the Dimensions section of the properties.
+	Dimensions []*dimensions.Dimensions `json:"dimensions"`
 }
 
+// maxDimensioned bounds how many selected objects get dimensions (beyond that they clutter).
+const maxDimensioned = 8
+
 func (s *Service) selectionView() SelectionView {
-	v := SelectionView{Entities: []selection.Entity{}, Selectors: []string{}, Highlights: []rendering.Pick{}}
+	v := SelectionView{Entities: []selection.Entity{}, Selectors: []string{}, Highlights: []rendering.Pick{},
+		Dimensions: []*dimensions.Dimensions{}}
 	ctx := s.app.SelectionContext()
 	if ctx.Empty() {
 		return v
@@ -306,6 +315,17 @@ func (s *Service) selectionView() SelectionView {
 		}
 		if p, err := bm.PickFor(raw); err == nil {
 			v.Highlights = append(v.Highlights, p)
+		}
+	}
+	seen := map[string]bool{}
+	for _, raw := range v.Selectors {
+		id := selectorFeature(raw)
+		if seen[id] || len(v.Dimensions) >= maxDimensioned {
+			continue
+		}
+		seen[id] = true
+		if d, err := s.app.ObjectDimensions(id); err == nil { // only visible solid bodies
+			v.Dimensions = append(v.Dimensions, d)
 		}
 	}
 	return v
@@ -969,11 +989,66 @@ func (s *Service) CallTool(name string, args json.RawMessage) (Outcome, error) {
 	}
 	s.app.SetActor(app.Actor{CreatedBy: "user"})
 	pol := s.policy()
-	if tools.IsAppearanceTool(name) {
-		pol = app.PolicyAuto // presentation edits never wait for approval, even in Review
+	if tools.IsAppearanceTool(name) || tools.IsDimensionEditTool(name) {
+		// Presentation edits never wait for approval, even in Review; neither does a typed
+		// dimension (like an inline parameter edit, it is direct and stays undoable).
+		pol = app.PolicyAuto
 	}
+	before, objects := s.leafSet(), s.dimensionTargets(args)
 	o := s.app.ApplyTool(name, args, pol)
-	return s.finishTool(name, o), nil
+	out := s.finishTool(name, o)
+	if o.Committed && tools.IsDimensionEditTool(name) {
+		s.keepObjectSelected(before, objects)
+	}
+	return out, nil
+}
+
+// dimensionTargets is the object a dimension tool call is about: its object_id, else the
+// features of the selection (which the tool falls back to).
+func (s *Service) dimensionTargets(args json.RawMessage) []string {
+	var a struct {
+		ObjectID string `json:"object_id"`
+	}
+	if json.Unmarshal(args, &a) == nil && a.ObjectID != "" {
+		return []string{a.ObjectID}
+	}
+	var out []string
+	for _, raw := range s.sel {
+		if id := selectorFeature(raw); id != "" && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (s *Service) leafSet() map[string]bool {
+	out := map[string]bool{}
+	if m, err := s.app.Model(); err == nil {
+		for _, id := range m.Leaves {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// keepObjectSelected re-selects the object after a dimension edit, so its dimensions stay on
+// screen for the next edit. The edit may replace the visible body (a new resize feature, or the
+// plain body again when a resize is cancelled out): then the object is the body that appeared.
+// Otherwise (an edit folded into the object's resize feature) it is still the same body.
+func (s *Service) keepObjectSelected(before map[string]bool, objects []string) {
+	now := s.leafSet()
+	var added []string
+	for id := range now {
+		if !before[id] {
+			added = append(added, id)
+		}
+	}
+	switch {
+	case len(added) == 1:
+		_, _ = s.setSelection([]string{"body(feature=" + added[0] + ")"})
+	case len(added) == 0 && len(objects) == 1 && now[objects[0]]:
+		_, _ = s.setSelection([]string{"body(feature=" + objects[0] + ")"})
+	}
 }
 
 func (s *Service) finishTool(name string, o app.Outcome) Outcome {

@@ -152,9 +152,12 @@ type Node struct {
 	Appearance    *Appearance       `json:"appearance,omitempty"`
 	// Group is an organizational label shared by the nodes of one user group (design tree).
 	// Like appearance it is never an input to geometry.
-	Group  string   `json:"group,omitempty"`
-	Status string   `json:"status,omitempty"`
-	Errors []string `json:"errors,omitempty"`
+	Group string `json:"group,omitempty"`
+	// LockProportions makes a dimension edit of this body scale the other two dimensions
+	// proportionally. Like group it is an editing preference, never an input to geometry.
+	LockProportions bool     `json:"lock_proportions,omitempty"`
+	Status          string   `json:"status,omitempty"`
+	Errors          []string `json:"errors,omitempty"`
 }
 
 // Graph is the ordered feature DAG. Order is insertion order and is the tie-breaker
@@ -319,8 +322,8 @@ func (g *Graph) Canonical() ([]byte, error) {
 // Hash is a content hash of the authoritative content (excludes derived status/errors and timestamps).
 func (g *Graph) Hash() string { return g.hash(false) }
 
-// GeometryHash is Hash ignoring presentation-only appearance and grouping: it is unchanged
-// by an appearance-only or grouping edit.
+// GeometryHash is Hash ignoring presentation-only appearance, grouping and editing
+// preferences: it is unchanged by an appearance-only or grouping edit.
 func (g *Graph) GeometryHash() string { return g.hash(true) }
 
 func (g *Graph) hash(ignoreAppearance bool) string {
@@ -329,7 +332,7 @@ func (g *Graph) hash(ignoreAppearance bool) string {
 		n.Status, n.Errors = "", nil
 		n.Metadata.Created, n.Metadata.Modified = "", ""
 		if ignoreAppearance {
-			n.Appearance, n.Group = nil, ""
+			n.Appearance, n.Group, n.LockProportions = nil, "", false
 		}
 	}
 	b, _ := json.Marshal(c)

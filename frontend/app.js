@@ -13,6 +13,8 @@ import { selectionContext, actionsFor, groupRuns, ACTIONS } from './actions.js';
 import { openSettings, loadTheme } from './settings.js';
 import { initPanels, getPref, setPref } from './panels.js';
 import { initComponents, openComponent, createComponent, replaceComponent, publishProject } from './components.js';
+import { DimensionRenderer } from './dimensions.js';
+import { ANCHORS, AXIS_LABEL, PANEL_ORDER, formatMM, parseDimension } from './dimensions-model.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
@@ -31,6 +33,7 @@ const panels = initPanels({ layout: $('layout'), toggles: { left: $('btn-panel-l
 const library = new MaterialLibrary();
 const textureUrl = (id, file) => materialUrl(id, file);
 
+let dimOverlay = null; // the selected objects' editable dimensions (created right after the viewport)
 const vp = new Viewport($('gl'), {
   library, textureUrl,
   onPick: async (p, mods) => {
@@ -70,11 +73,16 @@ const vp = new Viewport($('gl'), {
     $('hud').textContent = `distance ${m.distance.toFixed(3)} mm`;
     placeMeasureLabel(m.mid);
   },
-  onFrame: () => { if (vp.measure.pts.length === 2) placeMeasureLabel(vp.measure.pts[0].clone().lerp(vp.measure.pts[1], 0.5)); },
+  onFrame: () => {
+    if (vp.measure.pts.length === 2) placeMeasureLabel(vp.measure.pts[0].clone().lerp(vp.measure.pts[1], 0.5));
+    dimOverlay?.update();
+  },
   onPaneMenu: (i, el) => showPaneMenu(i, el),
   onLayout: (st) => views.save(st),
 });
 window.simonViewport = vp;
+dimOverlay = new DimensionRenderer(vp, { onEdit: (id, axis, value) => editDimension(id, axis, value), onInvalid: (msg) => toast(msg, 'bad') });
+window.simonDimensions = dimOverlay;
 
 // ---- materials: library, thumbnails, drag & drop --------------------------------------
 
@@ -669,13 +677,61 @@ function appearanceEditor(nodes) {
 
 function featureOf(sel) { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1].trim() : ''; }
 
+// ---- dimensions (informational + editable) ------------------------------------------------
+// The server measures (DimensionService); a typed size is a set_object_dimension tool call,
+// applied at once and undoable. The anchor is a per-user editing preference.
+
+const dimAnchor = () => (ANCHORS.some(([v]) => v === getPref('dimAnchor', 'center')) ? getPref('dimAnchor', 'center') : 'center');
+
+async function editDimension(id, axis, value) {
+  try {
+    const o = await api('tool', { name: 'set_object_dimension', args: { object_id: id, axis, value, anchor: dimAnchor() } });
+    if (!o.ok) toast(o.error, 'bad');
+  } catch (err) { toast(err.message, 'bad'); }
+  await refresh();
+}
+
+async function setLockProportions(id, enabled) {
+  try {
+    const o = await api('tool', { name: 'set_object_proportional_scaling', args: { object_id: id, enabled } });
+    if (!o.ok) toast(o.error, 'bad');
+  } catch (err) { toast(err.message, 'bad'); }
+  await refresh();
+}
+
+/** The Dimensions section of the object properties: width, height, depth, lock and anchor. */
+function dimensionsEditor(d) {
+  const rows = [];
+  for (const axis of PANEL_ORDER) {
+    const id = `dim-${axis}`;
+    const input = h('input', { id, type: 'text', inputmode: 'decimal', value: formatMM(d[axis]), 'aria-label': `${AXIS_LABEL[axis]} (mm)`,
+      onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.target.value = formatMM(d[axis]); e.target.blur(); } else if (e.key === 'Enter') e.target.blur(); },
+      onchange: (e) => {
+        const r = parseDimension(e.target.value);
+        if (!r.ok) { toast(r.error, 'bad'); e.target.value = formatMM(d[axis]); return; }
+        if (Math.abs(r.value - d[axis]) > 1e-9) editDimension(d.object_id, axis, r.value);
+      } });
+    rows.push(h('label', { for: id }, AXIS_LABEL[axis]), h('span', { class: 'dim-row' }, input, h('span', { class: 'muted' }, 'mm')));
+  }
+  const lock = h('input', { id: 'dim-lock', type: 'checkbox', checked: !!d.lock_proportions, 'aria-label': 'Lock proportions',
+    onchange: (e) => setLockProportions(d.object_id, e.target.checked) });
+  const anchor = h('select', { id: 'dim-anchor', 'aria-label': 'Resize anchor', onchange: (e) => setPref('dimAnchor', e.target.value) },
+    ...ANCHORS.map(([v, label]) => h('option', { value: v, selected: v === dimAnchor() }, label)));
+  rows.push(h('label', { for: lock.id }, 'Lock proportions'), lock, h('label', { for: anchor.id }, 'Anchor'), anchor);
+  return h('div', { class: 'params dimensions', role: 'group', 'aria-label': `Dimensions of ${d.object_id}` }, ...rows,
+    d.rotated ? h('span', { class: 'muted dim-note' }, 'Measured along the object’s own (rotated) axes.') : null);
+}
+
 function renderSelection(sel) {
   const list = $('sel-list'), chips = $('chips');
   const ents = sel?.entities ?? [];
+  dimOverlay?.set(sel?.dimensions ?? []);
   $('sel-section').hidden = !ents.length;
   if (!ents.length) { list.replaceChildren(); chips.replaceChildren(); return; }
   const selNodes = (S.state?.tree ?? []).filter((n) => n.visible && new Set(ents.map((e) => featureOf(e.selector))).has(n.id));
-  list.replaceChildren(...(selNodes.length ? [h('div', { class: 'sel-item' }, h('b', {}, `Appearance · ${selNodes.length} object${selNodes.length > 1 ? 's' : ''}`), appearanceEditor(selNodes))] : []), ...ents.map((e) => h('div', { class: 'sel-item' },
+  const dims = sel?.dimensions ?? [];
+  list.replaceChildren(...(dims.length === 1 ? [h('div', { class: 'sel-item' }, h('b', {}, `Dimensions · ${dims[0].object_id}`), dimensionsEditor(dims[0]))] : []),
+    ...(selNodes.length ? [h('div', { class: 'sel-item' }, h('b', {}, `Appearance · ${selNodes.length} object${selNodes.length > 1 ? 's' : ''}`), appearanceEditor(selNodes))] : []), ...ents.map((e) => h('div', { class: 'sel-item' },
     h('code', {}, e.selector),
     h('div', { class: 'muted' }, [e.surface_type, e.area ? `${e.area.toFixed(1)} mm²` : null,
       `at (${e.centroid.map((v) => v.toFixed(1)).join(', ')})`].filter(Boolean).join(' · ')))));

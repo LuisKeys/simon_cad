@@ -30,7 +30,7 @@ var knownParams = map[string][]string{
 	"union":            {},
 	"subtract":         {},
 	"intersect":        {},
-	"scale":            {"factor", "sx", "sy", "sz", "about", "ox", "oy", "oz"},
+	"scale":            {"factor", "sx", "sy", "sz", "about", "ox", "oy", "oz", "frame_ax", "frame_ay", "frame_az", "frame_angle_deg"},
 	"copy":             {"dx", "dy", "dz"},
 	"face_extrude":     {"distance"},
 	"face_inset":       {"inset", "depth"},
