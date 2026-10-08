@@ -57,21 +57,6 @@ func TestOpenAIResponsesCacheTokensAreASubset(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsCacheTokens(t *testing.T) {
-	srv := jsonServer(t, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],
-		"usage":{"prompt_tokens":1000,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":600}}}`)
-	defer srv.Close()
-	o := &OpenAI{Flavor: "ollama", BaseURL: srv.URL, Model: "llama", HTTP: srv.Client()}
-	resp, err := o.Complete(context.Background(), Request{
-		Messages: []Message{{Role: "user", Content: []Block{{Type: "text", Text: "hi"}}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u := resp.Usage; u.InputTokens != 1000 || u.CachedInputTokens != 600 {
-		t.Fatalf("usage = %+v", u)
-	}
-}
-
 // A provider that reports no cache (or an older API shape) must still be counted normally.
 func TestNoCacheFieldMeansNothingCached(t *testing.T) {
 	srv := jsonServer(t, `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],

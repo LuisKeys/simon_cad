@@ -221,12 +221,57 @@ Input the provider served from its prompt cache is tracked as `CachedInputTokens
 providers normalize both to "cached is part of the input"). It is costed at the cached rate when
 one is configured, and at the full input rate otherwise — never at a guessed discount.
 
-Prices are optional and configured per provider — Settings → *Token Prices*, or the
-`*_INPUT_PRICE` / `*_CACHED_INPUT_PRICE` / `*_OUTPUT_PRICE` variables — as cost per million
-tokens, labelled by `SIMONCAD_CURRENCY`. With prices loaded the estimate accompanies the tokens; with the slots empty
-only tokens are reported. A cost is never invented: a model with no configured price contributes
-nothing to the amount and is listed in `cost.unpriced`, which marks the estimate partial, and usage
-with no model attribution (recorded runs, stubs) is not costed at all.
+Prices are optional and configured per model — Settings → *Primary Model* / *Fallback Model* →
+*Token Prices*, or the `*_INPUT_PRICE` / `*_CACHED_INPUT_PRICE` / `*_OUTPUT_PRICE` variables (with
+the `SIMONCAD_FALLBACK_` prefix for the fallback) — as cost per million tokens, labelled by the
+model's currency (default `SIMONCAD_CURRENCY`). Each model in `Usage.ByModel` is costed with the
+prices of the slot that configures that exact model (`config.PriceForModel`). With prices loaded
+the estimate accompanies the tokens; with the slots empty only tokens are reported. A cost is never
+invented: a cloud model with no configured price contributes nothing to the amount and is listed in
+`cost.unpriced`, which marks the estimate partial, and usage with no model attribution (recorded
+runs, stubs) is not costed at all. Local (Ollama) models are never priced: their tokens are counted
+in `cost.local_tokens` and never in the amount; `cost.cloud_tokens` is the API-billed part.
+
+## Primary and fallback models
+
+`runtime.Router` routes every model call. `Selected` is the primary model; `Fallbacks` holds the
+one configured fallback model (cloud only), built by `NewRouterFromEnv` from `config.FallbackModel`
+— empty, with `FallbackErr` saying why, when it is disabled or incomplete.
+
+- **Capabilities.** `Route(need)` keeps a request on the primary whenever its declared capabilities
+  (`ModelCapabilities`: a multimodal Ollama model reads images) satisfy it, and otherwise uses the
+  fallback. The attachment processor and the visual refinement route through it.
+- **Recoverable errors.** `Router.Agent()` is the CAD agent's provider for one request: when the
+  primary fails with `ErrUnavailable` (unreachable, or 429/5xx after its own retries), the rest of
+  the request moves to the fallback, once, and never back; a failing fallback fails the request.
+- **Consent.** A request of a local primary is only sent to a cloud fallback when
+  `Router.Consent` allows it. Otherwise `Route` returns a `ConsentError`, which the server turns into
+  `409 {code: "fallback_consent"}`; the front end asks (Allow / Cancel, optionally remembered via
+  `POST /api/fallback/consent`) and resends. Mid-request (failover) nothing can be asked, so an
+  unauthorized fallback is reported, not used.
+- **Transparency.** Every call through the router is reported to `Router.OnRoute` as a
+  `RouteEvent`; the service publishes it as a `model` notice (the Simon Agent header indicator) and
+  keeps the last one in `State.model`. Each fallback is named in the conversation
+  (`Fallback: OpenAI · gpt-x — reason`) and logged with the model requested, the model used, the
+  reason, its tokens and its estimated cost.
+
+**Ollama.** The provider speaks Ollama's native `/api/chat`, the only Ollama API that honors a
+context window per request: the OpenAI-compatible endpoint ignores it, and Ollama silently drops
+whatever does not fit in the window the model was loaded with (4096 by default), so the model
+would get the system prompt and tool list cut in half (~16k tokens for a CAD turn). Each request
+sends `num_ctx` (`OLLAMA_NUM_CTX`, default 32768, capped at the model's own maximum). The answer's
+`prompt_eval_count` is the prompt the model actually read; when it falls below a lower-bound
+estimate of the prompt (characters / 6, images excluded) the request is reported as a
+`ContextExceededError` instead of answered, and a prompt that cannot fit at all is not sent. That
+error, like `ErrUnavailable`, lets the router hand the request to the fallback. Capabilities
+(vision, tools, thinking) come from `/api/show`, cached for 5 minutes (15 s after a failure), with
+the name-based registry as the fallback and `OLLAMA_VISION` overriding vision.
+
+Configuration: the primary slot is the provider variables SimonCAD always used; the fallback slot
+is `SIMONCAD_FALLBACK_ENABLED`, `SIMONCAD_FALLBACK_PROVIDER`, `SIMONCAD_FALLBACK_CONSENT` and the
+provider variables prefixed `SIMONCAD_FALLBACK_`, each inheriting the primary-slot value while
+unset. A configuration that predates the slot is migrated in place, without rewriting it: the
+first complete cloud provider other than the primary becomes the fallback, enabled, as before.
 
 ## What a turn sends
 

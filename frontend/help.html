@@ -512,12 +512,14 @@
 <p>Create <code>.env</code> from <code>.env.example</code>. Real environment variables take precedence.</p>
 <table>
 <tr><th>Variable</th><th>Meaning</th></tr>
-<tr><td><code>SIMONCAD_PROVIDER</code></td><td><code>claude</code> (default), <code>openai</code> or <code>ollama</code></td></tr>
+<tr><td><code>SIMONCAD_PROVIDER</code></td><td>Primary model: <code>claude</code> (default), <code>openai</code> or <code>ollama</code></td></tr>
 <tr><td><code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_MODEL</code>, <code>ANTHROPIC_BASE_URL</code></td><td>Claude provider</td></tr>
 <tr><td><code>OPENAI_API_KEY</code>, <code>OPENAI_MODEL</code>, <code>OPENAI_REASONING_EFFORT</code>, <code>OPENAI_BASE_URL</code></td><td>OpenAI provider (model is required)</td></tr>
-<tr><td><code>OLLAMA_MODEL</code>, <code>OLLAMA_BASE_URL</code></td><td>Local models, no key</td></tr>
+<tr><td><code>OLLAMA_MODEL</code>, <code>OLLAMA_BASE_URL</code></td><td>Local models, no key, never priced</td></tr>
+<tr><td><code>OLLAMA_NUM_CTX</code></td><td>Context window asked of Ollama, in tokens (default 32768; 0 = the server’s setting). A request has to fit in it whole: Ollama drops the rest silently, so Simon reports a request the model only partly read instead of answering it. Also editable in <b>Settings → Primary Model → Context window</b>.</td></tr>
+<tr><td><code>SIMONCAD_FALLBACK_ENABLED</code>, <code>SIMONCAD_FALLBACK_PROVIDER</code>, <code>SIMONCAD_FALLBACK_CONSENT</code></td><td>The fallback model (OpenAI or Anthropic) and whether a local model’s request may be sent to it (<code>ask</code>, <code>allow</code>, <code>deny</code>). Its own model, key and prices use the provider variables with the <code>SIMONCAD_FALLBACK_</code> prefix. Also editable in <b>Settings → Fallback Model</b>.</td></tr>
 <tr><td><code>SIMONCAD_COMPONENT_LIBRARY</code></td><td>A folder of shared components, searched on top of the ones next to the open project. Must be an absolute path. Also editable in <b>Settings → Component library</b>.</td></tr>
-<tr><td><code>ANTHROPIC_INPUT_PRICE</code>, <code>ANTHROPIC_CACHED_INPUT_PRICE</code>, <code>ANTHROPIC_OUTPUT_PRICE</code> (and the <code>OPENAI_*</code> / <code>OLLAMA_*</code> sets)</td><td>Optional cost per million tokens. Also editable in <b>Settings → Token Prices</b>.</td></tr>
+<tr><td><code>ANTHROPIC_INPUT_PRICE</code>, <code>ANTHROPIC_CACHED_INPUT_PRICE</code>, <code>ANTHROPIC_OUTPUT_PRICE</code> (and the <code>OPENAI_*</code> set)</td><td>Optional cost per million tokens. Also editable per model in <b>Settings → Primary Model / Fallback Model → Token Prices</b>.</td></tr>
 <tr><td><code>SIMONCAD_CURRENCY</code></td><td>Label for the amounts (default <code>USD</code>). It is a label only — no conversion is performed.</td></tr>
 </table>
 
@@ -525,12 +527,23 @@
 <p>Every request to the model is metered. Under each answer you get the tokens that turn consumed
 (input and output), and above the message box a running total for the session — hover it for the
 split per model and for the last turn. Clearing the conversation does not reset the meter.</p>
-<p>Cost estimation is opt-in: fill <b>Settings → Token Prices</b> with what your model costs per
+<p>Cost estimation is opt-in: fill <b>Token Prices</b> under <b>Settings → Primary Model</b> (and
+<b>Fallback Model</b>) with what each model costs per
 million input and output tokens (the figures from your provider's pricing page) and pick a currency.
 From then on each turn and the session also show an estimated cost. Leave the fields empty and only
 tokens are reported — Simon never guesses a price. If a turn used a model you have not priced (for
 example a vision model that read your image), its tokens are still counted and the estimate is
-marked partial rather than silently understated.</p>
+marked partial rather than silently understated. Local (Ollama) models have no prices: their tokens
+are shown as local and never counted as spend.</p>
+<h3>Primary and fallback models</h3>
+<p>The <b>Primary Model</b> answers every request it can. The <b>Fallback Model</b>, OpenAI or
+Anthropic, takes over only what the primary cannot do: an image or PDF a local model cannot read,
+or a request whose primary model stopped responding. The header of the Simon Agent panel shows the
+model at work (for example <i>Ollama · qwen3</i>, or <i>OpenAI · gpt-x (Fallback)</i> — hover it for
+the reason), and every fallback is noted in the conversation. Turn the fallback off and such
+requests are refused with an explanation instead. When the primary model is local, Simon asks before
+it first sends anything to the cloud; tick <i>Remember my choice</i> to keep the answer, and change
+it later in <b>Settings → Fallback Model → Remote data</b>.</p>
 <p>Part of what you send is usually served from the provider’s cache and billed cheaper: the
 system prompt and the tool list repeat on every step, which is exactly what caches well. The
 tooltip shows how much was cached, and <b>Cached input price</b> makes the estimate reflect it.

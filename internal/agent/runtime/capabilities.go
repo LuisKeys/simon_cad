@@ -72,23 +72,34 @@ var ollamaVisionFamilies = []string{
 //
 //	claude, openai: everything (vision, PDF documents, tools)
 //	ollama:         text + tools; vision for known multimodal families or OLLAMA_VISION=true
-//	                (OLLAMA_VISION=false turns it off); no document blocks
+//	                (OLLAMA_VISION=false turns it off); no document blocks. A live Ollama
+//	                provider asks the server instead (see OpenAI.ollamaCapabilities); this
+//	                name-based registry is what it falls back to.
 func ModelCapabilities(flavor, model string) ProviderCapabilities {
 	switch flavor {
 	case ProviderClaude, ProviderOpenAI:
 		return allCapabilities
 	case ProviderOllama:
 		c := ProviderCapabilities{Text: true, StructuredOutput: true, ToolCalls: true}
-		switch strings.ToLower(strings.TrimSpace(config.Get("OLLAMA_VISION"))) {
-		case "1", "true", "yes", "on":
-			c.Vision = true
-		case "0", "false", "no", "off":
-		default:
+		if v, set := ollamaVisionOverride(); set {
+			c.Vision = v
+		} else {
 			c.Vision = ollamaVisionModel(model)
 		}
 		return c
 	}
 	return ProviderCapabilities{Text: true}
+}
+
+// ollamaVisionOverride is OLLAMA_VISION: whether the user declared the model's vision.
+func ollamaVisionOverride() (vision, set bool) {
+	switch strings.ToLower(strings.TrimSpace(config.Get("OLLAMA_VISION"))) {
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	}
+	return false, false
 }
 
 func ollamaVisionModel(model string) bool {

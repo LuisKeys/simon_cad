@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -66,18 +67,45 @@ type ProviderSettings struct {
 	InputPrice       string `json:"inputPrice"`
 	OutputPrice      string `json:"outputPrice"`
 	CachedInputPrice string `json:"cachedInputPrice"`
+	// Currency labels this model's prices; empty uses the default currency. Local models
+	// have neither prices nor a currency.
+	Currency string `json:"currency"`
+	// ContextLength is the context window asked of a local model, in tokens ("" = the
+	// default, "0" = the Ollama server's own setting).
+	ContextLength string `json:"contextLength,omitempty"`
+}
+
+// FallbackSettings is the fallback model section of the Settings screen. Providers holds one
+// configuration per cloud provider, so switching the fallback provider keeps the other's.
+type FallbackSettings struct {
+	Enabled   bool                        `json:"enabled"`
+	Provider  string                      `json:"provider"`
+	Providers map[string]ProviderSettings `json:"providers"`
+	// Consent is ConsentAsk, ConsentAllow or ConsentDeny: whether a request of a local primary
+	// model may be sent to the remote fallback.
+	Consent string `json:"consent"`
+	// Migrated (read-only) says the fallback was derived from a configuration that predates
+	// the fallback slot and has not been saved yet.
+	Migrated bool `json:"migrated,omitempty"`
+	// Problem (read-only) is why the selected fallback cannot be used ("" when it can).
+	Problem string `json:"problem,omitempty"`
 }
 
 // Settings is the view of the configuration the Settings screen edits.
 type Settings struct {
+	// Provider and Providers are the primary model: the selected provider and the
+	// configuration of each provider in the primary slot.
 	Provider  string                      `json:"provider"`
 	Providers map[string]ProviderSettings `json:"providers"`
-	Theme     string                      `json:"theme"`
+	// Fallback is the fallback model. On save, nil leaves it as it is.
+	Fallback *FallbackSettings `json:"fallback,omitempty"`
+	Theme    string            `json:"theme"`
 	// ComponentLibrary is the directory searched for reusable projects, on top of the ones
 	// next to the open project. It is a path, not a URL, and empty means "only the project's
 	// own neighbourhood".
 	ComponentLibrary string `json:"componentLibrary"`
-	// Currency labels the per-provider token prices; it is a label, not a conversion.
+	// Currency is the default label of token prices (a model may name its own); it is a
+	// label, not a conversion.
 	Currency string `json:"currency"`
 	// Viewport holds the display preferences of the 3D view. On save, nil leaves the saved
 	// preferences as they are (a client that does not know them cannot reset them to "off").
@@ -85,10 +113,10 @@ type Settings struct {
 }
 
 // Env variable names per provider.
-var envKeys = map[string]struct{ key, model, baseURL, effort string }{
-	ProviderOpenAI: {"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL", "OPENAI_REASONING_EFFORT"},
-	ProviderClaude: {"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_BASE_URL", ""},
-	ProviderOllama: {"", "OLLAMA_MODEL", "OLLAMA_BASE_URL", ""},
+var envKeys = map[string]struct{ key, model, baseURL, effort, ctx string }{
+	ProviderOpenAI: {"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL", "OPENAI_REASONING_EFFORT", ""},
+	ProviderClaude: {"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_BASE_URL", "", ""},
+	ProviderOllama: {"", "OLLAMA_MODEL", "OLLAMA_BASE_URL", "", "OLLAMA_NUM_CTX"},
 }
 
 // DefaultBaseURL is the base URL of a provider when none is configured.
@@ -204,23 +232,35 @@ func Current() Settings {
 	vs := Viewport()
 	s.Viewport = &vs
 	for _, p := range Providers {
-		k := envKeys[p]
-		ps := ProviderSettings{BaseURL: GetOr(k.baseURL, DefaultBaseURL(p)), Model: Get(k.model)}
-		if k.key != "" {
-			ps.APIKey = Get(k.key)
-		}
-		if k.effort != "" {
-			ps.ReasoningEffort = strings.ToLower(Get(k.effort))
-		}
-		if p == ProviderClaude && ps.Model == "" {
-			ps.Model = DefaultClaudeModel
-		}
-		pr, _ := PriceFor(p)
-		ps.InputPrice, ps.OutputPrice = formatPrice(pr.Input), formatPrice(pr.Output)
-		ps.CachedInputPrice = formatPrice(pr.CachedInput)
-		s.Providers[p] = ps
+		s.Providers[p] = providerView(ModelConfigFor(SlotPrimary, p))
 	}
+	fp, enabled, migrated := fallbackChoice()
+	fb := &FallbackSettings{Enabled: enabled, Provider: fp, Providers: map[string]ProviderSettings{},
+		Consent: FallbackConsent(), Migrated: migrated}
+	for _, p := range FallbackProviders {
+		fb.Providers[p] = providerView(ModelConfigFor(SlotFallback, p))
+	}
+	if err := ModelConfigFor(SlotFallback, fp).Complete(); err != nil {
+		fb.Problem = err.Error()
+	}
+	s.Fallback = fb
 	return s
+}
+
+// providerView renders a model configuration for the Settings screen.
+func providerView(mc ModelConfig) ProviderSettings {
+	ps := ProviderSettings{APIKey: mc.APIKey, Model: mc.Model, BaseURL: mc.BaseURL, ReasoningEffort: mc.ReasoningEffort}
+	if ps.BaseURL == "" {
+		ps.BaseURL = DefaultBaseURL(mc.Provider)
+	}
+	if k := envKeys[mc.Provider].ctx; k != "" {
+		ps.ContextLength = Get(k)
+	}
+	if !Local(mc.Provider) {
+		ps.InputPrice, ps.OutputPrice = formatPrice(mc.Price.Input), formatPrice(mc.Price.Output)
+		ps.CachedInputPrice, ps.Currency = formatPrice(mc.Price.CachedInput), mc.Currency
+	}
+	return ps
 }
 
 // Save validates s, makes it the active configuration and persists it.
@@ -253,40 +293,102 @@ func Save(s Settings) error {
 		}
 	}
 	for _, p := range Providers {
-		ps, ok := s.Providers[p]
-		if !ok {
-			continue
+		if ps, ok := s.Providers[p]; ok {
+			if err := slotValues(next, "", p, ps); err != nil {
+				return err
+			}
 		}
-		k := envKeys[p]
-		if !ValidReasoningEffort(ps.ReasoningEffort) {
-			return fmt.Errorf("unknown reasoning effort %q (use one of: %s)", ps.ReasoningEffort, strings.Join(ReasoningEfforts, ", "))
-		}
-		if u := strings.TrimSpace(ps.BaseURL); u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-			return fmt.Errorf("%s base URL must start with http:// or https://", p)
-		}
-		if k.key != "" {
-			next[k.key] = strings.TrimSpace(ps.APIKey)
-		}
-		next[k.model] = strings.TrimSpace(ps.Model)
-		next[k.baseURL] = strings.TrimSpace(ps.BaseURL)
-		if k.effort != "" {
-			next[k.effort] = ps.ReasoningEffort
-		}
-		in, err := validatePrice(p, "input", ps.InputPrice)
-		if err != nil {
-			return err
-		}
-		out, err := validatePrice(p, "output", ps.OutputPrice)
-		if err != nil {
-			return err
-		}
-		cached, err := validatePrice(p, "cached input", ps.CachedInputPrice)
-		if err != nil {
-			return err
-		}
-		pk := priceKeys[p]
-		next[pk.in], next[pk.out], next[pk.cached] = in, out, cached
 	}
+	if fb := s.Fallback; fb != nil {
+		if fb.Provider == "anthropic" {
+			fb.Provider = ProviderClaude
+		}
+		if fb.Provider != ProviderOpenAI && fb.Provider != ProviderClaude {
+			return fmt.Errorf("the fallback model must be OpenAI or Anthropic, not %q", fb.Provider)
+		}
+		consent := fb.Consent
+		if consent == "" {
+			consent = ConsentAsk
+		}
+		if consent != ConsentAsk && consent != ConsentAllow && consent != ConsentDeny {
+			return fmt.Errorf("unknown fallback consent %q", fb.Consent)
+		}
+		next[keyFallbackEnabled], next[keyFallbackProvider], next[keyFallbackConsent] = fmt.Sprint(fb.Enabled), fb.Provider, consent
+		for _, p := range FallbackProviders {
+			if ps, ok := fb.Providers[p]; ok {
+				if err := slotValues(next, FallbackPrefix, p, ps); err != nil {
+					return fmt.Errorf("fallback: %w", err)
+				}
+			}
+		}
+	}
+	if err := persist(next); err != nil {
+		return err
+	}
+	if fb := s.Fallback; fb != nil && fb.Enabled {
+		// Saved anyway, so nothing typed is lost, but reported: an enabled fallback that
+		// cannot run would otherwise only surface when a request needs it.
+		if err := ModelConfigFor(SlotFallback, fb.Provider).Complete(); err != nil {
+			return fmt.Errorf("settings saved, but the fallback model cannot be used: %w", err)
+		}
+	}
+	return nil
+}
+
+// slotValues adds one provider's configuration in a slot (prefix "" = primary) to next.
+func slotValues(next map[string]string, prefix, p string, ps ProviderSettings) error {
+	k := envKeys[p]
+	if !ValidReasoningEffort(ps.ReasoningEffort) {
+		return fmt.Errorf("unknown reasoning effort %q (use one of: %s)", ps.ReasoningEffort, strings.Join(ReasoningEfforts, ", "))
+	}
+	if u := strings.TrimSpace(ps.BaseURL); u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		return fmt.Errorf("%s base URL must start with http:// or https://", p)
+	}
+	if k.key != "" {
+		next[prefix+k.key] = strings.TrimSpace(ps.APIKey)
+	}
+	next[prefix+k.model] = strings.TrimSpace(ps.Model)
+	next[prefix+k.baseURL] = strings.TrimSpace(ps.BaseURL)
+	if k.effort != "" {
+		next[prefix+k.effort] = ps.ReasoningEffort
+	}
+	if k.ctx != "" {
+		v := strings.TrimSpace(ps.ContextLength)
+		if v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 || (n > 0 && n < MinContextLength) {
+				return fmt.Errorf("%s context window %q must be a number of tokens of at least %d (or 0 for the server's default)", p, ps.ContextLength, MinContextLength)
+			}
+		}
+		next[prefix+k.ctx] = v
+	}
+	if Local(p) {
+		return nil // local models are not priced: whatever an older client sends is ignored
+	}
+	in, err := validatePrice(p, "input", ps.InputPrice)
+	if err != nil {
+		return err
+	}
+	out, err := validatePrice(p, "output", ps.OutputPrice)
+	if err != nil {
+		return err
+	}
+	cached, err := validatePrice(p, "cached input", ps.CachedInputPrice)
+	if err != nil {
+		return err
+	}
+	cur := strings.ToUpper(strings.TrimSpace(ps.Currency))
+	if len(cur) > 8 {
+		return fmt.Errorf("currency %q is too long (use a short code such as USD)", ps.Currency)
+	}
+	pk := priceKeys[p]
+	next[prefix+pk.in], next[prefix+pk.out], next[prefix+pk.cached] = in, out, cached
+	next[prefix+currencyKeys[p]] = cur
+	return nil
+}
+
+// persist merges values into the saved settings and makes them active.
+func persist(next map[string]string) error {
 	mu.Lock()
 	defer mu.Unlock()
 	merged := map[string]string{}

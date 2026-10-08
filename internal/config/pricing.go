@@ -39,7 +39,8 @@ const DefaultCurrency = "USD"
 
 const keyCurrency = "SIMONCAD_CURRENCY"
 
-// Price env variable names per provider (per million tokens).
+// Price env variable names per provider (per million tokens). The Ollama names are only
+// listed so older settings files parse; local models are never priced.
 var priceKeys = map[string]struct{ in, out, cached string }{
 	ProviderOpenAI: {"OPENAI_INPUT_PRICE", "OPENAI_OUTPUT_PRICE", "OPENAI_CACHED_INPUT_PRICE"},
 	ProviderClaude: {"ANTHROPIC_INPUT_PRICE", "ANTHROPIC_OUTPUT_PRICE", "ANTHROPIC_CACHED_INPUT_PRICE"},
@@ -51,14 +52,14 @@ func Currency() string {
 	return strings.ToUpper(GetOr(keyCurrency, DefaultCurrency))
 }
 
-// PriceFor returns the configured price of a provider's tokens. The second result is false
-// when no price is configured, which is what tells the caller to report tokens only.
+// PriceFor returns the configured price of a provider's primary-slot model. The second
+// result is false when no price is configured, which is what tells the caller to report
+// tokens only, and always for local models, which cost nothing per token.
 func PriceFor(provider string) (Price, bool) {
-	k, ok := priceKeys[provider]
-	if !ok {
+	if _, ok := priceKeys[provider]; !ok || Local(provider) {
 		return Price{}, false
 	}
-	p := Price{Input: parsePrice(Get(k.in)), Output: parsePrice(Get(k.out)), CachedInput: parsePrice(Get(k.cached))}
+	p := ModelConfigFor(SlotPrimary, provider).Price
 	return p, p.Set()
 }
 

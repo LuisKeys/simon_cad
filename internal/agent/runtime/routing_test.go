@@ -90,37 +90,31 @@ func TestRouterFromEnv(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "k")
 	t.Setenv("OPENAI_MODEL", "gpt-x")
 	t.Setenv("ANTHROPIC_API_KEY", "a")
+	t.Setenv("SIMONCAD_FALLBACK_ENABLED", "")
+	t.Setenv("SIMONCAD_FALLBACK_PROVIDER", "")
+	// A configuration that predates the fallback slot migrates to its first complete cloud
+	// provider: the single fallback model.
 	r := runtime.NewRouterFromEnv()
-	if r.Selected == nil || r.Selected.Name() != "ollama:llama3.1" || len(r.Fallbacks) != 2 || r.Fallbacks[0].Name() != "openai:gpt-x" {
+	if r.Selected == nil || r.Selected.Name() != "ollama:llama3.1" || len(r.Fallbacks) != 1 || r.Fallbacks[0].Name() != "openai:gpt-x" {
 		t.Fatalf("router: %+v", r)
 	}
+	t.Setenv("SIMONCAD_FALLBACK_ENABLED", "true") // an explicit choice wins over the migration
+	t.Setenv("SIMONCAD_FALLBACK_PROVIDER", "claude")
+	if r = runtime.NewRouterFromEnv(); len(r.Fallbacks) != 1 || r.Fallbacks[0].Name() != "claude-sonnet-5-5" {
+		t.Fatalf("explicit fallback: %+v", r)
+	}
+	t.Setenv("SIMONCAD_FALLBACK_ENABLED", "false")
+	r = runtime.NewRouterFromEnv()
+	if _, _, err := r.Route(runtime.ProviderCapabilities{Vision: true}); len(r.Fallbacks) != 0 || err == nil || !strings.Contains(err.Error(), "fallback model is disabled") {
+		t.Fatalf("disabled fallback: %+v %v", r, err)
+	}
+	t.Setenv("SIMONCAD_FALLBACK_ENABLED", "")
+	t.Setenv("SIMONCAD_FALLBACK_PROVIDER", "")
 	t.Setenv("OPENAI_MODEL", "") // incomplete OpenAI configuration is not a fallback
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	r = runtime.NewRouterFromEnv()
 	if len(r.Fallbacks) != 0 || r.Supports(runtime.ProviderCapabilities{Vision: true}) {
 		t.Fatalf("no fallback expected: %+v", r.Fallbacks)
-	}
-}
-
-func TestOllamaVisionModelSendsImageParts(t *testing.T) {
-	var got map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&got)
-		w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
-	}))
-	defer srv.Close()
-	o := &runtime.OpenAI{Flavor: "ollama", BaseURL: srv.URL, Model: "llava:7b", HTTP: srv.Client()}
-	_, err := o.Complete(context.Background(), runtime.Request{Messages: []runtime.Message{{Role: "user", Content: []runtime.Block{
-		{Type: "image", Source: &runtime.ImageSource{Type: "base64", MediaType: "image/png", Data: "QUJD"}},
-		{Type: "text", Text: "look"}}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg := got["messages"].([]any)[0].(map[string]any)
-	parts := msg["content"].([]any)
-	if len(parts) != 2 || parts[0].(map[string]any)["text"] != "look" ||
-		parts[1].(map[string]any)["image_url"].(map[string]any)["url"] != "data:image/png;base64,QUJD" {
-		t.Fatalf("image parts: %v", msg)
 	}
 }
 

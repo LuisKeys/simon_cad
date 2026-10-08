@@ -114,7 +114,7 @@ func TestPDFIsExtractedByADocumentCapableModel(t *testing.T) {
 	ollama := &fake{name: "ollama:llama3.1", caps: textOnly}
 	claude := &fake{name: "claude", caps: all, reply: "# Bracket\nThickness 4 mm"}
 	p := &attachments.Processor{Router: &runtime.Router{Selected: ollama, Fallbacks: []runtime.Provider{claude}}}
-	text, model, err := p.ExtractDocument(context.Background(), "bracket.pdf", []byte("%PDF-1.4 ..."))
+	text, model, _, err := p.ExtractDocument(context.Background(), "bracket.pdf", []byte("%PDF-1.4 ..."))
 	if err != nil || model != "claude" || !strings.Contains(text, "Thickness 4 mm") {
 		t.Fatalf("extract: %q %q %v", text, model, err)
 	}
@@ -122,7 +122,7 @@ func TestPDFIsExtractedByADocumentCapableModel(t *testing.T) {
 	if doc.Type != "document" || doc.Title != "bracket.pdf" || doc.Source.MediaType != "application/pdf" {
 		t.Fatalf("document block: %+v", doc)
 	}
-	if _, _, err := p.ExtractDocument(context.Background(), "notes.txt", []byte("plain")); err == nil {
+	if _, _, _, err := p.ExtractDocument(context.Background(), "notes.txt", []byte("plain")); err == nil {
 		t.Fatal("only PDFs are extracted")
 	}
 }

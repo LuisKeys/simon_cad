@@ -10,7 +10,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,6 +93,18 @@ type Service struct {
 	turnUsage    runtime.Usage
 	sessionUsage runtime.Usage
 	turns        int
+	// sessionConsent is a remote-fallback authorization given for this session only.
+	sessionConsent string
+	// announced holds the fallback models already named in the conversation this turn.
+	announced map[string]bool
+
+	// routeMu guards the routing record, which the router reports from model calls made
+	// while mu is released (see unlocking).
+	routeMu sync.Mutex
+	// model is the model serving the running request, or the one that served the last.
+	model *runtime.RouteEvent
+	// fallbacks are the fallback routes of the running request, for the record.
+	fallbacks []runtime.RouteEvent
 }
 
 // ChatMessage is one entry of the conversation panel.
@@ -442,6 +456,111 @@ func (s *Service) Preview(csID string) (*Ghost, error) {
 
 // ---- agent ----------------------------------------------------------------------------
 
+// router builds the model router of one request with prov as its primary model, the
+// session's fallback authorization and the route observer. Caller holds mu.
+func (s *Service) router(prov runtime.Provider) *runtime.Router {
+	r := s.NewRouter()
+	r.Selected = prov
+	if (r.Consent == "" || r.Consent == config.ConsentAsk) && s.sessionConsent != "" {
+		r.Consent = s.sessionConsent
+	}
+	r.OnRoute = s.onRoute
+	return r
+}
+
+// onRoute records which model serves a call and tells the front end (the Simon Agent model
+// indicator). It is called from model calls, while mu is released.
+func (s *Service) onRoute(ev runtime.RouteEvent) {
+	s.routeMu.Lock()
+	defer s.routeMu.Unlock()
+	if ev.Fallback {
+		known := false
+		for _, f := range s.fallbacks {
+			known = known || f == ev
+		}
+		if !known {
+			s.fallbacks = append(s.fallbacks, ev)
+		}
+	}
+	if s.model != nil && *s.model == ev {
+		return
+	}
+	s.model = &ev
+	s.hub.Publish(Notice{Kind: "model", Model: &ev})
+}
+
+// beginRoutes starts the routing record of a request. Caller holds mu.
+func (s *Service) beginRoutes() {
+	s.routeMu.Lock()
+	s.fallbacks = nil
+	s.routeMu.Unlock()
+	s.announced = map[string]bool{}
+}
+
+// announceFallback names a fallback model in the conversation once per request. Caller
+// holds mu.
+func (s *Service) announceFallback(label, reason string) {
+	if s.announced == nil {
+		s.announced = map[string]bool{}
+	}
+	if s.announced[label] {
+		return
+	}
+	s.announced[label] = true
+	text := "Fallback: " + label
+	if reason != "" {
+		text += " — " + reason
+	}
+	s.say("system", text, "", true, "")
+}
+
+// endRoutes closes the routing record of a request that consumed u: every fallback is
+// named in the conversation and logged with the model asked for, the model used, why, and
+// what it consumed. Caller holds mu.
+func (s *Service) endRoutes(u runtime.Usage) {
+	s.routeMu.Lock()
+	fbs := s.fallbacks
+	s.fallbacks = nil
+	s.routeMu.Unlock()
+	for _, ev := range fbs {
+		s.announceFallback(ev.Label(), ev.Reason)
+		var used runtime.Usage
+		if m, ok := u.ByModel[runtime.ModelKey(ev.Provider, ev.Model)]; ok {
+			used = runtime.Usage{InputTokens: m.InputTokens, CachedInputTokens: m.CachedInputTokens, OutputTokens: m.OutputTokens,
+				ByModel: map[string]runtime.ModelUsage{runtime.ModelKey(ev.Provider, ev.Model): m}}
+		}
+		cost := runtime.Estimate(used).String()
+		if cost == "" {
+			cost = "not priced"
+		}
+		log.Printf("model fallback: requested=%q used=%q reason=%q tokens=%d cost=%s", ev.Requested, ev.Label(), ev.Reason, used.Tokens(), cost)
+	}
+}
+
+// AuthorizeFallback records the answer to the remote fallback warning. remember saves it
+// in the settings; otherwise an authorization lasts for this session and a refusal only
+// cancels the request that asked.
+func (s *Service) AuthorizeFallback(allow, remember bool) error {
+	v := config.ConsentDeny
+	if allow {
+		v = config.ConsentAllow
+	}
+	if remember {
+		if err := config.SetFallbackConsent(v); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if allow {
+		s.sessionConsent = config.ConsentAllow
+	} else {
+		s.sessionConsent = ""
+	}
+	s.hub.Publish(Notice{Kind: "state"})
+	return nil
+}
+
 // unlocking releases the service lock while the model thinks, so reads stay responsive.
 type unlocking struct {
 	runtime.Provider
@@ -605,13 +724,18 @@ func (s *Service) AddAttachment(name string, data []byte) (Spec, error) {
 			return Spec{}, fmt.Errorf("document is larger than %d MB", maxDocumentBytes>>20)
 		}
 		s.mu.Lock()
-		router, prov := s.NewRouter(), (runtime.Provider)(nil)
+		var prov runtime.Provider
 		if p, err := s.NewProvider(); err == nil {
 			prov = p
 		}
+		router := s.router(prov)
 		s.mu.Unlock()
-		router.Selected = prov
-		text, model, err := (&attachments.Processor{Router: router}).ExtractDocument(context.Background(), name, data)
+		text, model, used, err := (&attachments.Processor{Router: router}).ExtractDocument(context.Background(), name, data)
+		s.mu.Lock()
+		s.recordUsage(used) // spent whether or not the extraction succeeded
+		s.endRoutes(used)
+		s.hub.Publish(Notice{Kind: "state"})
+		s.mu.Unlock()
 		if err != nil {
 			return Spec{}, err
 		}
@@ -703,15 +827,22 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		return err
 	}
 	// Images the selected provider cannot see go to a vision-capable model first (attachment
-	// processor + model router); the selected provider stays the CAD agent.
+	// processor + model router); the selected provider stays the CAD agent. The CAD agent
+	// itself runs on the router's agent provider, which may hand the request over to the
+	// fallback model once if the primary becomes unavailable.
+	router := s.router(prov)
 	var interp runtime.ImageInterpreter
 	if len(images) > 0 && !runtime.CapabilitiesOf(prov).Vision {
-		router := s.NewRouter()
-		router.Selected = prov
 		proc := &attachments.Processor{Router: router, NoThinking: !thinking,
 			Wrap: func(p runtime.Provider) runtime.Provider { return unlocking{p, &s.mu} },
 			OnRoute: func(kind attachments.Kind, used string) {
-				s.say("system", fmt.Sprintf("%s cannot read images; the image is interpreted by %s.", prov.Name(), used), "", true, "")
+				label := used
+				for _, fb := range router.Fallbacks {
+					if fb.Name() == used {
+						label = runtime.Label(fb)
+					}
+				}
+				s.announceFallback(label, fmt.Sprintf("%s cannot read images; the image is interpreted by %s.", prov.Name(), used))
 			}}
 		if err := proc.Available(attachments.KindImage); err != nil {
 			s.mu.Unlock()
@@ -722,6 +853,7 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 	s.keepDraft() // a new request implicitly accepts the previous batch
 	s.busy = true
 	s.agentState = &workflow.Event{State: workflow.StateIdle}
+	s.beginRoutes()
 	prior := s.history()
 	s.sayWith("user", text, "", true, "", append([]string(nil), images...))
 	s.chat[len(s.chat)-1].Docs = s.newSpecs() // the message shows the documents it introduced
@@ -740,7 +872,7 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		caps := runtime.SelectCaps(s.app, images, geo.New(), vis.New(), visualcap.New())
-		rt := &runtime.Runtime{Provider: unlocking{prov, &s.mu}, Caps: caps, History: prior, NoThinking: !thinking,
+		rt := &runtime.Runtime{Provider: unlocking{router.Agent(), &s.mu}, Caps: caps, History: prior, NoThinking: !thinking,
 			ImageIDs: images, Interpreter: interp, Reference: s.specContext()}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
@@ -782,6 +914,7 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		}
 		// Usage is reported even when the turn failed: the tokens were spent either way.
 		s.recordUsage(res.Usage)
+		s.endRoutes(res.Usage)
 		s.sayUsage(res.Usage)
 		if len(s.draft) > 0 {
 			s.say("draft", fmt.Sprintf("%d step(s) applied as a draft — keep or discard them.", len(s.draft)), "", true, "")
@@ -1576,6 +1709,10 @@ type State struct {
 	Stale    int  `json:"stale_components"`
 	// Usage is token consumption (last turn and session) with its cost estimate.
 	Usage UsageView `json:"usage"`
+	// Model is the model serving the running request, or the one that served the last;
+	// Primary is the configured primary model (shown before any request).
+	Model   *runtime.RouteEvent `json:"model,omitempty"`
+	Primary *runtime.RouteEvent `json:"primary,omitempty"`
 }
 
 // Features says which attachment workflows can work with the configured providers. It
@@ -1590,15 +1727,24 @@ type Features struct {
 }
 
 func (s *Service) features() Features {
-	router := s.NewRouter()
+	var prov runtime.Provider
 	if p, err := s.NewProvider(); err == nil {
-		router.Selected = p
+		prov = p
 	}
-	proc := &attachments.Processor{Router: router}
-	f := Features{Images: proc.Available(attachments.KindImage) == nil, Documents: proc.Available(attachments.KindDocument) == nil}
+	proc := &attachments.Processor{Router: s.router(prov)}
+	// A remote fallback that still needs the user's authorization is available: the user is
+	// asked when a request needs it.
+	ok := func(k attachments.Kind) bool {
+		err := proc.Available(k)
+		return err == nil || errors.Is(err, runtime.ErrConsentRequired)
+	}
+	f := Features{Images: ok(attachments.KindImage), Documents: ok(attachments.KindDocument)}
 	f.Refinement = f.Images
 	if !f.Images {
-		f.ImageReason = "Image features need a vision model: set OPENAI_API_KEY and OPENAI_MODEL or ANTHROPIC_API_KEY (or use a multimodal Ollama model)."
+		f.ImageReason = "Image features need a vision model: configure a Fallback Model (OpenAI or Anthropic) in Settings, or use a multimodal Ollama model."
+		if err := proc.Available(attachments.KindImage); err != nil {
+			f.ImageReason = err.Error()
+		}
 	}
 	return f
 }
@@ -1628,6 +1774,16 @@ func (s *Service) State() (*State, error) {
 	if p, err := runtime.ProviderNameFromEnv(); err == nil {
 		st.Provider = p
 	}
+	if p, err := s.NewProvider(); err == nil {
+		prov, model := runtime.Identify(p)
+		st.Primary = &runtime.RouteEvent{Provider: prov, Model: model, Local: runtime.IsLocal(p)}
+	}
+	s.routeMu.Lock()
+	if s.model != nil {
+		m := *s.model
+		st.Model = &m
+	}
+	s.routeMu.Unlock()
 	st.AgentState, st.Features = s.agentState, s.features()
 	st.Usage = s.usageView()
 	if s.refineCancel != nil {

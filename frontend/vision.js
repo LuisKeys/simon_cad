@@ -33,7 +33,7 @@ async function prepare(file) {
 }
 
 /**
- * ctx: { $, toast, getState(), getSelection(), showPreview(id), refresh() }
+ * ctx: { $, toast, getState(), getSelection(), showPreview(id), refresh(), withFallbackConsent(run) }
  * Returns hooks the main app calls: attachmentIds(), clearAttachments(), onState(st),
  * proposalCards(st), thumbs(ids, docs), uploading().
  */
@@ -68,7 +68,7 @@ export function initVision(ctx) {
     const d = { key: ++seq, name: file.name || 'document', size: file.size, status: 'uploading' };
     V.docs.push(d); renderSpecs(ctx.getState());
     try {
-      await uploadSpec(file);
+      await ctx.withFallbackConsent(() => uploadSpec(file));
       V.docs = V.docs.filter((x) => x !== d);
       ctx.refresh();
     } catch (e) {

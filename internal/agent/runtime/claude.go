@@ -24,24 +24,30 @@ type Claude struct {
 	HTTP    *http.Client
 }
 
-// NewClaudeFromEnv reads ANTHROPIC_API_KEY (OS-keychain storage arrives with the desktop app),
-// ANTHROPIC_BASE_URL and ANTHROPIC_MODEL.
+// NewClaudeFromEnv reads the primary-slot Anthropic configuration: ANTHROPIC_API_KEY
+// (OS-keychain storage arrives with the desktop app), ANTHROPIC_BASE_URL and ANTHROPIC_MODEL.
 func NewClaudeFromEnv() (*Claude, error) {
-	key := config.Get("ANTHROPIC_API_KEY")
-	if key == "" {
+	return newClaude(config.ModelConfigFor(config.SlotPrimary, ProviderClaude))
+}
+
+func newClaude(mc config.ModelConfig) (*Claude, error) {
+	if mc.APIKey == "" {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set; set it to use the live agent (recorded mode needs no key)")
 	}
-	c := &Claude{APIKey: key, BaseURL: "https://api.anthropic.com", Model: DefaultModel, HTTP: &http.Client{Timeout: 120 * time.Second}}
-	if u := config.Get("ANTHROPIC_BASE_URL"); u != "" {
-		c.BaseURL = strings.TrimRight(u, "/")
+	c := &Claude{APIKey: mc.APIKey, BaseURL: "https://api.anthropic.com", Model: DefaultModel, HTTP: &http.Client{Timeout: 120 * time.Second}}
+	if mc.BaseURL != "" {
+		c.BaseURL = strings.TrimRight(mc.BaseURL, "/")
 	}
-	if m := config.Get("ANTHROPIC_MODEL"); m != "" {
-		c.Model = m
+	if mc.Model != "" {
+		c.Model = mc.Model
 	}
 	return c, nil
 }
 
 func (c *Claude) Name() string { return c.Model }
+
+// Identity names the provider and model (see Identify).
+func (c *Claude) Identity() (string, string) { return ProviderClaude, c.Model }
 
 type apiTool struct {
 	Name        string         `json:"name"`
@@ -172,7 +178,7 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 		return &Response{Content: out.Content, StopReason: out.StopReason,
 			Usage: usageFor(ProviderClaude, model, in, out.Usage.CacheRead, out.Usage.OutputTokens)}, nil
 	}
-	return nil, fmt.Errorf("anthropic API unavailable after retries: %w", lastErr)
+	return nil, unavailable(fmt.Errorf("anthropic API unavailable after retries: %w", lastErr))
 }
 
 func truncate(s string, n int) string {

@@ -10,12 +10,15 @@ export async function api(path, body) {
   });
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
-  if (!res.ok) {
-    const err = new Error(data?.error ?? `${path}: HTTP ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
+  if (!res.ok) throw failure(data, res.status, `${path}: HTTP ${res.status}`);
   return data;
+}
+
+// failure turns an error reply into an Error that keeps its status, its code (e.g. "fallback_consent") and its details.
+function failure(data, status, fallback) {
+  const err = new Error(data?.error ?? fallback);
+  err.status = status; err.code = data?.code; err.data = data;
+  return err;
 }
 
 // Uploads raw image bytes (PNG/JPEG/WebP); resolves to {id, width, height, media_type, retained}.
@@ -32,7 +35,7 @@ export async function uploadSpec(file) {
   const res = await fetch(`/api/spec?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'X-Simon-Token': token }, body: file });
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
-  if (!res.ok) throw new Error(data?.error ?? `document upload failed (HTTP ${res.status})`);
+  if (!res.ok) throw failure(data, res.status, `document upload failed (HTTP ${res.status})`);
   return data;
 }
 

@@ -25,7 +25,7 @@
   <button id="btn-visual" class="tbtn" type="button" data-icon="compare" title="Visual comparison: reference vs. render, scores, iterations and visual refinement"><span>Visual</span></button>
   <a id="btn-help" class="tbtn" href="help.html" target="_blank" rel="noopener" data-icon="help" title="Help, features and example prompts (opens in a new tab)"><span>Help</span></a>
   <button id="btn-components" class="tbtn" type="button" data-icon="component" aria-expanded="false" aria-controls="components" title="Components"><span>Components</span></button>
-  <button id="btn-settings" class="tbtn" type="button" data-icon="settings" title="Settings: AI provider, model, API key and theme"><span>Settings</span></button>
+  <button id="btn-settings" class="tbtn" type="button" data-icon="settings" title="Settings: primary and fallback models, API keys and theme"><span>Settings</span></button>
   <button id="btn-more" class="ibtn" type="button" data-icon="more" aria-haspopup="menu" aria-label="More" title="More: command palette, agent level"></button>
   <button id="btn-panel-right" class="ibtn" type="button" data-icon="panel-right" aria-label="Show or hide the Simon Agent panel" title="Simon Agent" aria-pressed="true"></button>
 </header>
@@ -75,7 +75,7 @@
   <div id="split-right" class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the Simon Agent panel" tabindex="0" title="Drag to resize · double-click to reset"></div>
   <aside id="right" aria-label="Simon Agent">
     <section class="grow">
-      <h2>Simon Agent <button id="btn-clear" type="button" class="linkbtn" data-icon="trash" aria-label="Clear the conversation" title="Clear the conversation"></button></h2>
+      <h2>Simon Agent <span id="agent-model" class="agent-model" hidden></span><button id="btn-clear" type="button" class="linkbtn" data-icon="trash" aria-label="Clear the conversation" title="Clear the conversation"></button></h2>
       <div id="chat" class="chat" aria-live="polite"></div>
     </section>
     <form id="composer" class="composer" autocomplete="off">
@@ -131,6 +131,7 @@
   <form class="dialog small" id="confirm-form" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
     <div id="confirm-title"></div>
     <div id="confirm-body" class="muted"></div>
+    <label id="confirm-remember" class="think" hidden><input type="checkbox" id="confirm-remember-box" checked> Remember my choice</label>
     <div class="row"><button type="submit" class="danger" id="confirm-ok">Delete</button><button type="button" id="confirm-cancel">Cancel</button></div>
   </form>
 </div>

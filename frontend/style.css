@@ -264,6 +264,13 @@ button.ghost.wide { width: 100%; margin-top: 8px; }
 .composer .think { font-size: 12px; color: var(--faint); display: flex; gap: 8px; align-items: center; cursor: pointer; min-height: 28px; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .usage { font-size: 11px; line-height: 1.3; padding: 0 2px; cursor: help; }
+/* Simon Agent header: the model serving the request (or the last one); dimmed before any request. */
+.agent-model { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; font-size: 10.5px; font-weight: 500;
+  letter-spacing: 0; text-transform: none; color: var(--muted); white-space: nowrap; cursor: default; }
+.agent-model .ic { width: 12px; height: 12px; flex: none; }
+.agent-model span { overflow: hidden; text-overflow: ellipsis; }
+.agent-model.idle { opacity: .7; }
+.agent-model.fallback { color: var(--accent); }
 .chip { display: inline-flex; gap: 4px; align-items: center; background: var(--accent-soft); color: var(--sel); border-radius: 12px; padding: 2px 4px 2px 10px; font-size: 12px; max-width: 100%; }
 .chip button { border: 0; background: none; padding: 0 6px; min-height: 24px; color: inherit; }
 .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -472,6 +479,8 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .dialog.settings { width: min(480px, calc(100vw - 24px)); overflow: auto; }
 .dialog.settings .dtitle { font-size: 16px; font-weight: 600; }
 .dialog.settings h2 { margin: 8px 0 0; }
+.dialog.settings h3 { margin: 4px 0 0; font-size: 11px; font-weight: 600; color: var(--muted); }
+.sgroup { display: flex; flex-direction: column; gap: 10px; }
 .srow { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: center; }
 .shint { font-size: 11px; line-height: 1.45; margin: -2px 0 2px; }
 .srow label { color: var(--muted); font-size: 12px; }

@@ -103,9 +103,18 @@ func (p *Processor) route(kind Kind) (runtime.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	if fallback && p.OnRoute != nil {
-		p.OnRoute(kind, prov.Name())
+	reason := ""
+	if fallback {
+		sel := "the primary model"
+		if p.Router.Selected != nil {
+			sel = p.Router.Selected.Name()
+		}
+		reason = fmt.Sprintf("%s cannot read %s attachments", sel, strings.ToLower(string(kind)))
+		if p.OnRoute != nil {
+			p.OnRoute(kind, prov.Name())
+		}
 	}
+	prov = p.Router.Observe(prov, fallback, reason)
 	if p.Wrap != nil {
 		prov = p.Wrap(prov)
 	}
@@ -172,14 +181,14 @@ func (interpreter) BuildContext(a *app.App) (string, error) { return vis.New().B
 const maxDocumentTokens = 8192
 
 // ExtractDocument turns a PDF into plain text (with drawings described) on a provider that
-// accepts documents. It returns the text and the model that produced it.
-func (p *Processor) ExtractDocument(ctx context.Context, name string, data []byte) (string, string, error) {
+// accepts documents. It returns the text, the model that produced it and what it consumed.
+func (p *Processor) ExtractDocument(ctx context.Context, name string, data []byte) (string, string, runtime.Usage, error) {
 	if k := Classify(name, data); k != KindDocument {
-		return "", "", fmt.Errorf("%s is not a PDF document", name)
+		return "", "", runtime.Usage{}, fmt.Errorf("%s is not a PDF document", name)
 	}
 	prov, err := p.route(KindDocument)
 	if err != nil {
-		return "", "", err
+		return "", "", runtime.Usage{}, err
 	}
 	req := runtime.Request{NoThinking: true, MaxTokens: maxDocumentTokens, Messages: []runtime.Message{{Role: "user", Content: []runtime.Block{
 		{Type: "document", Title: name, Source: &runtime.ImageSource{Type: "base64", MediaType: "application/pdf", Data: base64.StdEncoding.EncodeToString(data)}},
@@ -187,11 +196,11 @@ func (p *Processor) ExtractDocument(ctx context.Context, name string, data []byt
 	}}}}
 	resp, err := prov.Complete(ctx, req)
 	if err != nil {
-		return "", "", err
+		return "", "", runtime.Usage{}, err
 	}
 	text := strings.TrimSpace(resp.Text())
 	if text == "" {
-		return "", "", fmt.Errorf("%s: no content could be extracted", name)
+		return "", "", resp.Usage, fmt.Errorf("%s: no content could be extracted", name)
 	}
-	return text, prov.Name(), nil
+	return text, prov.Name(), resp.Usage, nil
 }

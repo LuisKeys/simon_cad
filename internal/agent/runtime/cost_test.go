@@ -86,13 +86,56 @@ func TestEstimateIsPartialWhenOneModelHasNoPrice(t *testing.T) {
 	t.Setenv("ANTHROPIC_OUTPUT_PRICE", "15")
 	var u Usage
 	u.Add(usageFor(ProviderClaude, "sonnet", 1_000_000, 0, 0))
-	u.Add(usageFor(ProviderOllama, "llama", 500, 0, 500))
+	u.Add(usageFor(ProviderOpenAI, "gpt-x", 500, 0, 500))
 	c := Estimate(u)
 	if !c.Known || !c.Partial || c.Amount != 3 {
 		t.Fatalf("partial cost: %+v", c)
 	}
-	if !strings.Contains(c.String(), "partial: no price for llama") {
+	if !strings.Contains(c.String(), "partial: no price for gpt-x") {
 		t.Fatalf("string = %q", c.String())
+	}
+}
+
+// Local models are not spend: their tokens are reported, never priced, and do not make a
+// priced estimate "partial" — even when an older settings file still holds Ollama prices.
+func TestLocalUsageIsNeverCosted(t *testing.T) {
+	noPrices(t)
+	t.Setenv("ANTHROPIC_INPUT_PRICE", "3")
+	t.Setenv("OLLAMA_INPUT_PRICE", "100")
+	var u Usage
+	u.Add(usageFor(ProviderOllama, "llama", 1_000_000, 0, 500))
+	if c := Estimate(u); c.Known || c.Partial || c.Amount != 0 || c.LocalTokens != 1_000_500 || len(c.Unpriced) != 0 {
+		t.Fatalf("local only: %+v", c)
+	}
+	if r := Report(u); !strings.Contains(r, "local model, no cost") {
+		t.Fatalf("report = %q", r)
+	}
+	u.Add(usageFor(ProviderClaude, "claude-sonnet-5-5", 1_000_000, 0, 0))
+	c := Estimate(u)
+	if !c.Known || c.Partial || c.Amount != 3 || c.CloudTokens != 1_000_000 {
+		t.Fatalf("mixed: %+v", c)
+	}
+	if r := Report(u); !strings.Contains(r, "est. USD 3.0000 for 1000000 cloud tokens; 1000500 local tokens, no cost") {
+		t.Fatalf("report = %q", r)
+	}
+}
+
+// Each model is priced by the slot that configures it: a fallback running another model of
+// the same provider uses its own prices, not the primary's.
+func TestEstimateUsesTheModelThatRan(t *testing.T) {
+	noPrices(t)
+	t.Setenv("SIMONCAD_PROVIDER", "openai")
+	t.Setenv("OPENAI_MODEL", "gpt-small")
+	t.Setenv("OPENAI_INPUT_PRICE", "1")
+	t.Setenv("SIMONCAD_FALLBACK_OPENAI_MODEL", "gpt-big")
+	t.Setenv("SIMONCAD_FALLBACK_OPENAI_INPUT_PRICE", "10")
+	t.Setenv("SIMONCAD_FALLBACK_OPENAI_CURRENCY", "eur")
+	var u Usage
+	u.Add(usageFor(ProviderOpenAI, "gpt-small", 1_000_000, 0, 0))
+	u.Add(usageFor(ProviderOpenAI, "gpt-big", 1_000_000, 0, 0))
+	c := Estimate(u)
+	if !c.Known || c.Amounts["USD"] != 1 || c.Amounts["EUR"] != 10 || c.String() != "EUR 10.0000 + USD 1.0000" {
+		t.Fatalf("per-model prices: %+v %q", c, c.String())
 	}
 }
 

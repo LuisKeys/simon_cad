@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/vision"
 )
@@ -70,6 +72,14 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func fail(w http.ResponseWriter, err error) {
+	// A request that needs the remote fallback the user has not authorized yet: the front
+	// end asks (Allow / Cancel) and sends it again.
+	var ce *runtime.ConsentError
+	if errors.As(err, &ce) && !ce.Declined {
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": err.Error(), "code": "fallback_consent",
+			"selected": ce.Selected, "fallback": ce.Fallback})
+		return
+	}
 	code := http.StatusBadRequest
 	if err == ErrBusy {
 		code = http.StatusConflict
@@ -305,6 +315,17 @@ func (s *Server) routes() {
 			return
 		}
 		writeJSON(w, http.StatusOK, config.Current())
+	})
+	m.HandleFunc("/api/fallback/consent", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Allow    bool `json:"allow"`
+			Remember bool `json:"remember"`
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.AuthorizeFallback(in.Allow, in.Remember))
 	})
 	m.HandleFunc("/api/level", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

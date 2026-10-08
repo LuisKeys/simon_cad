@@ -48,14 +48,20 @@ func (s *Service) RunRefinement(req RefineRequest) error {
 		s.mu.Unlock()
 		return err
 	}
-	router := s.NewRouter()
-	router.Selected = prov
-	vision, _, err := router.Route(runtime.ProviderCapabilities{Vision: true})
+	router := s.router(prov)
+	vision, visionFallback, err := router.Route(runtime.ProviderCapabilities{Vision: true})
 	if err != nil {
 		s.mu.Unlock()
 		return err
 	}
+	visionReason := ""
+	if visionFallback {
+		visionReason = prov.Name() + " cannot read images; the visual critique runs on " + vision.Name()
+	}
+	vision = router.Observe(vision, visionFallback, visionReason)
+	agent := router.Agent() // builds the model; may hand over to the fallback once
 	s.keepDraft()
+	s.beginRoutes()
 	s.busy = true
 	ctx, cancel := context.WithCancel(context.Background())
 	s.refineCancel = cancel
@@ -80,7 +86,7 @@ func (s *Service) RunRefinement(req RefineRequest) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		wrap := func(p runtime.Provider) runtime.Provider { return unlocking{p, &s.mu} }
-		b := &refine.Builder{Provider: wrap(prov), NoThinking: !req.Thinking}
+		b := &refine.Builder{Provider: wrap(agent), NoThinking: !req.Thinking}
 		b.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			msg := o.Message
 			if o.Error != "" {
@@ -92,10 +98,11 @@ func (s *Service) RunRefinement(req RefineRequest) error {
 			}
 			s.say("tool", msg, name, o.OK, cs)
 		}
-		if vision.Name() != prov.Name() {
-			s.say("system", fmt.Sprintf("Visual critique and reference analysis use %s; %s builds the CAD model.", vision.Name(), prov.Name()), "", true, "")
+		if visionFallback {
+			s.announceFallback(runtime.Label(vision),
+				fmt.Sprintf("visual critique and reference analysis use %s; %s builds the CAD model.", vision.Name(), prov.Name()))
 		}
-		ctrl := &refine.Controller{App: s.app, Analyzer: &refine.Analyzer{Vision: wrap(vision)}, Planner: &refine.Planner{Provider: wrap(prov)},
+		ctrl := &refine.Controller{App: s.app, Analyzer: &refine.Analyzer{Vision: wrap(vision)}, Planner: &refine.Planner{Provider: wrap(agent)},
 			Builder: b, Critic: &refine.VisionCritic{Vision: wrap(vision)}, MaxIterations: req.MaxIterations,
 			OnEvent: func(ev refine.Event) {
 				s.refineState = &ev
@@ -114,6 +121,7 @@ func (s *Service) RunRefinement(req RefineRequest) error {
 		}
 		u := ctrl.Usage() // also counted when the run failed or was stopped part-way
 		s.recordUsage(u)
+		s.endRoutes(u)
 		s.sayUsage(u)
 		s.app.SetActor(app.Actor{CreatedBy: "user"})
 		s.changed()

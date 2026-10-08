@@ -7,7 +7,7 @@
 import { api, h, imageUrl, renderUrl, diffUrl } from './api.js';
 import { scoreRows, currentIteration, comparisonViews, parameterChanges, critiqueErrors, pct } from './visualcmp-model.js';
 
-/** ctx: { $, toast, getState(), attachmentIds(), clearAttachments() } */
+/** ctx: { $, toast, getState(), attachmentIds(), clearAttachments(), withFallbackConsent(run) } */
 export function initVisualPanel(ctx) {
   const { $, toast } = ctx;
   const P = { open: false, data: null, sel: null, view: null, previous: false, goal: '', iterations: 8, busy: false, live: null };
@@ -38,7 +38,7 @@ export function initVisualPanel(ctx) {
     if (!images.length && !(P.data?.references ?? []).length) { toast('Attach at least one reference image first (Attach, drop or paste).', 'bad'); return; }
     P.busy = true; render();
     try {
-      await api('visual/run', { goal: P.goal.trim(), images, max_iterations: Number(P.iterations) || 8, thinking: $('thinking').checked });
+      await ctx.withFallbackConsent(() => api('visual/run', { goal: P.goal.trim(), images, max_iterations: Number(P.iterations) || 8, thinking: $('thinking').checked }));
       ctx.clearAttachments();
       P.followLatest = true;
     } catch (e) { toast(e.message, 'bad'); }

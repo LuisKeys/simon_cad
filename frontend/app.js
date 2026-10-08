@@ -247,20 +247,39 @@ subscribe((n) => {
   if (n.kind === 'chat' && n.chat) { addChat(n.chat); return; }
   if (n.kind === 'selection') { api('state').then((st) => { S.state = st; applySelection(st.selection); }).catch(() => {}); return; }
   if (n.kind === 'agent_state' && n.state) { S.agentState = n.state; renderAgentState(); return; }
+  if (n.kind === 'model' && n.model) { S.model = n.model; renderModel(); return; }
   if (n.kind === 'state' || n.kind === 'agent_done') scheduleRefresh();
 });
 
 // ---- rendering of panels ---------------------------------------------------------------
 
+// Remote fallback authorization. When the local primary model cannot serve a request and the fallback is a cloud
+// model, the server refuses it (code "fallback_consent") until the user decides; `run` is sent again once allowed.
+// Nothing is sent remotely on Cancel, and a remembered answer is saved in Settings (Fallback Model › Remote data).
+async function withFallbackConsent(run) {
+  try { return await run(); } catch (err) {
+    if (err.code !== 'fallback_consent') throw err;
+    const fb = err.data?.fallback ?? {};
+    const remote = `${({ openai: 'OpenAI', claude: 'Anthropic' })[fb.provider] ?? fb.provider} · ${fb.model}`;
+    const { ok, remember } = await confirmBox({ title: 'Send this request to a remote model?',
+      body: `${err.data?.selected ?? 'The local model'} cannot handle it locally. To process it, SimonCAD will send the attachments `
+        + `and the context the request needs to the fallback model, ${remote}, outside this computer.`,
+      ok: 'Allow', okClass: 'primary', remember: true });
+    if (ok || remember) await api('fallback/consent', { allow: ok, remember });
+    if (!ok) { const e = new Error('Cancelled: nothing was sent to the remote model.'); e.cancelled = true; throw e; }
+    return run();
+  }
+}
+
 // Image-to-CAD: attachments, interpretation panel (all changes still go through tool calls).
 const vision = initVision({
   $, toast: (...a) => toast(...a), getState: () => S.state, getSelection: () => S.selection,
-  showPreview: (id) => showPreview(id), refresh: () => refresh(),
+  showPreview: (id) => showPreview(id), refresh: () => refresh(), withFallbackConsent,
 });
 
 // Visual comparison panel and closed-loop refinement (reference images stay constraints).
 const visualPanel = initVisualPanel({
-  $, toast: (...a) => toast(...a), getState: () => S.state,
+  $, toast: (...a) => toast(...a), getState: () => S.state, withFallbackConsent,
   attachmentIds: () => vision.attachmentIds(), clearAttachments: () => vision.clearAttachments(),
 });
 
@@ -283,6 +302,8 @@ function render(st) {
   renderTimeline(st);
   renderChat(st);
   renderUsage(st.usage);
+  S.model = st.model ?? null; S.primary = st.primary ?? null;
+  renderModel();
   renderCtxBar();
   components.render(st);
   vision.onState(st);
@@ -524,15 +545,22 @@ function paramEditor(n) {
 // asks the two questions it may come back with. B-Rep faces/edges/vertices are never edited:
 // they resolve to their owning feature, which is offered instead.
 
-function confirmBox({ title, body, ok = 'Delete' }) {
+// confirmBox resolves true/false; with `remember` it shows a "Remember my choice" box and resolves { ok, remember }.
+function confirmBox({ title, body, ok = 'Delete', okClass = 'danger', remember = false }) {
   return new Promise((resolve) => {
     const d = $('confirm');
     $('confirm-title').textContent = title;
     $('confirm-body').textContent = body;
     $('confirm-ok').textContent = ok;
+    $('confirm-ok').className = okClass;
+    $('confirm-remember').hidden = !remember;
+    $('confirm-remember-box').checked = true;
     d.hidden = false;
     $('confirm-cancel').focus();
-    const close = (v) => { d.hidden = true; $('confirm-form').onsubmit = null; $('confirm-cancel').onclick = null; resolve(v); };
+    const close = (v) => {
+      d.hidden = true; $('confirm-form').onsubmit = null; $('confirm-cancel').onclick = null;
+      resolve(remember ? { ok: v, remember: $('confirm-remember-box').checked } : v);
+    };
     $('confirm-form').onsubmit = (e) => { e.preventDefault(); close(true); };
     $('confirm-cancel').onclick = () => close(false);
   });
@@ -773,6 +801,27 @@ function renderChat(st) {
   if (stick) el.scrollTop = el.scrollHeight;
 }
 
+const PROVIDER_LABELS = { openai: 'OpenAI', claude: 'Anthropic', ollama: 'Ollama' };
+const modelLabel = (m) => (m.provider ? `${PROVIDER_LABELS[m.provider] ?? m.provider} · ${m.model}` : m.model);
+
+// Simon Agent header: the model serving the request as the router reports it ("model" notices), then the one that
+// produced the last answer; before any request, the configured primary model, dimmed. A fallback says why on hover.
+function renderModel() {
+  const el = $('agent-model');
+  const m = S.model ?? S.primary;
+  if (!el) return;
+  if (!m?.model) { el.hidden = true; el.replaceChildren(); return; }
+  const label = modelLabel(m) + (m.fallback ? ' (Fallback)' : '');
+  el.hidden = false;
+  el.classList.toggle('fallback', !!m.fallback);
+  el.classList.toggle('idle', !S.model);
+  const where = m.local ? 'Local model' : 'Cloud model';
+  el.title = m.fallback
+    ? `${where} — fallback for ${m.requested || 'the primary model'}${m.reason ? `\n${m.reason}` : ''}`
+    : `${where}${S.model ? '' : ' (primary; no request yet)'}`;
+  el.replaceChildren(icon(m.local ? 'monitor' : 'cloud'), h('span', null, label));
+}
+
 // Token meter: the session total, with the last turn and the per-model split in the tooltip.
 // Cost is only shown when prices are configured in Settings; otherwise tokens stand alone.
 function renderUsage(u) {
@@ -780,15 +829,22 @@ function renderUsage(u) {
   if (!el) return;
   if (!u || !u.session?.total_tokens) { el.hidden = true; el.replaceChildren(); return; }
   const n = (v) => v.toLocaleString();
-  const amount = (c) => `${c.currency} ${c.amount < 0.01 ? c.amount.toFixed(4) : c.amount.toFixed(2)}`;
+  const one = (cur, a) => `${cur} ${a < 0.01 ? a.toFixed(4) : a.toFixed(2)}`;
+  // Models priced in different currencies are listed side by side; no conversion is ever made.
+  const amount = (c) => (c.amounts ? Object.keys(c.amounts).sort().map((k) => one(k, c.amounts[k])).join(' + ') : one(c.currency, c.amount));
   const parts = [`${n(u.session.total_tokens)} tokens`];
   if (u.session.cost.known) parts.push(`≈ ${amount(u.session.cost)}${u.session.cost.partial ? '*' : ''}`);
+  else if (!u.session.cost.cloud_tokens && u.session.cost.local_tokens) parts.push('local');
   // Cached input is billed at a lower rate, so it is worth showing next to the raw counts.
   const cached = (c) => (c ? `, ${n(c)} cached` : '');
   const lines = [`Session (${u.turns} turn${u.turns === 1 ? '' : 's'}): ${n(u.session.input_tokens)} in${cached(u.session.cached_input_tokens)} / ${n(u.session.output_tokens)} out`];
   if (u.turn.total_tokens) lines.push(`Last turn: ${n(u.turn.input_tokens)} in${cached(u.turn.cached_input_tokens)} / ${n(u.turn.output_tokens)} out`);
-  for (const m of u.session.models) lines.push(`${m.provider}/${m.model}: ${n(m.input_tokens)} in${cached(m.cached_input_tokens)} / ${n(m.output_tokens)} out (${m.calls} calls)`);
-  if (!u.session.cost.known) lines.push('No token prices configured — set them in Settings to estimate cost.');
+  // Local models are counted, never costed: only cloud models are API spend.
+  for (const m of u.session.models) lines.push(`${modelLabel(m)}${m.provider === 'ollama' ? ' (local, no cost)' : ''}: ${n(m.input_tokens)} in${cached(m.cached_input_tokens)} / ${n(m.output_tokens)} out (${m.calls} calls)`);
+  const cost = u.session.cost;
+  if (cost.local_tokens && cost.cloud_tokens) lines.push(`Local: ${n(cost.local_tokens)} tokens, no cost · Cloud: ${n(cost.cloud_tokens)} tokens`);
+  if (!cost.known && cost.cloud_tokens) lines.push('No token prices configured for the cloud models — set them in Settings to estimate cost.');
+  else if (!cost.cloud_tokens && cost.local_tokens) lines.push('Local models only — no API cost.');
   else if (u.session.cost.partial) lines.push(`* no price for: ${u.session.cost.unpriced.join(', ')}`);
   el.hidden = false;
   el.title = lines.join('\n');
@@ -943,7 +999,7 @@ $('composer').addEventListener('submit', async (e) => {
   if (!text) return;
   if (vision.uploading()) { toast('Wait until the attachments finish uploading.', 'bad'); return; }
   try {
-    await api('prompt', { text, thinking: $('thinking').checked, images: vision.attachmentIds() });
+    await withFallbackConsent(() => api('prompt', { text, thinking: $('thinking').checked, images: vision.attachmentIds() }));
     $('prompt').value = ''; autosize();
     vision.clearAttachments();
   } catch (err) { toast(err.message, 'bad'); }

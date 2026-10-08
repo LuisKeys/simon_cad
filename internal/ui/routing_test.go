@@ -3,6 +3,9 @@ package ui
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -207,5 +210,91 @@ func TestUserMessageListsTheDocumentsAndImagesItCarries(t *testing.T) {
 	}
 	if err := s.PromptWith("too many", false, append(imgs, imgs...)[:maxPromptImages+1]); err == nil {
 		t.Fatal("the image bound must hold")
+	}
+}
+
+// identified is a provider double that names its provider and model, so the router knows
+// whether it runs locally.
+type identified struct {
+	*capProvider
+	provider, model string
+}
+
+func (p identified) Identity() (string, string) { return p.provider, p.model }
+
+// A local primary asks before its first remote fallback; once authorized, the request runs,
+// the fallback is named in the conversation and the model indicator follows the model that
+// ran last.
+func TestRemoteFallbackIsAuthorizedFirst(t *testing.T) {
+	s := newSvc(t)
+	info, _ := s.UploadImage(testPNG(t))
+	ollama := identified{&capProvider{name: "ollama:qwen3", caps: textCaps, resps: []runtime.Response{
+		{Content: []runtime.Block{{Type: "text", Text: "done"}}}}}, "ollama", "qwen3"}
+	vision := identified{&capProvider{name: "openai:gpt-x", caps: allCaps, resps: []runtime.Response{
+		{Content: []runtime.Block{{Type: "text", Text: "IMAGE: plate"}}}}}, "openai", "gpt-x"}
+	s.NewProvider = func() (runtime.Provider, error) { return ollama, nil }
+	s.NewRouter = func() *runtime.Router { return &runtime.Router{Fallbacks: []runtime.Provider{vision}} }
+	var models []runtime.RouteEvent
+	ch, cancel := s.Hub().Subscribe()
+	defer cancel()
+
+	err := s.PromptWith("Model this.", true, []string{info.ID})
+	if !errors.Is(err, runtime.ErrConsentRequired) || len(vision.reqs) != 0 {
+		t.Fatalf("expected a consent request, got %v (vision calls %d)", err, len(vision.reqs))
+	}
+	if st, _ := s.State(); !st.Features.Images || st.Primary == nil || st.Primary.Label() != "Ollama · qwen3" || !st.Primary.Local {
+		t.Fatalf("state before authorizing: %+v %+v", st.Features, st.Primary)
+	}
+	if err := s.AuthorizeFallback(true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PromptWith("Model this.", true, []string{info.ID}); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	for drained := false; !drained; {
+		select {
+		case n := <-ch:
+			if n.Kind == "model" {
+				models = append(models, *n.Model)
+			}
+		default:
+			drained = true
+		}
+	}
+	if len(models) != 2 || models[0].Label() != "OpenAI · gpt-x" || !models[0].Fallback || models[0].Requested != "qwen3" ||
+		models[1].Label() != "Ollama · qwen3" || models[1].Fallback {
+		t.Fatalf("model indicator events: %+v", models)
+	}
+	st, _ := s.State()
+	if st.Model == nil || st.Model.Label() != "Ollama · qwen3" {
+		t.Fatalf("the last response came from the local model: %+v", st.Model)
+	}
+	n := 0
+	for _, m := range st.Chat {
+		if m.Role == "system" && strings.HasPrefix(m.Text, "Fallback: OpenAI · gpt-x") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the fallback is named once: %+v", st.Chat)
+	}
+}
+
+func TestConsentRequestIsAConflictWithItsDetails(t *testing.T) {
+	rec := httptest.NewRecorder()
+	fail(rec, &runtime.ConsentError{Selected: "ollama:qwen3", Fallback: runtime.RouteEvent{Provider: "openai", Model: "gpt-x", Fallback: true}})
+	var body struct {
+		Code     string             `json:"code"`
+		Fallback runtime.RouteEvent `json:"fallback"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil || rec.Code != http.StatusConflict ||
+		body.Code != "fallback_consent" || body.Fallback.Model != "gpt-x" {
+		t.Fatalf("%d %+v %v", rec.Code, body, err)
+	}
+	rec = httptest.NewRecorder()
+	fail(rec, &runtime.ConsentError{Declined: true})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("a declined fallback is a plain error: %d", rec.Code)
 	}
 }
