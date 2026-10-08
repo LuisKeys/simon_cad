@@ -19,6 +19,7 @@ import (
 	"github.com/accelone/simoncad/internal/materials"
 	"github.com/accelone/simoncad/internal/vision"
 	"github.com/accelone/simoncad/internal/visual"
+	"github.com/accelone/simoncad/internal/workspace"
 )
 
 // Env is what tools may read. It is implemented by the app composition root.
@@ -53,6 +54,12 @@ type Env interface {
 	// Display only; never CAD state.
 	MeshDetail() string
 	SetMeshDetail(level string)
+	// Workspace is the project's units, grid and snapping settings; SetWorkspace replaces them
+	// (validated) and WorkspaceDefaults are the global defaults new projects start from.
+	// Presentation and editing aids only: never CAD state, never a ChangeSet.
+	Workspace() workspace.Settings
+	SetWorkspace(s workspace.Settings) error
+	WorkspaceDefaults() workspace.Settings
 	// Export writes the current model ("step" or "stl") and returns a summary.
 	Export(format, path string, deflection float64) (map[string]any, error)
 	// Visual is the visual-refinement state (not CAD state); Render draws standard views

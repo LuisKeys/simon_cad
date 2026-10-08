@@ -638,6 +638,37 @@ Dry run of delete_objects: reports which features would be deleted, which select
 | `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
 | `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
 
+### `configure_grid`
+
+Configure the viewport reference grid: show or hide it (visible), enable or disable it as a spatial reference (enabled), its plane (XY, XZ, YZ), spacing between lines, major line interval (in cells), extent (side of the square grid) and origin. 'Set the grid spacing to 5 millimeters' → spacing=5, unit=mm; 'hide the grid' → visible=false. The grid is a visual reference, never geometry. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean |  | The grid exists as a spatial reference (drawn when visible; snapped to when snapping to the grid) |
+| `extent` | number |  | Side length of the square grid, centred on its origin (> 0) |
+| `major_interval` | integer ≥ 1 ≤ 1000 |  | A major line every N cells |
+| `origin` | array of number |  | A point or vector [x, y, z] |
+| `plane` | XY \| XZ \| YZ |  | Grid plane (XY \| XZ \| YZ) |
+| `spacing` | number |  | Distance between grid lines (> 0) |
+| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
+| `visible` | boolean |  | Draw the grid |
+
+### `configure_snapping`
+
+Configure snapping (the settings future interactive moves and rotations will use). enabled is the master switch; grid, translation and rotation say which kinds of snapping are available. 'Enable snapping every 10 millimeters' → enabled=true, translation=true, translation_increment=10, unit=mm. 'Set rotation snapping to 45 degrees' → enabled=true, rotation=true, rotation_increment=45. translation_increment_from_grid=true makes the translation increment follow the grid spacing again. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `angle_unit` | deg \| rad |  | Unit of the angles given in this call; default deg (deg \| rad) |
+| `enabled` | boolean |  | Master switch: snapping is active only when on |
+| `grid` | boolean |  | Snap positions to grid intersections |
+| `rotation` | boolean |  | Snap rotations to the rotation increment |
+| `rotation_increment` | number |  | Rotation increment (> 0, at most a full turn) |
+| `translation` | boolean |  | Snap translations to the translation increment |
+| `translation_increment` | number |  | Translation increment (> 0) |
+| `translation_increment_from_grid` | boolean |  | true: the translation increment is the grid spacing |
+| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
+
 ### `confirm_detected_dimension`
 
 Record the user's answer about a dimension: confirm the detected value, or give the corrected value in mm (then it is trusted). Use this for 'it is 80 mm wide', 'yes that 12 is right', 'make this dimension 40 mm'.
@@ -647,6 +678,16 @@ Record the user's answer about a dimension: confirm the detected value, or give 
 | `dimension` | string | yes | Dimension id |
 | `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
 | `value` | number > 0 |  | Value in mm; omit to confirm the detected value |
+
+### `convert_units`
+
+Convert a length (mm, cm, m, in, ft) or an angle (deg, rad) between units with the application's conversion table. Use it for user values in other units before passing them to tools, which take mm (lengths) and degrees (angles).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `from` | mm \| cm \| m \| in \| ft \| deg \| rad | yes | Unit of value (mm \| cm \| m \| in \| ft \| deg \| rad) |
+| `to` | mm \| cm \| m \| in \| ft \| deg \| rad | yes | Target unit (mm \| cm \| m \| in \| ft \| deg \| rad) |
+| `value` | number | yes | Value to convert |
 
 ### `define_region`
 
@@ -719,6 +760,12 @@ Describe the visual refinement state: references (view, calibration, landmarks),
 
 _No arguments._
 
+### `get_workspace_settings`
+
+Read the project's workspace settings: display units (linear mm/cm/m/in/ft, angular deg/rad, decimal precision), the reference grid (visibility, plane, spacing, major line interval, extent, origin) and snapping (enabled, grid/translation/rotation, increments). Also returns the global defaults new projects start with. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
+
+_No arguments._
+
 ### `list_components`
 
 List the reusable components in the library. A component is a project saved as reusable; insert_component places a reference to one in the current project.
@@ -768,6 +815,15 @@ Render the current model offscreen from fixed cameras (left, right, front, rear,
 | `resolution` | array of integer ≥ 64 ≤ 2048 |  | [width, height], default [1024, 1024] |
 | `views` | array of left \| right \| front \| rear \| top \| front_3q \| rear_3q |  | Default: left, front, top, front_3q |
 
+### `restore_workspace_defaults`
+
+Restore the project's workspace settings (all, or one section: units, grid, snap) to the user's global defaults (source=global, the default) or to the factory defaults (source=factory: mm, degrees, 10 mm XY grid, snapping off). Geometry is unchanged.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `section` | all \| units \| grid \| snap |  | What to restore; default all (all \| units \| grid \| snap) |
+| `source` | global \| factory |  | Which defaults; default global (global \| factory) |
+
 ### `search_components`
 
 Search the component library by name, description or tag.
@@ -803,6 +859,30 @@ Set the real scale of the drawing explicitly, either as mm_per_px, or as a lengt
 | `mm` | number > 0 |  | The real length of that distance (mm) |
 | `mm_per_px` | number > 0 |  | Millimetres per image pixel |
 | `pixels` | number > 0 |  | A length measured in the image (px) |
+
+### `set_units`
+
+Change the project's display units and precision ('switch the project to inches', 'show angles in radians', 'show 3 decimals'). Display only: it changes how lengths and angles are shown and typed in the UI, never the geometry, positions or sizes (stored in mm).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `angular` | deg \| rad |  | Angular display unit (deg \| rad) |
+| `angular_precision` | integer ≥ 0 ≤ 8 |  | Decimal places of angles |
+| `linear` | mm \| cm \| m \| in \| ft |  | Linear display unit (mm \| cm \| m \| in \| ft) |
+| `linear_precision` | integer ≥ 0 ≤ 8 |  | Decimal places of lengths |
+
+### `snap_calculate`
+
+Compute a snapping or grid calculation with the project's settings, without changing anything: position (nearest grid intersection in the grid plane), translation (displacement rounded to the translation increment), angle (rounded to the rotation increment), world_to_grid and grid_to_world (grid coordinates: u, v in the plane, w along its normal, from the grid origin). Snapping only applies when enabled; force=true answers as if that kind of snapping were on. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `angle` | number |  | Angle for operation=angle |
+| `angle_unit` | deg \| rad |  | Unit of the angles given in this call; default deg (deg \| rad) |
+| `force` | boolean |  | Compute as if snapping (and this kind of snapping) were enabled |
+| `operation` | position \| translation \| angle \| world_to_grid \| grid_to_world | yes | Calculation (position \| translation \| angle \| world_to_grid \| grid_to_world) |
+| `point` | array of number |  | A point or vector [x, y, z] |
+| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
 
 ### `unlock_region`
 

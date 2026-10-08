@@ -11,6 +11,7 @@ my_part.scadproj/
   constraints.json     reserved
   materials.json       reserved
   assets/materials/    project-specific visual materials (<id>/material.json + textures); optional
+  workspace.json       display units, grid and snapping (presentation; never an input to geometry)
   agent-history.json   prompts, tool calls, ChangeSets, checkpoints
   events.jsonl         append-only event recorder, one JSON object per line
   thumbnails/          reserved (.gitkeep)
@@ -26,8 +27,9 @@ An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/se
 - **Atomic writes:** each file is written to a temp file and renamed.
 - **Versioned:** `project.json.schema_version` is checked on load. Newer than the build supports
   → refusal; older → `persistence.migrate`. v2 adds `assets/images/` and
-  `agent-history.json.interpretations`; v3 (current) adds the project `id` and the reusable-component
-  metadata. Every addition is optional, so v1 and v2 projects load as they are.
+  `agent-history.json.interpretations`; v3 adds the project `id` and the reusable-component
+  metadata; v4 (current) adds `workspace.json`. Every addition is optional, so v1–v3 projects load
+  as they are.
 - **Self-verifying:** `simoncad-cli replay` re-derives the model from the recorded ChangeSets and
   checks it equals `model.json`.
 
@@ -107,6 +109,28 @@ tagged `"tags": ["resize"]` in its metadata, with literal `sx`/`sy`/`sz`, its an
 a rotated object, its local frame as an axis-angle rotation (`frame_ax`, `frame_ay`, `frame_az`,
 `frame_angle_deg`): the scale acts along the frame's axes. `status` and `errors` are
 **derived** by rebuild and refreshed on every save; they are excluded from the content hash.
+
+## `workspace.json`
+
+The project's display units, reference grid and snapping. Lengths are canonical millimetres and
+angles degrees, whatever the display units; `translation_increment: null` follows the grid spacing.
+
+```json
+{
+  "schema_version": 1,
+  "units": { "linear": "mm", "angular": "deg", "linear_precision": 2, "angular_precision": 1 },
+  "grid": { "enabled": true, "visible": true, "plane": "XY", "spacing": 10, "major_interval": 10,
+            "extent": 1000, "origin": [0, 0, 0] },
+  "snap": { "enabled": false, "grid": true, "translation": true, "rotation": false,
+            "rotation_increment": 15, "translation_increment": null }
+}
+```
+
+`extent` is the side of the square grid, centred on `origin`. Reading is lenient: unknown fields
+are ignored, missing ones take the defaults, and a section that is malformed or invalid falls back
+to the defaults as a whole (the project still opens). A project without the file (saved before v4)
+opens with the factory defaults shown above and gains the file on its next save. The units of
+`model.json` stay `mm`: display units never rescale geometry.
 
 ## `agent-history.json`
 

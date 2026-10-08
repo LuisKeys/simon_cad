@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/accelone/simoncad/internal/workspace"
 )
 
 // Provider names (SIMONCAD_PROVIDER values).
@@ -110,6 +112,9 @@ type Settings struct {
 	// Viewport holds the display preferences of the 3D view. On save, nil leaves the saved
 	// preferences as they are (a client that does not know them cannot reset them to "off").
 	Viewport *ViewportSettings `json:"viewport,omitempty"`
+	// Workspace is the global units, grid and snapping defaults new projects inherit. On
+	// save, nil leaves them as they are; existing projects never change with them.
+	Workspace *workspace.Settings `json:"workspace,omitempty"`
 }
 
 // Env variable names per provider.
@@ -231,6 +236,8 @@ func Current() Settings {
 	s.Currency = Currency()
 	vs := Viewport()
 	s.Viewport = &vs
+	ws := WorkspaceDefaults()
+	s.Workspace = &ws
 	for _, p := range Providers {
 		s.Providers[p] = providerView(ModelConfigFor(SlotPrimary, p))
 	}
@@ -289,6 +296,15 @@ func Save(s Settings) error {
 			return err
 		}
 		for k, v := range vv {
+			next[k] = v
+		}
+	}
+	if s.Workspace != nil {
+		wv, err := workspaceValues(*s.Workspace)
+		if err != nil {
+			return fmt.Errorf("workspace defaults: %w", err)
+		}
+		for k, v := range wv {
 			next[k] = v
 		}
 	}

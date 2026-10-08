@@ -15,13 +15,14 @@ import (
 	"github.com/accelone/simoncad/internal/commands"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
+	"github.com/accelone/simoncad/internal/workspace"
 )
 
 // SchemaVersion is the current on-disk format version. v2 adds assets/images/ (source
 // images, only when explicitly retained) and interpretations in agent-history.json; v3 adds
-// the stable project id and the reusable-component metadata. Every addition is optional, so
-// v1 and v2 projects load unchanged.
-const SchemaVersion = 3
+// the stable project id and the reusable-component metadata; v4 adds workspace.json (units,
+// grid and snapping). Every addition is optional, so v1–v3 projects load unchanged.
+const SchemaVersion = 4
 
 // Meta is project.json. ID is the stable identity a ComponentInstance references: it survives
 // renaming the directory, and the directory name never does. A project with Reusable set is a
@@ -115,7 +116,16 @@ type Project struct {
 	Constraints json.RawMessage
 	Materials   json.RawMessage
 	Images      []Image
+	// Workspace is the project's units, grid and snapping (workspace.json). Load leaves it
+	// nil for a project saved before it existed; Save writes the factory defaults for nil.
+	Workspace *workspace.Settings
+	// WorkspaceWarnings say which parts of workspace.json could not be read and were
+	// replaced by defaults (unknown fields are ignored silently).
+	WorkspaceWarnings []string
 }
+
+// WorkspaceFile holds a project's workspace settings.
+const WorkspaceFile = "workspace.json"
 
 var (
 	emptyComponents  = json.RawMessage(`{"components": []}`)
@@ -154,6 +164,10 @@ func Save(dir string, p *Project) error {
 		}
 		return r
 	}
+	ws := workspace.Defaults()
+	if p.Workspace != nil {
+		ws = p.Workspace.Normalized()
+	}
 	files := []struct {
 		name string
 		val  any
@@ -164,6 +178,7 @@ func Save(dir string, p *Project) error {
 		{"constraints.json", raw(p.Constraints, emptyConstraints)},
 		{"materials.json", raw(p.Materials, emptyMaterials)},
 		{"agent-history.json", p.History},
+		{WorkspaceFile, ws},
 	}
 	for _, f := range files {
 		b, err := canonical(f.val)
@@ -294,6 +309,13 @@ func Load(dir string) (*Project, error) {
 			return nil, err
 		}
 	}
+	if b, err := os.ReadFile(filepath.Join(dir, WorkspaceFile)); err == nil {
+		ws, warns, err := workspace.Decode(b, workspace.Defaults())
+		if err != nil {
+			warns = []string{err.Error() + "; defaults used"}
+		}
+		p.Workspace, p.WorkspaceWarnings = &ws, warns
+	}
 	var err error
 	if p.Images, err = loadImages(dir); err != nil {
 		return nil, err
@@ -330,10 +352,11 @@ func LoadGraph(dir string) (Meta, *cadir.Graph, error) {
 
 // migrate upgrades files from older schema versions. Every version bump so far only added
 // optional content (v2: assets/images/, interpretations; v3: the project id and component
-// metadata), so an older project is valid as it is; the next save writes the current version.
+// metadata; v4: workspace.json), so an older project is valid as it is; the next save writes
+// the current version.
 func migrate(dir string, p *Project) error {
 	switch p.Meta.SchemaVersion {
-	case SchemaVersion, 2, 1:
+	case SchemaVersion, 3, 2, 1:
 		if p.Meta.ID == "" {
 			p.Meta.ID = DeriveID(p.Meta.Name, p.Meta.Created)
 		}

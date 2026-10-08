@@ -27,6 +27,9 @@ const (
 	ProjectSaved        = "ProjectSaved"
 	ExportCompleted     = "ExportCompleted"
 	AgentResponseFinal  = "AgentResponseFinal"
+	// WorkspaceChanged records a change of the project's units, grid or snapping settings
+	// (not CAD state, so not a ChangeSet).
+	WorkspaceChanged = "WorkspaceChanged"
 	// Component lifecycle. These are the only operations that touch a project other than the
 	// open one, so the trace would be blind to them without their own event types.
 	ComponentCreated  = "ComponentCreated"

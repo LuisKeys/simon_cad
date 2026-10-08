@@ -75,8 +75,6 @@ export function h(tag, attrs, ...kids) {
   return el;
 }
 
-export const mm3 = (v) => `${(v ?? 0).toFixed(1)} mm³`;
-
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /** svg builds SVG elements like h builds HTML ones (no innerHTML; text via createTextNode). */
 export function svg(tag, attrs, ...kids) {

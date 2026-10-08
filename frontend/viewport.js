@@ -8,13 +8,13 @@ import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { MaterialManager } from './materials/pbr.js';
 import { WorldAxes } from './axes.js';
 import { ViewportLayoutManager } from './viewlayout.js';
+import { WorkspaceGrid } from './grid.js';
+import { PLANE_AXES, gridShown } from './grid-model.js';
 
 const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
 const PICK_PX = 7;
 const MAX_VERTEX_PICK = 4000;
 const CUBE_MARGIN = 8;
-// The reference grid of each view plane (GridHelper lies in XZ): rotation and normal axis.
-const GRID_PLANES = { XY: { rot: [Math.PI / 2, 0, 0], axis: 2 }, XZ: { rot: [0, 0, 0], axis: 1 }, YZ: { rot: [0, 0, Math.PI / 2], axis: 0 } };
 
 export class Viewport {
   constructor(canvas, hooks) {
@@ -38,17 +38,10 @@ export class Viewport {
     const key = new THREE.DirectionalLight(0xffffff, this.envMap ? 1.0 : 1.6);
     key.position.set(1, -1.5, 2.5);
     this.scene.add(key);
-    // One grid per view plane; each view shows the one of its ViewportConfig.gridPlane.
-    this.grids = {};
-    for (const [plane, def] of Object.entries(GRID_PLANES)) {
-      const g = new THREE.GridHelper(400, 40, 0x3a3a3a, 0x232323);
-      g.rotation.set(...def.rot);
-      g.material.transparent = true; g.material.opacity = 0.45;
-      g.visible = false;
-      this.grids[plane] = g;
-      this.scene.add(g);
-    }
-    this.grid = this.grids.XY; // the perspective view's grid
+    // The workspace grid (Settings → Workspace, or the agent's configure_grid): world-aligned,
+    // with the project's spacing, extent, origin and plane.
+    this.grid = new WorkspaceGrid();
+    this.scene.add(this.grid);
     this.helperBox = new THREE.Box3();
     // Visual aids, not geometry: never in bounds(), picking, history or exports.
     this.axes = new WorldAxes();
@@ -312,12 +305,11 @@ export class Viewport {
     this.layout.changed();
   }
 
-  /** Grid size and axis length follow the model; they are shared by every view. */
+  /** Axis length follows the model (the grid has its own configured extent). */
   _updateHelpers(box) {
     const c = box.getCenter(new THREE.Vector3());
     const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1);
     const gs = Math.pow(10, Math.ceil(Math.log10(r * 4)));
-    for (const g of Object.values(this.grids)) g.scale.setScalar(gs / 400);
     this.helperBox.copy(box);
     // The axes stay on the true origin and reach at least as far as the grid does.
     this.axes.setExtent(gs / 2 + Math.max(Math.abs(c.x), Math.abs(c.y), Math.abs(c.z), Math.abs(box.min.z)));
@@ -325,24 +317,34 @@ export class Viewport {
   }
 
   /**
-   * Shows the grid of the pane's plane, centred on the model. The perspective grid lies just
-   * under the model (as always); an orthographic grid sits on the far side of the model so
-   * it never draws over it.
+   * Shows the workspace grid for one view. The perspective view shows the configured working
+   * plane, through the grid origin; an orthographic view shows the plane it looks at (Top: XY,
+   * Front: XZ, Right: YZ). The lines never move within their plane, so they stay on world
+   * coordinates: only a nudge along the normal, away from the camera, keeps a face lying on
+   * the grid plane from fighting it, and an orthographic grid is pushed behind the whole model
+   * (which does not move it on screen) so it never draws over it.
    */
   _placeGrid(pane, visible) {
-    const plane = pane.config.gridPlane;
-    for (const [k, g] of Object.entries(this.grids)) g.visible = visible && k === plane;
-    if (!visible) return;
-    const g = this.grids[plane], axis = GRID_PLANES[plane].axis;
-    const b = this.helperBox, empty = b.isEmpty();
-    const pos = empty ? new THREE.Vector3() : b.getCenter(new THREE.Vector3());
-    if (pane.perspective) pos.z = empty ? 0 : b.min.z - 0.01;
-    else if (!empty) {
-      const toCam = pane.camera.position.clone().sub(pane.controls.target).getComponent(axis);
-      const eps = Math.max(b.getSize(new THREE.Vector3()).length() * 1e-4, 0.01);
-      pos.setComponent(axis, toCam >= 0 ? b.min.getComponent(axis) - eps : b.max.getComponent(axis) + eps);
+    const cfg = this.grid.config;
+    if (!visible || !gridShown(cfg)) { this.grid.hide(); return; }
+    const plane = pane.perspective ? cfg.plane : pane.config.gridPlane;
+    const n = PLANE_AXES[plane][2], o = cfg.origin?.[n] ?? 0;
+    const away = pane.camera.position.getComponent(n) >= o ? -1 : 1;
+    const dist = pane.camera.position.distanceTo(pane.controls.target);
+    const eps = Math.max(0.01, (pane.perspective ? dist : cfg.extent) * 1e-4);
+    let behind = null;
+    const b = this.helperBox;
+    if (!pane.perspective && !b.isEmpty()) {
+      const back = (away < 0 ? b.min.getComponent(n) : b.max.getComponent(n)) + away * eps - o;
+      behind = away < 0 ? Math.min(back, -eps) : Math.max(back, eps);
     }
-    g.position.copy(pos);
+    this.grid.show(plane, { away, behind, eps });
+  }
+
+  /** The project's workspace settings (state.workspace): the grid follows them at once. */
+  setWorkspace(ws) {
+    this.grid.setConfig(ws?.grid);
+    this.dirty();
   }
 
   /**
@@ -694,16 +696,7 @@ export class Viewport {
 
   /** Recolors the grid for the UI theme (the canvas is transparent over the CSS background). */
   setTheme(theme) {
-    const light = theme === 'light';
-    const major = new THREE.Color(light ? 0xa9afba : 0x3a3a3a), minor = new THREE.Color(light ? 0xcdd1d9 : 0x232323);
-    for (const g of Object.values(this.grids)) {
-      const c = g.geometry.getAttribute('color');
-      for (let v = 0; v < c.count; v++) { // GridHelper: 4 vertices per division, center line first colour
-        const col = Math.floor(v / 4) === 20 ? major : minor;
-        c.setXYZ(v, col.r, col.g, col.b);
-      }
-      c.needsUpdate = true;
-    }
+    this.grid.setTheme(theme);
     this.dirty();
   }
 

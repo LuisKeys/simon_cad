@@ -4,6 +4,7 @@
 // like every other mutation.
 import { api, h } from './api.js';
 import { icon } from './icons.js';
+import { units } from './units.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -107,7 +108,7 @@ async function insert(c) {
   const v = await deps.formDialog({
     title: `Insert ${c.name}`, ok: 'Insert',
     fields: [{ key: 'name', label: 'Instance name', text: true, value: c.name },
-      { key: 'dx', label: 'X (mm)', value: 0 }, { key: 'dy', label: 'Y (mm)', value: 0 }, { key: 'dz', label: 'Z (mm)', value: 0 }],
+      ...['X', 'Y', 'Z'].map((a) => ({ key: `d${a.toLowerCase()}`, label: `${a} (${units.symbol})`, value: 0, length: true }))],
   });
   if (!v) return;
   await deps.callTool('insert_component', { component: c.project_id, name: v.name, dx: v.dx, dy: v.dy, dz: v.dz },

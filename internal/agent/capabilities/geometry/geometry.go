@@ -5,6 +5,7 @@ package geometry
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/accelone/simoncad/internal/app"
@@ -37,6 +38,7 @@ How you work
 - Body edits: "make it twice as big / scale to 80%" → scale (factor; sx/sy/sz for one axis; about=base keeps a printed part on the bed). "Duplicate / copy this" → duplicate (dx/dy/dz offset; the copy is linked to its source and follows its parameter edits; several bodies go in ONE call). "Align these", "center it", "put it on the floor" → align (axes, mode min/center/max; to=first keeps the first body still, to=origin aligns to the world planes). Scale, align and face edits apply to visible bodies: if a feature is consumed by a later one, use the later (visible) one.
 - Dimensions: an object's width, depth and height are its extents along its own local X, Y and Z (they follow its rotation). "Make it 150 mm wide", "increase the width to 150 mm without changing height or depth" → set_object_dimension (axis width/depth/height, value in mm); several target sizes at once → resize_object. Only the named dimension changes unless Lock Proportions is on (set_object_proportional_scaling, or proportional=true for one call: "scale it to 150 mm wide keeping proportions"). anchor=object_origin keeps the object's origin in place; the default is its center. Omit object_id for the selected object. Then call get_object_dimensions to verify and report the resulting size. This is a non-parametric scale of the whole object: say so when it distorts features (a cylinder resized across its axis becomes elliptical, holes and wall thicknesses scale too). When the user means a design parameter of one feature rather than the object's overall size (a plate's thickness, a hole's diameter), modify_parameter is still the right tool.
 - Face edits use the selected face's selector: "pull/push this face", "extrude this face 5 mm" → face_extrude (distance > 0 adds, < 0 cuts); "inset this face 2 mm" → face_inset (add depth < 0 for a pocket with a rim, > 0 for a pad; without depth it only splits the face); "offset this face", "make this hole 0.2 mm bigger" → face_offset (works on cylindrical faces too: distance > 0 moves the face outward from the material, so a hole shrinks; use a negative distance to enlarge a hole).
+- Units and workspace: tool lengths are ALWAYS millimetres and angles degrees, whatever display units the project uses (see the context). Convert values the user gives in other units (inches, cm, feet, radians) before passing them to modeling tools — call convert_units, never guess a factor — and state results in the project's display units. Display units, the grid and snapping are workspace settings, not geometry: "switch the project to inches" → set_units; "set the grid spacing to 5 mm", "hide the grid", "use the XZ plane" → configure_grid (lengths take a 'unit' argument); "enable snapping every 10 mm", "rotation snapping to 45 degrees" → configure_snapping; "reset units/grid/snapping" → restore_workspace_defaults; read them with get_workspace_settings; snap_calculate answers snapping questions. They never change the model, are not ChangeSets and are not undone with undo.
 - Grouping is organization only: "group these as Base" → group (name); "ungroup" → ungroup (features or group). Never use groups to combine geometry; that is boolean union.
 - Put the engineering intent of each change in the 'intent' argument, in natural language.
 - Plan the WHOLE request before acting: break it into every step needed and carry them all out in this turn, calling several tools per response when steps are independent. Never stop after the first tool; later steps use the ids returned by earlier ones as 'target'. Example: "a 50 mm cube with 4 mm rounded edges" = create_box (dx=dy=dz=50), then fillet (target = the box id, radius=4).
@@ -59,7 +61,20 @@ func (Capability) BuildContext(a *app.App) (string, error) {
 		return "", err
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "## Context\nUnits: %s\n\n## Current model\n```json\n%s\n```\n", a.Graph.Units, b)
+	ws := a.Workspace
+	grid := "hidden"
+	if ws.Grid.Visible && ws.Grid.Enabled {
+		grid = "visible"
+	}
+	snap := "off"
+	if ws.Snap.Enabled {
+		snap = fmt.Sprintf("on (grid %v, translation %v every %s, rotation %v every %s)", ws.Snap.Grid, ws.Snap.Translation,
+			ws.Units.FormatLength(ws.TranslationStep()), ws.Snap.Rotation, ws.Units.FormatAngle(ws.Snap.RotationIncrement*math.Pi/180))
+	}
+	fmt.Fprintf(&sb, "## Context\nUnits: %s (canonical: every tool length is mm, every angle degrees)\n"+
+		"Display units: %s, %d decimals; angles %s, %d decimals\nGrid: %s plane, spacing %s, %s; snapping %s\n\n## Current model\n```json\n%s\n```\n",
+		a.Graph.Units, ws.Units.Linear, ws.Units.LinearPrecision, ws.Units.Angular, ws.Units.AngularPrecision,
+		ws.Grid.Plane, ws.Units.FormatLength(ws.Grid.Spacing), grid, snap, b)
 	sel := a.SelectionContext()
 	if sel.Empty() {
 		sb.WriteString("\n## Selection\nNothing is selected.\n")

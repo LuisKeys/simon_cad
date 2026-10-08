@@ -1,7 +1,7 @@
 // Simon CAD UI: panels over the ui.Service API. Every mutation here is a call that ends in
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
-import { api, subscribe, h, mm3, materialUrl } from './api.js';
+import { api, subscribe, h, materialUrl } from './api.js';
 import { Viewport } from './viewport.js';
 import { initVision } from './vision.js';
 import { initVisualPanel } from './visualcmp.js';
@@ -14,7 +14,8 @@ import { openSettings, loadTheme } from './settings.js';
 import { initPanels, getPref, setPref } from './panels.js';
 import { initComponents, openComponent, createComponent, replaceComponent, publishProject } from './components.js';
 import { DimensionRenderer } from './dimensions.js';
-import { ANCHORS, AXIS_LABEL, PANEL_ORDER, formatMM, parseDimension } from './dimensions-model.js';
+import { ANCHORS, AXIS_LABEL, PANEL_ORDER } from './dimensions-model.js';
+import { units, setUnits } from './units.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
@@ -69,8 +70,8 @@ const vp = new Viewport($('gl'), {
     if (!m) { label.hidden = true; $('hud').textContent = vp.measure.on ? 'Measure: click two points' : hudStats(); return; }
     const d = m.d;
     label.hidden = false;
-    label.textContent = `${m.distance.toFixed(3)} mm  (Δ ${d.x.toFixed(2)}, ${d.y.toFixed(2)}, ${d.z.toFixed(2)})`;
-    $('hud').textContent = `distance ${m.distance.toFixed(3)} mm`;
+    label.textContent = `${units.length(m.distance)}  (Δ ${[d.x, d.y, d.z].map((v) => units.length(v, { unit: false })).join(', ')})`;
+    $('hud').textContent = `distance ${units.length(m.distance)}`;
     placeMeasureLabel(m.mid);
   },
   onFrame: () => {
@@ -283,12 +284,24 @@ const visualPanel = initVisualPanel({
   attachmentIds: () => vision.attachmentIds(), clearAttachments: () => vision.clearAttachments(),
 });
 
+// Workspace settings of the project (units, grid, snapping): the grid redraws at once and every
+// displayed length follows the display units. Values stay canonical millimetres underneath.
+function applyWorkspace(ws) {
+  if (!ws) return;
+  vp.setWorkspace(ws);
+  if (setUnits(ws)) {
+    dimOverlay?.refresh();
+    if (S.selection) renderSelection(S.selection);
+  }
+}
+
 function render(st) {
   S.selection = st.selection;
   if (!st.refine_state) S.refineState = null;
   S.level = st.level;
   loadMaterials(st.path ?? st.name);
   views.load(st.path ?? st.name);
+  applyWorkspace(st.workspace);
   // replaceChildren stringifies null into a "null" text node, so drop absent children first.
   $('project').replaceChildren(...[h('span', { class: 'pname' }, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, '●') : null, icon('down')].filter(Boolean));
   $('btn-undo').disabled = !st.can_undo || st.busy;
@@ -732,14 +745,14 @@ function dimensionsEditor(d) {
   const rows = [];
   for (const axis of PANEL_ORDER) {
     const id = `dim-${axis}`;
-    const input = h('input', { id, type: 'text', inputmode: 'decimal', value: formatMM(d[axis]), 'aria-label': `${AXIS_LABEL[axis]} (mm)`,
-      onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.target.value = formatMM(d[axis]); e.target.blur(); } else if (e.key === 'Enter') e.target.blur(); },
+    const input = h('input', { id, type: 'text', inputmode: 'decimal', value: units.compact(d[axis]), 'aria-label': `${AXIS_LABEL[axis]} (${units.symbol})`,
+      onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.target.value = units.compact(d[axis]); e.target.blur(); } else if (e.key === 'Enter') e.target.blur(); },
       onchange: (e) => {
-        const r = parseDimension(e.target.value);
-        if (!r.ok) { toast(r.error, 'bad'); e.target.value = formatMM(d[axis]); return; }
+        const r = units.parseLength(e.target.value);
+        if (!r.ok) { toast(r.error, 'bad'); e.target.value = units.compact(d[axis]); return; }
         if (Math.abs(r.value - d[axis]) > 1e-9) editDimension(d.object_id, axis, r.value);
       } });
-    rows.push(h('label', { for: id }, AXIS_LABEL[axis]), h('span', { class: 'dim-row' }, input, h('span', { class: 'muted' }, 'mm')));
+    rows.push(h('label', { for: id }, AXIS_LABEL[axis]), h('span', { class: 'dim-row' }, input, h('span', { class: 'muted' }, units.symbol)));
   }
   const lock = h('input', { id: 'dim-lock', type: 'checkbox', checked: !!d.lock_proportions, 'aria-label': 'Lock proportions',
     onchange: (e) => setLockProportions(d.object_id, e.target.checked) });
@@ -761,8 +774,8 @@ function renderSelection(sel) {
   list.replaceChildren(...(dims.length === 1 ? [h('div', { class: 'sel-item' }, h('b', {}, `Dimensions · ${dims[0].object_id}`), dimensionsEditor(dims[0]))] : []),
     ...(selNodes.length ? [h('div', { class: 'sel-item' }, h('b', {}, `Appearance · ${selNodes.length} object${selNodes.length > 1 ? 's' : ''}`), appearanceEditor(selNodes))] : []), ...ents.map((e) => h('div', { class: 'sel-item' },
     h('code', {}, e.selector),
-    h('div', { class: 'muted' }, [e.surface_type, e.area ? `${e.area.toFixed(1)} mm²` : null,
-      `at (${e.centroid.map((v) => v.toFixed(1)).join(', ')})`].filter(Boolean).join(' · ')))));
+    h('div', { class: 'muted' }, [e.surface_type, e.area ? units.area(e.area) : null,
+      `at (${e.centroid.map((v) => units.length(v, { unit: false })).join(', ')}) ${units.symbol}`].filter(Boolean).join(' · ')))));
   chips.replaceChildren(...ents.map((e) => h('span', { class: 'chip', title: e.selector },
     h('span', {}, shortSel(e.selector)),
     h('button', { type: 'button', 'aria-label': `Remove ${e.selector} from the selection`, onclick: async () => {
@@ -901,7 +914,7 @@ function changeSetCard(cs) {
       cs.added.length ? h('li', {}, `adds ${cs.added.join(', ')}`) : null,
       cs.modified.length ? h('li', {}, `modifies ${cs.modified.join(', ')}`) : null,
       cs.removed.length ? h('li', {}, `removes ${cs.removed.join(', ')}`) : null,
-      h('li', {}, `volume ${mm3(cs.volume_before_mm3)} → ${mm3(cs.volume_after_mm3)} (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`),
+      h('li', {}, `volume ${units.volume(cs.volume_before_mm3)} → ${units.volume(cs.volume_after_mm3)} (${delta >= 0 ? '+' : ''}${units.volume(delta)})`),
       ...cs.warnings.map((w) => h('li', { class: 'warn' }, '⚠ ' + w)),
       ...checks),
     h('div', { class: 'actions' },
@@ -994,7 +1007,7 @@ async function restoreCheckpoint(c) {
 async function compareCheckpoint(c) {
   try {
     const r = await api(`compare?a=${encodeURIComponent(c.id)}`);
-    const lines = [`vs “${r.label_a}”: ${r.features_a} → ${r.features_b} features, ${r.volume_a_mm3.toFixed(1)} → ${r.volume_b_mm3.toFixed(1)} mm³`];
+    const lines = [`vs “${r.label_a}”: ${r.features_a} → ${r.features_b} features, ${units.volume(r.volume_a_mm3)} → ${units.volume(r.volume_b_mm3)}`];
     if (r.diff.added?.length) lines.push('added: ' + r.diff.added.join(', '));
     if (r.diff.removed?.length) lines.push('removed: ' + r.diff.removed.join(', '));
     for (const ch of r.diff.changed ?? []) lines.push(`${ch.feature}.${ch.name}: ${ch.from} → ${ch.to}`);
@@ -1186,10 +1199,12 @@ function formDialog({ title, fields, ok = 'Apply' }) {
     $('fd-ok').textContent = ok;
     const inputs = fields.map((f) => {
       const id = `fd-${f.key}`;
+      // Length fields hold mm and angle fields degrees; they are shown and typed in the display units.
+      const shown = (v) => (f.length ? Number(units.toDisplay(v).toFixed(6)) : f.angle ? Number(units.angleToDisplay(v).toFixed(6)) : v);
       const input = f.options
         ? h('select', { id }, ...f.options.map((o) => h('option', { value: o.value ?? o, selected: (o.value ?? o) === f.value }, o.label ?? o)))
         : f.text ? h('input', { id, type: 'text', value: String(f.value ?? ''), spellcheck: 'false' })
-          : h('input', { id, type: 'number', step: 'any', value: String(f.value ?? 0), min: f.min, title: f.hint });
+          : h('input', { id, type: 'number', step: 'any', value: String(shown(f.value ?? 0)), min: f.min === undefined ? undefined : shown(f.min), title: f.hint });
       return [f, input];
     });
     $('fd-fields').replaceChildren(...inputs.flatMap(([f, i]) => [h('label', { for: i.id }, f.label), i]));
@@ -1199,7 +1214,11 @@ function formDialog({ title, fields, ok = 'Apply' }) {
     $('fd-form').onsubmit = (e) => {
       e.preventDefault();
       const out = {};
-      for (const [f, i] of inputs) out[f.key] = f.options || f.text ? i.value : Number(i.value);
+      for (const [f, i] of inputs) {
+        out[f.key] = f.options || f.text ? i.value : Number(i.value);
+        if (f.length) out[f.key] = units.toMM(out[f.key]);
+        else if (f.angle) out[f.key] = units.angleToDeg(out[f.key]);
+      }
       close(out);
     };
     $('fd-cancel').onclick = () => close(null);
@@ -1214,13 +1233,13 @@ const actionEnv = {
     const ids = selIds();
     if (!ids.length) return;
     if (kind === 'move') {
-      const v = await formDialog({ title: `Move ${ids.length > 1 ? ids.length + ' objects' : ids[0]} (mm)`, ok: 'Move',
-        fields: [{ key: 'dx', label: 'X', value: 0 }, { key: 'dy', label: 'Y', value: 0 }, { key: 'dz', label: 'Z', value: 0 }] });
+      const v = await formDialog({ title: `Move ${ids.length > 1 ? ids.length + ' objects' : ids[0]} (${units.symbol})`, ok: 'Move',
+        fields: [{ key: 'dx', label: 'X', value: 0, length: true }, { key: 'dy', label: 'Y', value: 0, length: true }, { key: 'dz', label: 'Z', value: 0, length: true }] });
       if (!v) return;
       for (const id of ids) await callTool('transform', { target: id, dx: v.dx, dy: v.dy, dz: v.dz, intent: `Move ${id}` }, 'Move');
     } else {
       const v = await formDialog({ title: `Rotate ${ids.length > 1 ? ids.length + ' objects' : ids[0]} about its centre`, ok: 'Rotate',
-        fields: [{ key: 'angle', label: 'Angle (deg)', value: 90 }, { key: 'axis', label: 'Axis', options: ['X', 'Y', 'Z'], value: 'Z' }] });
+        fields: [{ key: 'angle', label: `Angle (${units.angleSymbol})`, value: 90, angle: true }, { key: 'axis', label: 'Axis', options: ['X', 'Y', 'Z'], value: 'Z' }] });
       if (!v) return;
       const cs = ids.map((id) => vp.bodyCenter(id)).filter(Boolean);
       const o = cs.length ? [0, 1, 2].map((i) => cs.reduce((t, c) => t + c[i], 0) / cs.length) : [0, 0, 0];
@@ -1246,8 +1265,8 @@ const actionEnv = {
     const ids = edges.length ? [...new Set(edges.map(featureOf))] : selIds();
     if (!ids.length) return;
     const param = tool === 'fillet' ? 'radius' : 'distance';
-    const v = await formDialog({ title: `${tool === 'fillet' ? 'Fillet' : 'Chamfer'} ${edges.length ? `${edges.length} edge${edges.length > 1 ? 's' : ''}` : 'all edges'} (mm)`,
-      ok: tool === 'fillet' ? 'Fillet' : 'Chamfer', fields: [{ key: 'v', label: tool === 'fillet' ? 'Radius' : 'Distance', value: 1, min: 0.001 }] });
+    const v = await formDialog({ title: `${tool === 'fillet' ? 'Fillet' : 'Chamfer'} ${edges.length ? `${edges.length} edge${edges.length > 1 ? 's' : ''}` : 'all edges'} (${units.symbol})`,
+      ok: tool === 'fillet' ? 'Fillet' : 'Chamfer', fields: [{ key: 'v', label: tool === 'fillet' ? 'Radius' : 'Distance', value: 1, min: 0.001, length: true }] });
     if (!v || !(v.v > 0)) return;
     for (const id of ids) {
       const args = { target: id, [param]: v.v };
@@ -1274,8 +1293,8 @@ const actionEnv = {
     if (!ids.length) return;
     // Default: next to the selection along X, with a 5 mm gap.
     const w = Math.max(0, ...ids.map((id) => vp.bodySize(id)?.[0] ?? 0));
-    const v = await formDialog({ title: `Duplicate ${nameOf(ids)}: offset (mm)`, ok: 'Duplicate',
-      fields: [{ key: 'dx', label: 'X', value: Math.round((w + 5) * 100) / 100 }, { key: 'dy', label: 'Y', value: 0 }, { key: 'dz', label: 'Z', value: 0 }] });
+    const v = await formDialog({ title: `Duplicate ${nameOf(ids)}: offset (${units.symbol})`, ok: 'Duplicate',
+      fields: [{ key: 'dx', label: 'X', value: Math.round((w + 5) * 100) / 100, length: true }, { key: 'dy', label: 'Y', value: 0, length: true }, { key: 'dz', label: 'Z', value: 0, length: true }] });
     if (!v) return;
     await callTool('duplicate', { features: ids, dx: v.dx, dy: v.dy, dz: v.dz, intent: `Duplicate ${ids.join(', ')}` }, 'Duplicate');
   },
@@ -1315,10 +1334,10 @@ const actionEnv = {
     if (faces.length < all.length) toast('Several faces of one body: only the first is used. Select the others again afterwards.', '', 6000);
     const what = `${faces.length > 1 ? faces.length + ' faces' : 'face'}`;
     const spec = {
-      face_extrude: { title: `Extrude ${what} (mm)`, ok: 'Extrude', fields: [{ key: 'distance', label: 'Distance (+ out / − in)', value: 5 }] },
-      face_inset: { title: `Inset ${what} (mm)`, ok: 'Inset', fields: [{ key: 'inset', label: 'Inset from edges', value: 2, min: 0.001 },
-        { key: 'depth', label: 'Depth (0 = split only, + pad, − pocket)', value: 0 }] },
-      face_offset: { title: `Offset ${what} (mm)`, ok: 'Offset', fields: [{ key: 'distance', label: 'Distance (+ out of the material)', value: 1 }] },
+      face_extrude: { title: `Extrude ${what} (${units.symbol})`, ok: 'Extrude', fields: [{ key: 'distance', label: 'Distance (+ out / − in)', value: 5, length: true }] },
+      face_inset: { title: `Inset ${what} (${units.symbol})`, ok: 'Inset', fields: [{ key: 'inset', label: 'Inset from edges', value: 2, min: 0.001, length: true },
+        { key: 'depth', label: 'Depth (0 = split only, + pad, − pocket)', value: 0, length: true }] },
+      face_offset: { title: `Offset ${what} (${units.symbol})`, ok: 'Offset', fields: [{ key: 'distance', label: 'Distance (+ out of the material)', value: 1, length: true }] },
     }[tool];
     const v = await formDialog(spec);
     if (!v) return;
@@ -1411,7 +1430,8 @@ async function openProject() {
 $('project').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
   { label: 'New project…', icon: 'file-plus', run: newProject },
   { label: 'Open project…', icon: 'folder', run: openProject }]));
-$('btn-settings').addEventListener('click', () => openSettings({ toast, onTheme: (t) => vp.setTheme(t), onViewport: (v) => vp.setViewPrefs(v) }));
+$('btn-settings').addEventListener('click', () => openSettings({ toast, onTheme: (t) => vp.setTheme(t), onViewport: (v) => vp.setViewPrefs(v),
+  workspace: S.state?.workspace, onWorkspace: (ws) => vp.setWorkspace(ws), onSaved: () => refresh() }));
 $('btn-more').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
   { label: 'Command palette', icon: 'command', key: 'Ctrl+K', run: openPalette },
   { sep: true }, { head: 'Agent level' },

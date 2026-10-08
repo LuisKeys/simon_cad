@@ -1,6 +1,8 @@
-// Settings screen: AI models (primary and fallback), UI theme and viewport display preferences. Values come from, and
-// are saved to, the backend configuration layer (internal/config); this module holds no other state.
+// Settings screen: AI models (primary and fallback), UI theme, viewport display preferences and the open project's
+// workspace (units, grid, snapping). Values come from, and are saved to, the backend configuration layer
+// (internal/config) and, for the project's workspace, the workspace tools; this module holds no other state.
 import { api, h } from './api.js';
+import { workspaceSection } from './workspace-settings.js';
 
 const PROVIDERS = [['openai', 'OpenAI'], ['claude', 'Anthropic'], ['ollama', 'Ollama']];
 // The fallback model is always a cloud model: it serves what the local or primary model cannot.
@@ -113,8 +115,11 @@ function modelFields(slot, providers, models, current, defaultCurrency, onProvid
   return { nodes, provider, stash, fill };
 }
 
-/** Opens the Settings dialog. */
-export async function openSettings({ toast, onTheme, onViewport }) {
+/**
+ * Opens the Settings dialog. `workspace` is the open project's state.workspace, `onWorkspace` previews workspace
+ * settings in the viewport and `onSaved` runs after a successful save.
+ */
+export async function openSettings({ toast, onTheme, onViewport, workspace, onWorkspace, onSaved }) {
   let cfg;
   try { cfg = await api('settings'); } catch (e) { toast(e.message, 'bad'); return; }
   const saved = cfg.theme, savedView = { ...cfg.viewport };
@@ -164,22 +169,32 @@ export async function openSettings({ toast, onTheme, onViewport }) {
   const gizmoSize = sel('set-gizmo-size', GIZMO_SIZES, view.gizmoSize, () => { view.gizmoSize = gizmoSize.value; preview(); });
   const gizmoPos = sel('set-gizmo-pos', GIZMO_POSITIONS, view.gizmoPosition, () => { view.gizmoPosition = gizmoPos.value; preview(); });
   const status = h('span', { class: 'muted', role: 'status' });
+  const ws = workspace ? workspaceSection({ view: workspace, defaults: cfg.workspace, preview: onWorkspace }) : null;
 
   const close = (revert) => {
-    if (revert) { applyTheme(saved, onTheme); onViewport?.(savedView); }
+    if (revert) { applyTheme(saved, onTheme); onViewport?.(savedView); ws?.revert(); }
     el.hidden = true; el.replaceChildren();
   };
   const form = h('form', { class: 'dialog settings', 'aria-label': 'Settings', onsubmit: async (e) => {
     e.preventDefault();
     primary.stash(); fallback.stash();
+    // An invalid workspace value is already reported next to the section; nothing is saved.
+    if (ws?.invalid()) { form.querySelector('[aria-invalid=true]')?.focus(); return; }
+    status.textContent = ''; status.className = 'muted';
     try {
+      // The project's workspace goes through the same tools as the agent's requests.
+      const wsDefaults = ws ? await ws.save(async (name, args) => {
+        const o = await api('tool', { name, args });
+        if (!o.ok) throw new Error(o.error);
+      }) : null;
       // The global currency is only the default label now (each model names its own); it is sent back unchanged.
       const out = await api('settings', { provider: primary.provider.value, providers: cfg.providers, theme: theme.value,
-        componentLibrary: complib.value.trim(), currency: cfg.currency ?? '', viewport: view,
+        componentLibrary: complib.value.trim(), currency: cfg.currency ?? '', viewport: view, workspace: wsDefaults ?? undefined,
         fallback: { enabled: fbEnabled.checked, provider: fallback.provider.value, providers: fb.providers, consent: consent.value } });
       try { localStorage.setItem(THEME_KEY, out.theme); } catch { /* ignore */ }
       el.hidden = true; el.replaceChildren();
       toast('Settings saved', 'ok');
+      onSaved?.();
     } catch (err) { status.textContent = err.message; status.className = 'bad'; }
   } },
     h('div', { class: 'dtitle' }, 'Settings'),
@@ -201,6 +216,7 @@ export async function openSettings({ toast, onTheme, onViewport }) {
     srow('set-gizmo', 'Show Axis Gizmo', check('set-gizmo', 'showGizmo')),
     srow('set-gizmo-size', 'Axis Gizmo Size', gizmoSize),
     srow('set-gizmo-pos', 'Axis Gizmo Position', gizmoPos),
+    ...(ws?.nodes ?? []),
     h('div', { class: 'row' }, h('button', { type: 'submit', class: 'primary' }, 'Save Settings'),
       h('button', { type: 'button', onclick: () => close(true) }, 'Cancel'), status));
   form.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(true); });

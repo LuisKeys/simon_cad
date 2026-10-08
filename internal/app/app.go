@@ -28,6 +28,7 @@ import (
 	"github.com/accelone/simoncad/internal/tools"
 	"github.com/accelone/simoncad/internal/vision"
 	"github.com/accelone/simoncad/internal/visual"
+	"github.com/accelone/simoncad/internal/workspace"
 	materialsdata "github.com/accelone/simoncad/materials"
 )
 
@@ -75,6 +76,11 @@ type App struct {
 	// meshDetail is the viewport mesh detail ("fine" | "normal" | "coarse"). Display only:
 	// it is not CAD state, is not saved and never changes geometry.
 	meshDetail string
+	// Workspace is the project's units, grid and snapping (workspace.json): presentation and
+	// editing aids, never an input to geometry. WorkspaceWarnings say what could not be read
+	// from the project's file and was replaced by defaults.
+	Workspace         workspace.Settings
+	WorkspaceWarnings []string
 
 	// Raw preserved files not interpreted here. components.json is derived on save from the
 	// graph's component instances, so it is no longer carried through.
@@ -116,11 +122,13 @@ func newApp(clock func() time.Time) *App {
 	return a
 }
 
-// New starts an empty project.
+// New starts an empty project. Its workspace settings are a copy of the global defaults:
+// later changes to the defaults do not follow it.
 func New(name string, clock func() time.Time) *App {
 	a := newApp(clock)
 	a.Meta = persistence.Meta{SchemaVersion: persistence.SchemaVersion, ID: persistence.NewID(),
 		Name: name, Units: "mm", OCCTVersion: a.K.Version(), Created: a.Clock().UTC().Format(time.RFC3339)}
+	a.Workspace = configWorkspaceDefaults().Clone()
 	return a
 }
 
@@ -132,6 +140,13 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 	}
 	a := newApp(clock)
 	a.Meta, a.AH = p.Meta, p.History
+	// A project keeps its own workspace settings. One saved before they existed gets the
+	// factory defaults (what it was designed with), never the user's current global
+	// defaults: those must not silently change an existing project.
+	a.Workspace, a.WorkspaceWarnings = workspace.Defaults(), p.WorkspaceWarnings
+	if p.Workspace != nil {
+		a.Workspace = *p.Workspace
+	}
 	a.useProjectMaterials(dir)
 	a.useLibraryRoots(dir)
 	a.constraints, a.materials = p.Constraints, p.Materials
@@ -186,6 +201,9 @@ func (a *App) useLibraryRoots(dir string) {
 // configComponentLibrary is the configured library root, indirected so tests can point the
 // library somewhere else without touching the user's settings.
 var configComponentLibrary = config.ComponentLibrary
+
+// configWorkspaceDefaults are the global workspace defaults, indirected like the library root.
+var configWorkspaceDefaults = config.WorkspaceDefaults
 
 // Dir is the project's directory ("" until it is saved or opened).
 func (a *App) Dir() string { return a.dir }
@@ -284,6 +302,7 @@ func (a *App) Save(dir string) error {
 	if err := persistence.Save(dir, &persistence.Project{
 		Meta: a.Meta, Graph: a.Graph, History: a.AH, Events: a.Bus.Events(),
 		Components: components.Manifest(a.Graph), Constraints: a.constraints, Materials: a.materials, Images: imgs,
+		Workspace: &a.Workspace,
 	}); err != nil {
 		return err
 	}
@@ -395,6 +414,21 @@ func (a *App) MeshDetail() string {
 	return a.meshDetail
 }
 
+// SetWorkspace validates and stores the project's workspace settings. It is what the
+// workspace tools call; geometry is never touched.
+func (a *App) SetWorkspace(s workspace.Settings) error {
+	s = s.Normalized()
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	if s.Equal(a.Workspace) {
+		return nil
+	}
+	a.Workspace = s.Clone()
+	a.Bus.Publish(events.WorkspaceChanged, a.Workspace)
+	return nil
+}
+
 // ---- tools.Env ----------------------------------------------------------------------
 
 type toolEnv struct{ a *App }
@@ -416,9 +450,12 @@ func (e toolEnv) ProjectID() string                          { return e.a.Meta.I
 func (e toolEnv) PublishComponent(name, description string, tags []string, nodes []*cadir.Node) (string, error) {
 	return e.a.PublishComponent(name, description, tags, nodes)
 }
-func (e toolEnv) MeshDetail() string         { return e.a.MeshDetail() }
-func (e toolEnv) SetMeshDetail(level string) { e.a.meshDetail = level }
-func (e toolEnv) Visual() *visual.State      { return e.a.Visual }
+func (e toolEnv) MeshDetail() string                      { return e.a.MeshDetail() }
+func (e toolEnv) SetMeshDetail(level string)              { e.a.meshDetail = level }
+func (e toolEnv) Workspace() workspace.Settings           { return e.a.Workspace.Clone() }
+func (e toolEnv) SetWorkspace(s workspace.Settings) error { return e.a.SetWorkspace(s) }
+func (e toolEnv) WorkspaceDefaults() workspace.Settings   { return configWorkspaceDefaults() }
+func (e toolEnv) Visual() *visual.State                   { return e.a.Visual }
 func (e toolEnv) Render(views []string, w, h int, mode string) ([]*visual.Render, error) {
 	return e.a.Render(views, w, h, mode)
 }

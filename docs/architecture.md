@@ -232,6 +232,43 @@ Three categories are kept apart:
   invertible `SetLockProportions` command. Like appearance and group it is presentation (excluded
   from the content key and `GeometryHash`) and follows the visible body onto new features.
 
+### 6b. Workspace: units, grid and snapping
+
+Canonical units never change: every length (geometry, parameters, tool arguments, grid spacing,
+snapping) is **millimetres**, and angles are degrees in tool arguments and settings, radians in
+`SnapService` calculations. Display units only convert at the boundary, so switching a project to
+inches never rescales or moves anything (`TestSwitchingUnitsDoesNotModifyGeometry`).
+
+| Responsibility | Where |
+|---|---|
+| UnitService: conversion table, formatting, precision, angle normalization | `internal/workspace/units.go` (the only factor table; the UI receives it in `state.workspace.linear_units`) |
+| Settings schema, defaults, validation, safe decoding | `internal/workspace/settings.go` (`Settings`, `Validate`, `Decode`) |
+| GridService: world ↔ grid coordinates | `Grid.WorldToGrid` / `GridToWorld` (offset + axis permutation; grid axes are world axes) |
+| SnapService: `SnapPosition`, `SnapTranslation`, `SnapAngle` | `internal/workspace/snap.go` — deterministic (12-significant-digit cleanup, halves away from zero) |
+| Global defaults (user preference) | `config.WorkspaceDefaults`, Settings › `workspace` |
+| Project settings | `App.Workspace`, saved in `workspace.json` |
+
+**Scope.** A new project copies the global defaults; afterwards they are independent: changing
+the defaults never alters an existing project, open or saved. A project saved before
+`workspace.json` existed opens with the factory defaults (what it was made with), never with the
+user's current globals. `restore_workspace_defaults` copies the current globals (or the factory
+values) on request.
+
+**One path.** The Settings screen and the agent both change the project's settings through the
+workspace tools (`set_units`, `configure_grid`, `configure_snapping`,
+`restore_workspace_defaults`; reads `get_workspace_settings`, `snap_calculate`, `convert_units`),
+which validate with `workspace.Settings.Validate` and store through `App.SetWorkspace`. They are
+query tools, not ChangeSets: workspace settings are not CAD state, are not undone with undo and
+never trigger a rebuild; each call is still in `agent-history.json` and each change publishes a
+`WorkspaceChanged` event.
+
+**Grid rendering** (`frontend/grid.js`, lines from `grid-model.js`): lines at `origin + k·spacing`
+in world space, major lines every `major_interval` cells, centre lines in the axis colours. The
+perspective view shows the configured plane through the grid origin; orthographic views show the
+plane they face. To avoid z-fighting the grid only moves along its normal (a hair away from the
+camera, or behind the whole model in orthographic views), never within its plane. Snapping is
+computed and tested but not yet connected to mouse transforms.
+
 ### Sketches and image-derived geometry
 
 `sketch` is a CAD-IR node type for planar 2D geometry; it produces faces, not a solid
@@ -322,8 +359,8 @@ object match, `len`, `set`, `oneof`, `contains`, `approx`, `any`).
 ## 11. Persistence
 
 A project is a `.scadproj` directory of canonical JSON — see [project-format.md](project-format.md).
-Saving writes atomically (temp file + rename). Loading validates the schema version (v1 → v2 only added optional content, so v1 projects load
-unchanged) and the graph. Saving the same state twice yields identical bytes;
+Saving writes atomically (temp file + rename). Loading validates the schema version (every bump so far only added optional
+content, so v1–v3 projects load unchanged; v4 adds `workspace.json`) and the graph. Saving the same state twice yields identical bytes;
 `save → load → rebuild → save` is byte-identical.
 
 ## 12. Native layer and threading

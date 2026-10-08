@@ -91,7 +91,8 @@ backlog item "round only the outer edges after pocketing".
   the label picks one of seven orientations for that view only (Perspective, Top, Bottom,
   Front, Back, Left, Right); the change is animated and a projection switch keeps the target
   and visible size. Grid planes follow the Z-up model: Top/Bottom XY, Front/Back XZ,
-  Left/Right YZ (the orthographic grid sits behind the model). Double-clicking a label
+  Left/Right YZ (the orthographic grid sits behind the model); the perspective view shows the
+  project's configured grid plane. Double-clicking a label
   maximizes that view and again restores the quad; the dividers resize the views. Single
   View shows the active pane, so its configuration carries over between layouts. Layout,
   split and cameras are saved per project path in `localStorage` (`simon.views.v1:<path>`),
@@ -121,6 +122,19 @@ backlog item "round only the outer edges after pocketing".
   All of it is presentation only: not pickable, not in the model bounds, never exported or recorded
   in the history. Settings → *Viewport* turns each part on or off and sets the axis opacity and the
   gizmo's size and corner; the choice is saved with the other settings.
+- **Workspace / Units & Grid:** Settings › *Workspace / Units & Grid* edits the open project's
+  display units (linear mm/cm/m/in/ft, angular degrees/radians, decimals), grid (show, plane,
+  spacing, major line interval, extent, origin) and snapping (master switch, grid, translation,
+  rotation, increments). Lengths in the form are shown in the unit chosen there; changes preview
+  in the viewport at once and Cancel reverts them; invalid values (zero or negative spacing,
+  extent or increments) are refused in place. Save calls the workspace tools — the same ones the
+  agent uses — for the sections that changed; *Restore Defaults* loads the global defaults and
+  *Use as default for new projects* stores the values as those defaults. Display units apply to
+  dimension labels and fields, the measurement label, selection info, ChangeSet volumes and the
+  modeling dialogs (Move, Fillet, Duplicate, face edits, component placement): values are typed
+  in display units and sent to tools in mm (`frontend/units.js`, factors from the server). The
+  grid (`frontend/grid.js`) is drawn world-aligned with major lines and axis-coloured centre
+  lines; see [architecture.md §6b](architecture.md).
 - **Contextual action bar:** a fixed strip above the viewport that shows only the actions valid for
   the current selection (none / body / face / edge / vertex / several bodies / mixed). It is a pure
   function of the selection: `frontend/actions.js` maps each context to actions (id, label, icon,

@@ -47,6 +47,9 @@ func Default() *Registry {
 	for _, t := range meshDetailTools() {
 		r.Register(t)
 	}
+	for _, t := range workspaceTools() {
+		r.Register(t)
+	}
 	for _, t := range queryTools() {
 		r.Register(t)
 	}

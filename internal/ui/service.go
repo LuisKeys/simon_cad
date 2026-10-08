@@ -40,6 +40,7 @@ import (
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
 	"github.com/accelone/simoncad/internal/vision"
+	"github.com/accelone/simoncad/internal/workspace"
 )
 
 // ErrBusy is returned for edits attempted while the agent is working.
@@ -1193,7 +1194,7 @@ func (s *Service) finishTool(name string, o app.Outcome) Outcome {
 	if o.Committed && !o.ChangeSet.AppearanceOnly() {
 		s.app.Checkpoint(firstNonEmpty(o.ChangeSet.Intent, name), false)
 	}
-	s.say("tool", firstNonEmpty(o.Error, o.Message, name), name, o.OK, func() string {
+	s.say("tool", firstNonEmpty(o.Error, o.Message, workspaceMessage(o.Data), name), name, o.OK, func() string {
 		if o.ChangeSet != nil {
 			return o.ChangeSet.ID
 		}
@@ -1201,6 +1202,19 @@ func (s *Service) finishTool(name string, o app.Outcome) Outcome {
 	}())
 	s.changed()
 	return out
+}
+
+// workspaceMessage describes what a workspace tool changed ("" for any other result).
+func workspaceMessage(data any) string {
+	m, _ := data.(map[string]any)
+	c, ok := m["changed"].([]string)
+	if !ok {
+		return ""
+	}
+	if len(c) == 0 {
+		return "Workspace settings unchanged"
+	}
+	return "Workspace: " + strings.Join(c, ", ")
 }
 
 // DeleteRequest is a UI delete (Delete/Backspace, context menu). Features empty = the
@@ -1713,6 +1727,25 @@ type State struct {
 	// Primary is the configured primary model (shown before any request).
 	Model   *runtime.RouteEvent `json:"model,omitempty"`
 	Primary *runtime.RouteEvent `json:"primary,omitempty"`
+	// Workspace is the project's units, grid and snapping, as the viewport and panels use them.
+	Workspace WorkspaceView `json:"workspace"`
+}
+
+// WorkspaceView is the project's workspace settings plus what a client needs to display
+// values without its own conversion table: the size of the display unit in millimetres.
+type WorkspaceView struct {
+	workspace.Settings
+	MMPerUnit       float64            `json:"mm_per_unit"`
+	LinearUnits     map[string]float64 `json:"linear_units"`        // every unit → mm (the UnitService table)
+	TranslationStep float64            `json:"translation_step_mm"` // the effective translation increment
+	Warnings        []string           `json:"warnings,omitempty"`  // what could not be read from workspace.json
+}
+
+func workspaceView(a *app.App) WorkspaceView {
+	ws := a.Workspace.Clone()
+	return WorkspaceView{Settings: ws, MMPerUnit: workspace.MMPer(ws.Units.Linear), LinearUnits: workspace.MMPerTable(),
+		TranslationStep: ws.TranslationStep(),
+		Warnings:        a.WorkspaceWarnings}
 }
 
 // Features says which attachment workflows can work with the configured providers. It
@@ -1786,6 +1819,7 @@ func (s *Service) State() (*State, error) {
 	s.routeMu.Unlock()
 	st.AgentState, st.Features = s.agentState, s.features()
 	st.Usage = s.usageView()
+	st.Workspace = workspaceView(s.app)
 	if s.refineCancel != nil {
 		st.RefineState = s.refineState
 	}

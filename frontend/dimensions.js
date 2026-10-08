@@ -9,7 +9,8 @@
 //
 // Labels are only editable for the selected objects, which are the only ones dimensioned.
 import * as THREE from 'three';
-import { AXIS_LABEL, dimensionLines, formatMM, labelVisible, parseDimension } from './dimensions-model.js';
+import { AXIS_LABEL, dimensionLines, labelVisible } from './dimensions-model.js';
+import { units } from './units.js';
 
 const LINE_COLOR = 0x35d0c8;
 
@@ -43,6 +44,14 @@ export class DimensionRenderer {
       for (const line of dimensionLines(dim)) this.items.push({ dim, line, obj: this._drawLine(line), labels: new Map() });
     }
     this.vp.dirty();
+  }
+
+  /** Redraws the labels after the display units changed (the lines do not move). */
+  refresh() {
+    if (this.editor.active) return;
+    const list = JSON.parse(this.key || '[]');
+    this.key = '';
+    this.set(list);
   }
 
   _clear() {
@@ -101,8 +110,8 @@ export class DimensionRenderer {
     el.className = 'dim-label';
     el.dataset.object = dim.object_id;
     el.dataset.axis = line.axis;
-    el.textContent = formatMM(line.value);
-    const what = `${AXIS_LABEL[line.axis]} of ${dim.object_id}: ${formatMM(line.value)} mm`;
+    el.textContent = units.compact(line.value);
+    const what = `${AXIS_LABEL[line.axis]} of ${dim.object_id}: ${units.compact(line.value)} ${units.symbol}`;
     el.title = `${what}${dim.rotated ? ' (along its own axes)' : ''}. Click to type a new size${dim.lock_proportions ? '; proportions are locked' : ''}.`;
     el.setAttribute('aria-label', `${what}. Edit`);
     // The view underneath must not see the press (no orbit, no pick).
@@ -132,8 +141,8 @@ export class DimensionEditor {
     input.type = 'text';
     input.inputMode = 'decimal';
     input.className = 'dim-input';
-    input.value = formatMM(line.value);
-    input.setAttribute('aria-label', `New ${line.axis} of ${dim.object_id} in mm`);
+    input.value = units.compact(line.value);
+    input.setAttribute('aria-label', `New ${line.axis} of ${dim.object_id} in ${units.symbol}`);
     input.spellcheck = false;
     label.replaceChildren(input);
     label.classList.add('editing');
@@ -155,24 +164,24 @@ export class DimensionEditor {
     const a = this.active;
     if (!a) return;
     if (confirm) {
-      const r = parseDimension(a.input.value);
+      const r = units.parseLength(a.input.value);
       if (!r.ok) { a.input.setAttribute('aria-invalid', 'true'); this.hooks.onInvalid?.(r.error); a.input.select(); return; }
       if (Math.abs(r.value - a.line.value) < 1e-9) { confirm = false; } // unchanged: nothing to do
       else {
         this.active = null;
         a.label.classList.remove('editing');
         a.label.classList.add('busy');
-        a.label.textContent = formatMM(r.value);
+        a.label.textContent = units.compact(r.value);
         // On success the new dimensions replace this label; on failure it shows the old value.
         try { await this.hooks.onEdit(a.dim.object_id, a.line.axis, r.value); } finally {
           a.label.classList.remove('busy');
-          a.label.textContent = formatMM(a.line.value);
+          a.label.textContent = units.compact(a.line.value);
         }
         return;
       }
     }
     this.active = null;
     a.label.classList.remove('editing');
-    a.label.textContent = formatMM(a.line.value);
+    a.label.textContent = units.compact(a.line.value);
   }
 }

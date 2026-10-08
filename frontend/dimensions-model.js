@@ -1,5 +1,5 @@
 // Pure helpers of the interactive dimensions (no DOM, no Three.js; unit tested): where the
-// dimension lines of an object go, how a typed value is read and how a size is shown.
+// dimension lines of an object go. Sizes are shown and read in the display units (units.js).
 // The measurement itself comes from the server (DimensionService, get_object_dimensions);
 // edits go through the set_object_dimension tool like every other change.
 
@@ -9,24 +9,6 @@ export const AXIS_LABEL = { width: 'Width', depth: 'Depth', height: 'Height' };
 export const ANCHORS = [['center', 'Center'], ['object_origin', 'Object origin']];
 /** The order the Properties panel lists them in. */
 export const PANEL_ORDER = ['width', 'height', 'depth'];
-
-const MAX_MM = 1e6;
-
-/** "150", "150 mm", "150,5" → { ok: true, value }; anything else → { ok: false, error }. */
-export function parseDimension(text) {
-  const t = String(text ?? '').trim().replace(/\s*mm$/i, '').replace(',', '.');
-  if (!/^[+]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(t)) return { ok: false, error: 'Type a size in mm, e.g. 150' };
-  const v = Number(t);
-  if (!Number.isFinite(v) || v <= 0) return { ok: false, error: 'The size must be greater than 0 mm' };
-  if (v > MAX_MM) return { ok: false, error: `The size must be at most ${MAX_MM} mm` };
-  return { ok: true, value: v };
-}
-
-/** A size for display: at most two decimals, no trailing zeros. */
-export function formatMM(v) {
-  if (!Number.isFinite(v)) return '';
-  return String(Math.round(v * 100) / 100);
-}
 
 /** The size the other dimensions will get when `axis` becomes `value` (Lock Proportions). */
 export function proportionalSize(d, axis, value, lock) {

@@ -1,22 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AXES, parseDimension, formatMM, proportionalSize, dimensionLines, labelVisible, toWorld } from './dimensions-model.js';
+import { AXES, proportionalSize, dimensionLines, labelVisible, toWorld } from './dimensions-model.js';
+import { displayUnits } from './units.js';
 
 const box = { width: 120, depth: 80, height: 40, min: [0, 0, 0], max: [120, 80, 40], axes: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] };
 const close = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
 
 test('typed sizes: plain numbers, a mm suffix and a decimal comma', () => {
-  assert.deepEqual(parseDimension('150'), { ok: true, value: 150 });
-  assert.deepEqual(parseDimension(' 150 mm '), { ok: true, value: 150 });
-  assert.deepEqual(parseDimension('12,5'), { ok: true, value: 12.5 });
-  assert.deepEqual(parseDimension('.5'), { ok: true, value: 0.5 });
-  for (const bad of ['', 'abc', '0', '-3', '1/2', '2e9', 'NaN', '150 cm']) assert.equal(parseDimension(bad).ok, false, bad);
+  const { parseLength } = displayUnits(null);
+  assert.deepEqual(parseLength('150'), { ok: true, value: 150 });
+  assert.deepEqual(parseLength(' 150 mm '), { ok: true, value: 150 });
+  assert.deepEqual(parseLength('12,5'), { ok: true, value: 12.5 });
+  assert.deepEqual(parseLength('.5'), { ok: true, value: 0.5 });
+  for (const bad of ['', 'abc', '0', '-3', '1/2', '2e9', 'NaN', '150 cm']) assert.equal(parseLength(bad).ok, false, bad);
 });
 
 test('sizes show at most two decimals', () => {
-  assert.equal(formatMM(150), '150');
-  assert.equal(formatMM(12.3456), '12.35');
-  assert.equal(formatMM(NaN), '');
+  const { compact } = displayUnits(null);
+  assert.equal(compact(150), '150');
+  assert.equal(compact(12.3456), '12.35');
+  assert.equal(compact(NaN), '');
 });
 
 test('lock proportions scales the other two dimensions by the same factor', () => {
