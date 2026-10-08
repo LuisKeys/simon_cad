@@ -59,7 +59,14 @@ func (s *Service) RunRefinement(req RefineRequest) error {
 		visionReason = prov.Name() + " cannot read images; the visual critique runs on " + vision.Name()
 	}
 	vision = router.Observe(vision, visionFallback, visionReason)
-	agent := router.Agent() // builds the model; may hand over to the fallback once
+	// builds the model: on the fallback from the start when the primary is local (the
+	// request always carries images) or the goal asks for it; otherwise it may hand over
+	// to the fallback once
+	agent, _, err := router.AgentOnFallback("an image is attached", runtime.WantsFrontier(req.Goal))
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	s.keepDraft()
 	s.beginRoutes()
 	s.busy = true

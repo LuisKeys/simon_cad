@@ -249,12 +249,33 @@ func (o *observed) Identity() (string, string)         { return Identify(o.Provi
 // Use a new Agent per request.
 func (r *Router) Agent() Provider { return &failover{r: r} }
 
+// AgentOnFallback is Agent for a request that should run on the fallback model from its
+// first call, for reason (attachments, or the user asking for it). It returns the plain
+// Agent when no reason is given, the fallback is unavailable or the primary is already a
+// cloud model and could serve the request itself (only reason "requested" overrides that).
+// A local primary needs the user's consent to send the request to a remote fallback: the
+// ConsentError is returned so the caller can ask.
+func (r *Router) AgentOnFallback(reason string, userRequested bool) (Provider, bool, error) {
+	if reason == "" || len(r.Fallbacks) == 0 || r.Selected == nil {
+		return r.Agent(), false, nil
+	}
+	if !userRequested && !IsLocal(r.Selected) {
+		return r.Agent(), false, nil
+	}
+	fb := r.Fallbacks[0]
+	if err := r.consent(fb); err != nil {
+		return nil, false, err
+	}
+	return &failover{r: r, switched: fb, reason: reason, preset: true}, true, nil
+}
+
 type failover struct {
 	r          *Router
 	mu         sync.Mutex
 	switched   Provider // the fallback, once the request moved to it
 	reason     string
 	noThinking bool
+	preset     bool // the request started on the fallback (see AgentOnFallback)
 }
 
 func (f *failover) current() Provider {
@@ -269,8 +290,14 @@ func (f *failover) current() Provider {
 func (f *failover) Name() string { return f.current().Name() }
 
 // Capabilities are the selected provider's: what a request may attach is decided before it
-// starts, and a hand-over must not widen it.
-func (f *failover) Capabilities() ProviderCapabilities { return CapabilitiesOf(f.r.Selected) }
+// starts, and a hand-over must not widen it. A request that started on the fallback has
+// the fallback's.
+func (f *failover) Capabilities() ProviderCapabilities {
+	if f.preset {
+		return CapabilitiesOf(f.switched)
+	}
+	return CapabilitiesOf(f.r.Selected)
+}
 
 func (f *failover) Identity() (string, string) { return Identify(f.current()) }
 

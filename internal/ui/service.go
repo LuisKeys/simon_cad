@@ -839,8 +839,25 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 	// itself runs on the router's agent provider, which may hand the request over to the
 	// fallback model once if the primary becomes unavailable.
 	router := s.router(prov)
+	// The whole request runs on the fallback (frontier) model when something is attached
+	// (an image or a document) and the primary is local, or when the prompt asks for it.
+	// Without a usable fallback the request stays on the primary, as before.
+	reason, asked := "", runtime.WantsFrontier(text)
+	switch {
+	case asked:
+		reason = "requested in the prompt"
+	case len(images) > 0:
+		reason = "an image is attached"
+	case len(s.specs) > 0:
+		reason = "a document is attached"
+	}
+	agentProv, onFallback, err := router.AgentOnFallback(reason, asked)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	var interp runtime.ImageInterpreter
-	if len(images) > 0 && !runtime.CapabilitiesOf(prov).Vision {
+	if !onFallback && len(images) > 0 && !runtime.CapabilitiesOf(prov).Vision {
 		proc := &attachments.Processor{Router: router, NoThinking: !thinking,
 			Wrap: func(p runtime.Provider) runtime.Provider { return unlocking{p, &s.mu} },
 			OnRoute: func(kind attachments.Kind, used string) {
@@ -880,7 +897,7 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		caps := runtime.SelectCaps(s.app, images, geo.New(), vis.New(), visualcap.New())
-		rt := &runtime.Runtime{Provider: unlocking{router.Agent(), &s.mu}, Caps: caps, History: prior, NoThinking: !thinking,
+		rt := &runtime.Runtime{Provider: unlocking{agentProv, &s.mu}, Caps: caps, History: prior, NoThinking: !thinking,
 			ImageIDs: images, Interpreter: interp, Reference: s.specContext()}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""

@@ -222,9 +222,9 @@ type identified struct {
 
 func (p identified) Identity() (string, string) { return p.provider, p.model }
 
-// A local primary asks before its first remote fallback; once authorized, the request runs,
-// the fallback is named in the conversation and the model indicator follows the model that
-// ran last.
+// A local primary asks before its first remote fallback; once authorized, the whole request
+// (an image is attached) runs on the fallback, which is named in the conversation and shown
+// by the model indicator.
 func TestRemoteFallbackIsAuthorizedFirst(t *testing.T) {
 	s := newSvc(t)
 	info, _ := s.UploadImage(testPNG(t))
@@ -262,13 +262,12 @@ func TestRemoteFallbackIsAuthorizedFirst(t *testing.T) {
 			drained = true
 		}
 	}
-	if len(models) != 2 || models[0].Label() != "OpenAI · gpt-x" || !models[0].Fallback || models[0].Requested != "qwen3" ||
-		models[1].Label() != "Ollama · qwen3" || models[1].Fallback {
+	if len(models) != 1 || models[0].Label() != "OpenAI · gpt-x" || !models[0].Fallback || models[0].Requested != "qwen3" {
 		t.Fatalf("model indicator events: %+v", models)
 	}
 	st, _ := s.State()
-	if st.Model == nil || st.Model.Label() != "Ollama · qwen3" {
-		t.Fatalf("the last response came from the local model: %+v", st.Model)
+	if st.Model == nil || st.Model.Label() != "OpenAI · gpt-x" || len(ollama.reqs) != 0 {
+		t.Fatalf("the whole request ran on the fallback: %+v", st.Model)
 	}
 	n := 0
 	for _, m := range st.Chat {

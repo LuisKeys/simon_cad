@@ -107,8 +107,11 @@ values are ignored. `.env` is git-ignored; `.env.example` documents everything.
 
 **Primary and fallback models.** The primary model serves every request it can. The fallback
 model, a cloud model (OpenAI or Anthropic), serves what the primary cannot: attachments it cannot
-read (an image for a text-only Ollama model, a PDF) and requests whose primary model became
-unavailable after its own retries — at most one hand-over per request, never back. With the
+read (an image for a text-only Ollama model, a PDF), requests whose primary model became
+unavailable after its own retries — at most one hand-over per request, never back — and, with a
+local primary, every request that carries an attached image or document, or whose prompt asks for
+it ("use the frontier/fallback model", "usa el modelo de frontera"; also with a cloud primary).
+Without a usable fallback those requests stay on the primary. With the
 fallback disabled, such requests are refused with a reason; nothing is rerouted silently. With a
 local primary, SimonCAD asks before the first request it would send to the cloud (the answer can
 be remembered; Settings › Fallback Model › Remote data changes it). Every fallback is named in the

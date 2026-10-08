@@ -127,3 +127,57 @@ func TestAgentDoesNotFailOverWithoutCause(t *testing.T) {
 		t.Fatalf("disabled: %v", err)
 	}
 }
+
+// A request with attachments (or one that asks for it) starts on the fallback model; a
+// cloud primary keeps its own requests unless the user asked for the frontier model.
+func TestAgentOnFallbackFromTheStart(t *testing.T) {
+	local, remote := &model{provider: "ollama", name: "qwen3", caps: textCaps}, &model{provider: "openai", name: "gpt-x", caps: allCaps}
+	var events []runtime.RouteEvent
+	r := &runtime.Router{Selected: local, Fallbacks: []runtime.Provider{remote}, Consent: config.ConsentAllow,
+		OnRoute: func(ev runtime.RouteEvent) { events = append(events, ev) }}
+
+	if _, on, err := r.AgentOnFallback("", false); err != nil || on {
+		t.Fatalf("nothing attached: %v %v", on, err)
+	}
+	agent, on, err := r.AgentOnFallback("an image is attached", false)
+	if err != nil || !on || !runtime.CapabilitiesOf(agent).Vision {
+		t.Fatalf("attached: %v %v", on, err)
+	}
+	if resp, err := agent.Complete(context.Background(), runtime.Request{}); err != nil || resp.Text() != "gpt-x" || local.calls != 0 {
+		t.Fatalf("complete: %v %v local=%d", resp, err, local.calls)
+	}
+	if len(events) != 1 || !events[0].Fallback || events[0].Requested != "qwen3" || events[0].Reason != "an image is attached" {
+		t.Fatalf("events: %+v", events)
+	}
+
+	r.Consent = config.ConsentAsk
+	if _, _, err := r.AgentOnFallback("a document is attached", false); !errors.Is(err, runtime.ErrConsentRequired) {
+		t.Fatalf("consent: %v", err)
+	}
+
+	cloud := &runtime.Router{Selected: &model{provider: "claude", name: "x", caps: allCaps}, Fallbacks: []runtime.Provider{remote}}
+	if _, on, _ := cloud.AgentOnFallback("an image is attached", false); on {
+		t.Fatal("a cloud primary that can read the attachment keeps the request")
+	}
+	if _, on, _ := cloud.AgentOnFallback("requested in the prompt", true); !on {
+		t.Fatal("the user asked for the frontier model")
+	}
+	none := &runtime.Router{Selected: local, FallbackErr: runtime.ErrFallbackDisabled}
+	if _, on, err := none.AgentOnFallback("an image is attached", false); on || err != nil {
+		t.Fatalf("no fallback: %v %v", on, err)
+	}
+}
+
+func TestWantsFrontier(t *testing.T) {
+	for _, s := range []string{"usa el modelo de frontera para esto", "Use the fallback model", "hacelo con el modelo de respaldo",
+		"ask the frontier model", "usá la nube", "usa el fallback"} {
+		if !runtime.WantsFrontier(s) {
+			t.Errorf("%q should ask for the frontier model", s)
+		}
+	}
+	for _, s := range []string{"make a 40mm cube", "crea una caja de 10 mm", "the fallback of the design is a cube"} {
+		if runtime.WantsFrontier(s) {
+			t.Errorf("%q should not", s)
+		}
+	}
+}
