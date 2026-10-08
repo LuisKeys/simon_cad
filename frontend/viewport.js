@@ -56,6 +56,7 @@ export class Viewport {
 
     this.appearance = {};       // body id -> {color, opacity, visible, material_id, texture_scale} from the CAD-IR
     this.materials = new MaterialManager(hooks.library, hooks.textureUrl, () => this.dirty());
+    this.materials.maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
     this.bodies = new Map();   // id -> { data, group, mesh, edges, material }
     this.ghost = new THREE.Group(); this.scene.add(this.ghost);
     this.hoverGroup = new THREE.Group(); this.scene.add(this.hoverGroup);

@@ -22,6 +22,7 @@ export class MaterialManager {
     this.library = library;
     this.textureUrl = textureUrl;
     this.onChange = onChange;
+    this.maxAnisotropy = 4; // the viewport raises it to the GPU's maximum for sharp textures at grazing angles
     this.loader = new THREE.TextureLoader();
     // key: "<kind>|<url>"; one GPU texture per file no matter how many bodies share it.
     this.textures = new RefCache((key) => this._loadTexture(key), (tex) => tex.dispose());
@@ -34,7 +35,7 @@ export class MaterialManager {
     const tex = this.loader.load(url, () => this.onChange(), undefined, () => { /* missing texture: scalars still apply */ });
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.colorSpace = kind === 'baseColor' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-    tex.anisotropy = 4;
+    tex.anisotropy = this.maxAnisotropy;
     return tex;
   }
 
@@ -47,6 +48,9 @@ export class MaterialManager {
       m.transparent = false; m.opacity = 1; m.depthWrite = true; m.attenuationColor = base.clone();
       m.attenuationDistance = Math.max(def.thickness ?? 1, 1) * 4;
     } else { m.transparent = op < 1; m.opacity = op; m.depthWrite = op >= 1; }
+    // three multiplies the scalar by the map's texel: with a map present the scalar must be 1.
+    if (def.textures?.roughness) m.roughness = 1;
+    if (def.textures?.metalness) m.metalness = 1;
     const held = [];
     for (const [kind, file] of Object.entries(def.textures ?? {})) {
       if (!file || !MAPS[kind]) continue;

@@ -12,10 +12,15 @@
   "baseColor": "#BFC2C4",
   "metalness": 1.0,
   "roughness": 0.35,
-  "textureScale": 20,
+  "textures": {
+    "baseColor": "color.jpg",
+    "normal": "normal.jpg",
+    "roughness": "roughness.jpg"
+  },
+  "textureScale": 100,
   "license": {
-    "source": "Simon CAD",
+    "source": "ambientCG Metal009",
     "license": "CC0-1.0",
-    "url": ""
+    "url": "https://ambientcg.com/view?id=Metal009"
   }
 }
