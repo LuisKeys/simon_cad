@@ -11,6 +11,7 @@
   "baseColor": "#E6E3DA",
   "metalness": 0.0,
   "roughness": 0.7,
+  "sheen": 0.15,
   "textureScale": 1,
   "license": {
     "source": "Simon CAD",

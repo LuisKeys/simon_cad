@@ -11,7 +11,9 @@
   "baseColor": "#DDE9EE",
   "metalness": 0.0,
   "roughness": 0.15,
-  "opacity": 0.35,
+  "transmission": 0.85,
+  "ior": 1.49,
+  "thickness": 2,
   "textureScale": 1,
   "license": {
     "source": "Simon CAD",

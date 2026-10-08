@@ -11,6 +11,7 @@
   "baseColor": "#C8CBCE",
   "metalness": 1.0,
   "roughness": 0.1,
+  "envMapIntensity": 1.0,
   "textureScale": 20,
   "license": {
     "source": "Simon CAD",

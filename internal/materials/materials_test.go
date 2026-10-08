@@ -127,10 +127,24 @@ func TestValidate(t *testing.T) {
 		{ID: "a", Name: "x", BaseColor: "red"},
 		{ID: "a", Name: "x", BaseColor: "#000000", Metalness: 2},
 		{ID: "a", Name: "x", BaseColor: "#000000", Roughness: -1},
+		{ID: "a", Name: "x", BaseColor: "#000000", Clearcoat: f64(1.5)},
+		{ID: "a", Name: "x", BaseColor: "#000000", IOR: f64(0.5)},
+		{ID: "a", Name: "x", BaseColor: "#000000", Emissive: "glow"},
+		{ID: "a", Name: "x", BaseColor: "#000000", EnvMapIntensity: f64(-1)},
 	}
 	for i, m := range bad {
 		if m.Validate() == nil {
 			t.Errorf("case %d should be invalid", i)
 		}
+	}
+}
+
+func f64(v float64) *float64 { return &v }
+
+func TestValidatePhysicalExtras(t *testing.T) {
+	m := Material{ID: "g", Name: "Glass", BaseColor: "#ffffff", Clearcoat: f64(1), Transmission: f64(0.9),
+		IOR: f64(1.5), Thickness: f64(2), Sheen: f64(0.3), Anisotropy: f64(0.5), Emissive: "#102030", EnvMapIntensity: f64(1.4)}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("valid physical material rejected: %v", err)
 	}
 }

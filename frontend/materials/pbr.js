@@ -1,11 +1,12 @@
 // Three.js side of the material system: turns library definitions + CAD-IR appearance into
-// shared MeshStandardMaterials. Textures and materials are created once, reference counted
+// shared MeshStandardMaterials (MeshPhysicalMaterial when a definition asks for clearcoat, transmission...). Textures and materials are created once, reference counted
 // and disposed from the GPU when unused (see cache.js). Presentation only: nothing here
 // touches geometry except the optional `uv` attribute, which is derived from it.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { RefCache, materialKey } from './cache.js';
 import { computeUVs } from './uv.js';
+import { isPhysical, physicalProps, usesTransmission } from './physical.js';
 
 export const DEFAULT_DEF = { id: '', name: 'Default', baseColor: '#9FB2C8', metalness: 0.25, roughness: 0.45, textures: {}, textureScale: 1 };
 
@@ -40,8 +41,12 @@ export class MaterialManager {
   _build(def, ap) {
     const base = new THREE.Color(ap?.color || def.baseColor);
     const op = (typeof def.opacity === 'number' ? def.opacity : 1) * (typeof ap?.opacity === 'number' ? ap.opacity : 1);
-    const m = new THREE.MeshStandardMaterial({ color: base, metalness: def.metalness, roughness: def.roughness, side: THREE.FrontSide });
-    m.transparent = op < 1; m.opacity = op; m.depthWrite = op >= 1;
+    const props = { color: base, metalness: def.metalness, roughness: def.roughness, side: THREE.FrontSide, ...physicalProps(def) };
+    const m = isPhysical(def) ? new THREE.MeshPhysicalMaterial(props) : new THREE.MeshStandardMaterial(props);
+    if (usesTransmission(def, op)) { // glass: refraction instead of alpha blending
+      m.transparent = false; m.opacity = 1; m.depthWrite = true; m.attenuationColor = base.clone();
+      m.attenuationDistance = Math.max(def.thickness ?? 1, 1) * 4;
+    } else { m.transparent = op < 1; m.opacity = op; m.depthWrite = op >= 1; }
     const held = [];
     for (const [kind, file] of Object.entries(def.textures ?? {})) {
       if (!file || !MAPS[kind]) continue;
@@ -107,9 +112,11 @@ export class ThumbnailRenderer {
 
   /** @returns {Promise<string>} PNG data URL */
   async render(def) {
-    const m = new THREE.MeshStandardMaterial({ color: def.baseColor, metalness: def.metalness, roughness: def.roughness });
+    const props = { color: def.baseColor, metalness: def.metalness, roughness: def.roughness, ...physicalProps(def) };
+    const m = isPhysical(def) ? new THREE.MeshPhysicalMaterial(props) : new THREE.MeshStandardMaterial(props);
     const op = typeof def.opacity === 'number' ? def.opacity : 1;
     m.transparent = op < 1; m.opacity = Math.max(op, 0.35);
+    if (usesTransmission(def)) { m.transmission = 0; m.transparent = true; m.opacity = 0.4; } // no transmission pass in a 96px swatch
     const base = def.textures?.baseColor;
     if (base) {
       try {

@@ -7,10 +7,17 @@ import { shadowFrame } from './lighting-model.js';
 /** Softboxes in a dark room, in world (Z-up) directions: what metals and glossy plastics reflect. */
 export function studioEnvironment() {
   const scene = new THREE.Scene();
-  const room = new THREE.Mesh(new THREE.BoxGeometry(40, 40, 24),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(0x4a505a), side: THREE.BackSide }));
-  room.position.z = 8;
-  scene.add(room);
+  // A sky-to-ground gradient dome: flat metal faces reflect one direction of it, so the
+  // dome must be mid-bright everywhere or polished parts come out pure black or pure white.
+  const dome = new THREE.SphereGeometry(30, 32, 16);
+  const pos = dome.attributes.position, col = [];
+  const top = new THREE.Color(0xe4ebf5).multiplyScalar(1.1), mid = new THREE.Color(0x9aa3b0), low = new THREE.Color(0x4c5058);
+  for (let i = 0; i < pos.count; i++) {
+    const t = pos.getZ(i) / 30; // -1 (down) .. 1 (up)
+    col.push(...(t > 0 ? mid.clone().lerp(top, t) : mid.clone().lerp(low, -t * 1.2 > 1 ? 1 : -t * 1.2)).toArray());
+  }
+  dome.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  scene.add(new THREE.Mesh(dome, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
   const panel = (w, h, intensity, pos, tint = 0xffffff) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({ color: new THREE.Color(tint).multiplyScalar(intensity), side: THREE.DoubleSide }));
@@ -18,21 +25,17 @@ export function studioEnvironment() {
     m.lookAt(0, 0, 0);
     scene.add(m);
   };
-  panel(14, 10, 9, [10, -12, 14]);              // key softbox, front-right and above
-  panel(5, 16, 4, [-16, -4, 6], 0xdfe9ff);      // cool strip on the left
-  panel(5, 14, 3, [16, 6, 5], 0xfff1dd);        // warm strip on the right
-  panel(16, 16, 3.5, [0, 0, 19]);               // overhead
-  panel(18, 4, 5, [0, 17, 9]);                  // rim light behind
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(0x8b9099) }));
-  floor.position.z = -3.9;
-  scene.add(floor);                             // bounce from below, so undersides are not black
+  panel(16, 12, 3.2, [10, -12, 14]);            // key softbox, front-right and above
+  panel(6, 18, 2.2, [-16, -4, 6], 0xdfe9ff);    // cool strip on the left
+  panel(6, 16, 2, [16, 6, 5], 0xfff1dd);        // warm strip on the right
+  panel(18, 18, 1.6, [0, 0, 19]);               // overhead
+  panel(20, 5, 2.4, [0, 17, 9]);                // rim light behind
   return scene;
 }
 
 export class StudioLighting {
   constructor(scene, renderer) {
-    this.key = new THREE.DirectionalLight(0xfff6ea, 2.2);
+    this.key = new THREE.DirectionalLight(0xfff6ea, 1.4);
     this.key.castShadow = true;
     this.key.shadow.mapSize.set(2048, 2048);
     this.key.shadow.bias = -0.0004;

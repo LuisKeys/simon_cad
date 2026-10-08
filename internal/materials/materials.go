@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"path"
 	"regexp"
 	"sort"
@@ -42,7 +43,18 @@ type Material struct {
 	Opacity      *float64 `json:"opacity,omitempty"`
 	Textures     Textures `json:"textures,omitempty"`
 	TextureScale float64  `json:"textureScale,omitempty"`
-	License      License  `json:"license,omitempty"`
+	// Optional physically based extras (rendered with a physical material). All unitless
+	// 0..1 unless noted; absent means "not used".
+	Clearcoat          *float64 `json:"clearcoat,omitempty"`
+	ClearcoatRoughness *float64 `json:"clearcoatRoughness,omitempty"`
+	Transmission       *float64 `json:"transmission,omitempty"`
+	IOR                *float64 `json:"ior,omitempty"`       // 1..2.333
+	Thickness          *float64 `json:"thickness,omitempty"` // mm, for transmission
+	Sheen              *float64 `json:"sheen,omitempty"`
+	Anisotropy         *float64 `json:"anisotropy,omitempty"`
+	Emissive           string   `json:"emissive,omitempty"`        // #RRGGBB
+	EnvMapIntensity    *float64 `json:"envMapIntensity,omitempty"` // >= 0
+	License            License  `json:"license,omitempty"`
 	// Project is true for materials that come from a project's assets/materials folder.
 	Project bool `json:"project,omitempty"`
 
@@ -76,6 +88,22 @@ func (m *Material) Validate() error {
 		return fmt.Errorf("material %q: opacity out of [0,1]", m.ID)
 	case m.TextureScale < 0:
 		return fmt.Errorf("material %q: textureScale must be positive", m.ID)
+	case m.Emissive != "" && !hexPattern.MatchString(m.Emissive):
+		return fmt.Errorf("material %q: emissive %q is not #RRGGBB", m.ID, m.Emissive)
+	}
+	for _, f := range []struct {
+		name     string
+		v        *float64
+		min, max float64
+	}{
+		{"clearcoat", m.Clearcoat, 0, 1}, {"clearcoatRoughness", m.ClearcoatRoughness, 0, 1},
+		{"transmission", m.Transmission, 0, 1}, {"sheen", m.Sheen, 0, 1}, {"anisotropy", m.Anisotropy, 0, 1},
+		{"ior", m.IOR, 1, 2.333}, {"thickness", m.Thickness, 0, math.MaxFloat64},
+		{"envMapIntensity", m.EnvMapIntensity, 0, math.MaxFloat64},
+	} {
+		if f.v != nil && !(*f.v >= f.min && *f.v <= f.max) {
+			return fmt.Errorf("material %q: %s %v out of [%v,%v]", m.ID, f.name, *f.v, f.min, f.max)
+		}
 	}
 	return nil
 }

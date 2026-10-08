@@ -82,7 +82,9 @@ try {
   await glass.dispatchEvent('dragstart', { dataTransfer: dt });
   await target.dispatchEvent('dragover', { dataTransfer: dt });
   await target.dispatchEvent('drop', { dataTransfer: dt });
-  await page.waitForFunction(() => window.simonViewport.bodies.get('lid').mesh.material.opacity < 0.5);
+  await page.waitForFunction(() => window.simonViewport.bodies.get('lid').mesh.material.transmission > 0.5);
+  assert.equal(await page.evaluate(() => window.simonViewport.bodies.get('lid').mesh.material.isMeshPhysicalMaterial), true, 'glass renders as a physical material');
+  await page.screenshot({ path: join(shots, 'materials-3-glass.png') });
   assert.equal((await metal('plate')).metalness, 1, 'drop did not touch the selected plate');
 
   // 3. Shared materials: two bodies with the same material share one instance.

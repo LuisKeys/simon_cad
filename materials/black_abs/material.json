@@ -12,6 +12,8 @@
   "baseColor": "#1E1F21",
   "metalness": 0.0,
   "roughness": 0.5,
+  "clearcoat": 0.15,
+  "clearcoatRoughness": 0.35,
   "textureScale": 1,
   "license": {
     "source": "Simon CAD",
