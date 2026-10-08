@@ -197,7 +197,11 @@
 <div class="prompt">Mirror the arm across the YZ plane and merge with the original.</div>
 <div class="prompt">Mirror the bracket across the XZ plane shifted 20 mm along +Y.</div>
 <h3>Move and rotate</h3>
+<p><b>In the viewport</b> (Blender style): select one object and press <kbd>G</kbd> to move it or <kbd>R</kbd> to rotate it (or right-click it → <b>Transform → Move / Rotate</b>, or the Move/Rotate buttons of the action bar). The object follows the mouse; nothing changes in the model until you confirm. While moving, <kbd>X</kbd> / <kbd>Y</kbd> / <kbd>Z</kbd> constrain the move to that axis and <kbd>Shift</kbd>+<kbd>X</kbd> / <kbd>Y</kbd> / <kbd>Z</kbd> to the plane normal to it (<kbd>Shift</kbd>+<kbd>Z</kbd> = XY); by default it moves in the workspace grid plane. While rotating, <kbd>X</kbd> / <kbd>Y</kbd> / <kbd>Z</kbd> pick the axis (default: the grid plane's normal) and <kbd>P</kbd> switches the pivot between the object's origin and its center. Press the same key again to go back to the default. With snapping on (Settings → Workspace), the object's origin lands on the grid and angles on the rotation increment; hold <kbd>Ctrl</kbd> to suspend snapping. The bar at the bottom of the viewport shows the move, the position or the angle in the project's units. <b>Left-click</b> or <kbd>Enter</kbd> confirms (one undoable change, <kbd>Ctrl</kbd>+<kbd>Z</kbd>); <kbd>Esc</kbd> or a <b>right-click</b> cancels and puts the object back exactly. A component instance is moved through its own placement; the component itself never changes.</p>
 <div class="prompt">Move the cylinder 25 mm along +X and 10 mm up.</div>
+<div class="prompt">Move the selected object to X=100, Y=50.</div>
+<div class="prompt">Rotate this component 45 degrees around Z.</div>
+<div class="prompt">Rotate the selected object 90 degrees around its center.</div>
 <div class="prompt">Rotate the arm 90 degrees about the Z axis through the origin, then move it 50 mm in X.</div>
 <div class="prompt">Tilt the plate 30 degrees about the X axis.</div>
 </section>
@@ -504,12 +508,17 @@ a size or a position. Grid changes show in the viewport at once. New projects st
 <table>
 <tr><th>Keys</th><th>Action</th></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd></td><td>Command palette</td></tr>
+<tr><td><kbd>?</kbd></td><td>Show / hide the shortcuts panel (also the keyboard button in the header)</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd></td><td>Save</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd></td><td>Undo</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td>Redo</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>D</kbd></td><td>Duplicate the selected bodies</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>G</kbd></td><td>Group the selection</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>Ungroup the selection</td></tr>
+<tr><td><kbd>G</kbd> / <kbd>R</kbd></td><td>Move / rotate the selected object with the mouse (viewport focused, not while typing)</td></tr>
+<tr><td><kbd>X</kbd> <kbd>Y</kbd> <kbd>Z</kbd> · <kbd>Shift</kbd>+<kbd>X</kbd> <kbd>Y</kbd> <kbd>Z</kbd></td><td>While moving: constrain to an axis · to a plane. While rotating: the rotation axis</td></tr>
+<tr><td><kbd>P</kbd></td><td>While rotating: pivot at the object's origin / center</td></tr>
+<tr><td>Click / <kbd>Enter</kbd> · <kbd>Esc</kbd> / right-click</td><td>Confirm · cancel a move or rotation (<kbd>Ctrl</kbd> held: no snapping)</td></tr>
 <tr><td><kbd>F</kbd></td><td>Fit the active view</td></tr>
 <tr><td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>4</kbd></td><td>Toggle Single / Quad View</td></tr>
 <tr><td><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>Delete selection (not while typing)</td></tr>

@@ -16,6 +16,9 @@ import { initComponents, openComponent, createComponent, replaceComponent, publi
 import { DimensionRenderer } from './dimensions.js';
 import { ANCHORS, AXIS_LABEL, PANEL_ORDER } from './dimensions-model.js';
 import { units, setUnits } from './units.js';
+import { InteractiveTransformController } from './transform.js';
+import { initShortcuts } from './shortcuts.js';
+import { isToggleKey } from './shortcuts-model.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
@@ -56,7 +59,11 @@ const vp = new Viewport($('gl'), {
     const ids = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
     const hasMat = (S.state?.tree ?? []).some((t) => ids.includes(t.id) && t.appearance?.material_id);
     const bodySel = (S.selection?.selectors ?? []).every((x) => x.startsWith('body('));
+    const movable = ids.length === 1 && (S.selection?.transforms ?? []).some((t) => t.object_id === ids[0]);
     showMenu(at, [
+      ...(movable ? [{ head: 'Transform' },
+        { label: 'Move', icon: 'move', key: 'G', data: { xform: 'move' }, run: () => xform.begin('translate', { at }) },
+        { label: 'Rotate', icon: 'rotate', key: 'R', data: { xform: 'rotate' }, run: () => xform.begin('rotate', { at }) }, { sep: true }] : []),
       ...(ids.length ? [...materialMenu(materialCtx, ids, { hasMaterial: hasMat, openPanel: openMaterialPanel }), { sep: true }] : []),
       ...(ids.length && bodySel ? [{ label: 'Duplicate…', icon: 'duplicate', key: 'Ctrl+D', run: () => actionEnv.duplicate() },
         { label: 'Group…', icon: 'group', key: 'Ctrl+G', run: () => actionEnv.group() }, { sep: true }] : []),
@@ -84,6 +91,29 @@ const vp = new Viewport($('gl'), {
 window.simonViewport = vp;
 dimOverlay = new DimensionRenderer(vp, { onEdit: (id, axis, value) => editDimension(id, axis, value), onInvalid: (msg) => toast(msg, 'bad') });
 window.simonDimensions = dimOverlay;
+
+// Interactive Move (G) / Rotate (R): a modal operation previewed on the body's matrix and
+// committed as one move_object / rotate_object call (the same TransformService the agent uses).
+const xform = new InteractiveTransformController(vp, {
+  selection: () => S.selection,
+  workspace: () => S.state?.workspace,
+  commit: async ({ name, args }) => {
+    try {
+      const o = await api('tool', { name, args });
+      if (!o.ok) toast(o.error, 'bad');
+      else if (!o.committed) toast(`${name === 'move_object' ? 'Move' : 'Rotate'} proposed: review it in the conversation`, 'ok');
+      await refresh();
+      return o.ok;
+    } catch (e) { toast(e.message, 'bad'); await refresh(); return false; }
+  },
+  // The editable dimensions would float at the old place: hidden while the object moves.
+  onModal: (on) => { dimOverlay?.set(on ? [] : S.selection?.dimensions ?? []); document.body.classList.toggle('transforming', on); },
+  notify: (msg, kind) => toast(msg, kind),
+});
+window.simonTransform = xform;
+// The viewport has keyboard focus for G/R when it was the last thing clicked or is under the mouse.
+document.addEventListener('pointerdown', (e) => { S.vpFocus = $('viewport').contains(e.target); }, true);
+const viewportFocused = () => S.vpFocus || $('viewport').matches(':hover');
 
 // ---- materials: library, thumbnails, drag & drop --------------------------------------
 
@@ -205,6 +235,7 @@ function applySelection(sel) {
   renderSelection(sel);
   if (S.state) renderTree(S.state);
   renderCtxBar();
+  xform.validate();
 }
 
 // ---- data refresh --------------------------------------------------------------------
@@ -218,6 +249,7 @@ async function refreshScene() {
       S.sceneAgain = false;
       const delta = await api('scene', { known: vp.known });
       vp.applyDelta(delta);
+      xform.validate(); // an agent edit, undo or project switch may have replaced the target
       $('empty').hidden = vp.bodies.size > 0 || (delta.sketches ?? []).length > 0;
       $('hud').textContent = hudStats();
     } while (S.sceneAgain);
@@ -1232,6 +1264,9 @@ const actionEnv = {
   async transform(kind) {
     const ids = selIds();
     if (!ids.length) return;
+    // One object: the interactive Move/Rotate (G/R). Several: typed values (multi-object
+    // interactive transforms are a later phase).
+    if (ids.length === 1) { xform.begin(kind === 'move' ? 'translate' : 'rotate'); return; }
     if (kind === 'move') {
       const v = await formDialog({ title: `Move ${ids.length > 1 ? ids.length + ' objects' : ids[0]} (${units.symbol})`, ok: 'Move',
         fields: [{ key: 'dx', label: 'X', value: 0, length: true }, { key: 'dy', label: 'Y', value: 0, length: true }, { key: 'dz', label: 'Z', value: 0, length: true }] });
@@ -1434,6 +1469,7 @@ $('btn-settings').addEventListener('click', () => openSettings({ toast, onTheme:
   workspace: S.state?.workspace, onWorkspace: (ws) => vp.setWorkspace(ws), onSaved: () => refresh() }));
 $('btn-more').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
   { label: 'Command palette', icon: 'command', key: 'Ctrl+K', run: openPalette },
+  { label: 'Keyboard shortcuts', icon: 'keyboard', key: '?', run: () => shortcuts.open() },
   { sep: true }, { head: 'Agent level' },
   { label: 'Review — preview every change', checked: S.level === 'review', data: { level: 'review' }, run: () => setLevel('review') },
   { label: 'Auto — commit low-risk changes', checked: S.level === 'auto', data: { level: 'auto' }, run: () => setLevel('auto') }]));
@@ -1548,11 +1584,19 @@ $('pal-input').addEventListener('keydown', (e) => {
 });
 $('palette').addEventListener('mousedown', (e) => { if (e.target === $('palette')) closePalette(); });
 
+const shortcuts = initShortcuts($('shortcuts'));
+$('btn-shortcuts').addEventListener('click', () => shortcuts.toggle());
+
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+  if (shortcuts.isOpen()) { // the panel is modal: only its own keys work while it is open
+    if (e.key === 'Escape' || isToggleKey(e, typing)) { e.preventDefault(); shortcuts.close(); }
+    return;
+  }
   const overlay = !$('palette').hidden || !$('dialog').hidden || !$('confirm').hidden || !$('formdlg').hidden;
-  if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !mod && !overlay && !S.playing && S.selection?.selectors?.length) {
+  if (isToggleKey(e, typing) && !overlay && !S.playing && $('visual').hidden && $('settings').hidden && $('interp').hidden) { e.preventDefault(); $('ctxmenu').hidden = true; shortcuts.open(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !mod && !overlay && !S.playing && S.selection?.selectors?.length) {
     e.preventDefault(); // Backspace must not navigate back
     deleteObjects();
   } else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('palette').hidden ? openPalette() : closePalette(); }
@@ -1569,7 +1613,10 @@ document.addEventListener('keydown', (e) => {
   else if (mod && !typing && !overlay && e.key.toLowerCase() === 'g' && selIds().length) { e.preventDefault(); e.shiftKey ? actionEnv.ungroup() : actionEnv.group(); }
   else if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
   else if (e.ctrlKey && e.altKey && !e.shiftKey && (e.code === 'Digit4' || e.code === 'Numpad4') && !typing && !overlay) { e.preventDefault(); vp.layout.toggleMode(); renderCtxBar(); }
-  else if (!typing && !mod && !overlay && e.key === 'f') vp.fit();
+  else if (!typing && !mod && !overlay && !e.altKey && (e.key === 'g' || e.key === 'r') && !S.playing && viewportFocused()) {
+    e.preventDefault();
+    xform.begin(e.key === 'g' ? 'translate' : 'rotate');
+  } else if (!typing && !mod && !overlay && e.key === 'f') vp.fit();
   else if (!typing && !mod && !overlay && e.key === 'm') toggleMeasure();
 });
 

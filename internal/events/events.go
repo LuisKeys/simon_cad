@@ -36,6 +36,9 @@ const (
 	ComponentInserted = "ComponentInserted"
 	ComponentDetached = "ComponentDetached"
 	ComponentSynced   = "ComponentSynced"
+	// ObjectTransformed is published once per committed move/rotate (an interactive drag or
+	// an agent call), never for the previews in between.
+	ObjectTransformed = "ObjectTransformed"
 )
 
 type Event struct {

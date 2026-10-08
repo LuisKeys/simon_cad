@@ -9,6 +9,7 @@ import (
 	"github.com/accelone/simoncad/internal/dimensions"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/tools"
+	"github.com/accelone/simoncad/internal/transform"
 )
 
 // Read-only views for front ends. The UI never touches App.Graph or App.Mgr directly: it
@@ -22,6 +23,12 @@ func (a *App) Snapshot() *cadir.Graph { return a.Graph.Clone() }
 // same measurement the get_object_dimensions tool returns.
 func (a *App) ObjectDimensions(id string) (*dimensions.Dimensions, error) {
 	return tools.ObjectDimensions(toolEnv{a}, id)
+}
+
+// ObjectTransform reads where a visible body is and whether it can be moved now, the same
+// answer the get_object_transform tool gives.
+func (a *App) ObjectTransform(id string) (*transform.Object, error) {
+	return tools.ObjectTransform(toolEnv{a}, id)
 }
 
 // CanUndo and CanRedo report the ChangeSet undo/redo stacks.

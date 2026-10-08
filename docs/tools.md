@@ -394,6 +394,22 @@ Change one parameter of an existing feature (e.g. plate dz from 4 to 5 mm). If t
 | `parameter` | string | yes | Parameter name, e.g. dz, diameter, count |
 | `value` | any | yes | New value (number, string, or boolean) |
 
+### `move_object`
+
+Move one object in world coordinates, as one undoable change. Relative: dx/dy/dz ('move it 20 mm along X' → dx=20). Absolute: x/y/z place the object's origin there ('move it to X=100, Y=50' → x=100, y=50; omitted axes stay). Don't mix both on one axis. Values are in `unit` (default mm). snap=true applies the project's grid/translation snapping to the moved axes. A component instance's placement is updated; the component itself never changes. Omit object_id to move the selected object.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `dx` | number |  | Move along X |
+| `dy` | number |  | Move along Y |
+| `dz` | number |  | Move along Z |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+| `snap` | boolean |  | Apply the project's snapping settings (grid / translation increment, or the rotation increment); only when snapping is enabled |
+| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
+| `x` | number |  | Absolute X of the object's origin |
+| `y` | number |  | Absolute Y of the object's origin |
+| `z` | number |  | Absolute Z of the object's origin |
+
 ### `remove_feature`
 
 Delete a feature. Fails if other features depend on it; remove or re-point those first.
@@ -446,6 +462,22 @@ Return the model to an earlier semantic checkpoint, given by id (cp_002), number
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `checkpoint` | string | yes | Checkpoint id, number, 'previous', or label text |
+
+### `rotate_object`
+
+Rotate one object about a world axis, as one undoable change ('rotate it 45 degrees around Z' → angle=45, axis=z). `angle` is in angle_unit (default deg; positive = counter-clockwise looking down the axis). axis defaults to the normal of the workspace grid plane. pivot: origin (default, the object's own origin), center (its box center) or point (`point`, in `unit`). snap=true snaps the angle to the rotation increment. A component instance's placement is updated; the component itself never changes. Omit object_id to rotate the selected object.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `angle` | number | yes | Rotation angle |
+| `angle_unit` | deg \| rad |  | Unit of the angles given in this call; default deg (deg \| rad) |
+| `axis` | x \| y \| z |  | World axis to rotate about; default: the grid plane's normal (x \| y \| z) |
+| `axis_vector` | array of number |  | A point or vector [x, y, z] |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+| `pivot` | origin \| center \| point |  | Fixed point of the rotation (origin \| center \| point) |
+| `point` | array of number |  | A point or vector [x, y, z] |
+| `snap` | boolean |  | Apply the project's snapping settings (grid / translation increment, or the rotation increment); only when snapping is enabled |
+| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
 
 ### `scale`
 
@@ -741,6 +773,14 @@ _No arguments._
 ### `get_object_dimensions`
 
 Measure an object: width, depth and height in mm along its local X, Y and Z axes (Z up; the axes follow the object's own rotation), its local axes, box, center, origin and whether proportional scaling is locked. Use it to check a resize.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+
+### `get_object_transform`
+
+Where an object is: its origin and box center (world mm), its orientation (local axes and one rotation axis/angle in degrees), whether it can be moved now (and why not) and how a move is recorded (a transform feature, or a component instance's placement). Use it before an absolute move or to pick a rotation pivot.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|

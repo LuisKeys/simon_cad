@@ -39,6 +39,7 @@ import (
 	"github.com/accelone/simoncad/internal/rendering"
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
+	"github.com/accelone/simoncad/internal/transform"
 	"github.com/accelone/simoncad/internal/vision"
 	"github.com/accelone/simoncad/internal/workspace"
 )
@@ -305,6 +306,9 @@ type SelectionView struct {
 	// Dimensions of the selected objects (the visible bodies the selection is on), for the
 	// viewport's editable dimensions and the Dimensions section of the properties.
 	Dimensions []*dimensions.Dimensions `json:"dimensions"`
+	// Transforms of the selected objects (origin, center, orientation, whether they can be
+	// moved): what the viewport's interactive Move/Rotate start from.
+	Transforms []*transform.Object `json:"transforms"`
 }
 
 // maxDimensioned bounds how many selected objects get dimensions (beyond that they clutter).
@@ -312,7 +316,7 @@ const maxDimensioned = 8
 
 func (s *Service) selectionView() SelectionView {
 	v := SelectionView{Entities: []selection.Entity{}, Selectors: []string{}, Highlights: []rendering.Pick{},
-		Dimensions: []*dimensions.Dimensions{}}
+		Dimensions: []*dimensions.Dimensions{}, Transforms: []*transform.Object{}}
 	ctx := s.app.SelectionContext()
 	if ctx.Empty() {
 		return v
@@ -341,6 +345,9 @@ func (s *Service) selectionView() SelectionView {
 		seen[id] = true
 		if d, err := s.app.ObjectDimensions(id); err == nil { // only visible solid bodies
 			v.Dimensions = append(v.Dimensions, d)
+		}
+		if t, err := s.app.ObjectTransform(id); err == nil {
+			v.Transforms = append(v.Transforms, t)
 		}
 	}
 	return v
@@ -1123,15 +1130,16 @@ func (s *Service) CallTool(name string, args json.RawMessage) (Outcome, error) {
 	}
 	s.app.SetActor(app.Actor{CreatedBy: "user"})
 	pol := s.policy()
-	if tools.IsAppearanceTool(name) || tools.IsDimensionEditTool(name) {
+	direct := tools.IsDimensionEditTool(name) || tools.IsDirectTransformTool(name)
+	if tools.IsAppearanceTool(name) || direct {
 		// Presentation edits never wait for approval, even in Review; neither does a typed
-		// dimension (like an inline parameter edit, it is direct and stays undoable).
+		// dimension or a viewport move/rotate (direct manipulation: applied at once, undoable).
 		pol = app.PolicyAuto
 	}
 	before, objects := s.leafSet(), s.dimensionTargets(args)
 	o := s.app.ApplyTool(name, args, pol)
 	out := s.finishTool(name, o)
-	if o.Committed && tools.IsDimensionEditTool(name) {
+	if o.Committed && direct {
 		s.keepObjectSelected(before, objects)
 	}
 	return out, nil

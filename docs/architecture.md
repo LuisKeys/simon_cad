@@ -294,6 +294,57 @@ carry `created_by: agent`, `capability: vision`, `source_image_id`, `interpretat
 ChangeSet ids. Geometry rebuilds from the CAD-IR alone; `geometry`/`cadir` never import `vision` or
 `agent` (tested). Source images are saved under `assets/images/` only when explicitly retained.
 
+### 6c. Transformations: moving and rotating objects
+
+One pipeline serves the viewport and the agent:
+
+```
+ G / R / Right-click → Transform ─▶ InteractiveTransformController ─┐   (frontend/transform.js)
+ agent / palette / CLI ──────────────────────────────────────────────┼─▶ move_object / rotate_object
+                                                                     │     (tools/transform.go: TransformService)
+                                                                     ▼
+                         transform.Rigid (internal/transform) ─▶ `transform` feature, or a
+                         component instance's placement ─▶ ChangeSet ─▶ rebuild (kernel)
+```
+
+- **TransformService** (`internal/tools/transform.go`): `ObjectTransform` (getObjectTransform:
+  origin, box center, orientation, whether the object can be moved and how), `TranslateObject`
+  and `RotateObject` (translateObject / rotateObject). They return an ordinary Plan, so a move is
+  one ChangeSet, one undo step, replayable and validated like any edit. A committed move/rotate
+  publishes one `ObjectTransformed` event. The older `transform` tool keeps working and writes the
+  same feature type.
+- **Rigid motions** (`internal/transform`): `p ↦ R·p + T`, composed as matrices, so no Euler angles
+  accumulate. `PlacementOf` writes a motion as the CAD-IR writes one (rotation by `angle_deg` about
+  an axis through a pivot, then `dx/dy/dz`), choosing the user's pivot so the parameters stay
+  readable; values are rounded to 1 nm / 1e-9° so snapped values are stored exactly. Internally
+  angles are radians; `angle_deg` is the only conversion.
+- **Where a motion is written.** A body gets a new `transform` feature targeting it: the features
+  it was built from are never edited and geometry is never rescaled. A **component instance** is
+  moved through its own placement (its local transform in the parent project): the motion is
+  composed with the placement (`Compose`, the instance's own scale stays first, so nonuniform
+  scaling composes correctly) and written back with `SetParameter`s — no feature is added and the
+  component's source project is untouched. Instances whose placement is driven by an expression,
+  objects in a locked visual region and anything that is not a visible body are refused up front.
+- **Coordinates.** Moves and rotations are in world coordinates (lengths mm, angles radians);
+  the tools take a `unit` / `angle_unit` and convert at the edge. A rotation is stored as its
+  equivalent angle in (−180°, 180°]. Local-frame moves, custom pivots in the UI, numeric input
+  during a drag, gizmos and multi-object transforms are later phases: the session model takes an
+  object list and a constraint object, so they extend it rather than replace it.
+- **Snapping.** `workspace.SnapMove` snaps the move of the object's origin: free axes in the grid
+  plane land on grid lines (grid origin + k·spacing), the other free axes move by the translation
+  increment, constrained axes keep their coordinate exactly; `SnapAngle` snaps the total angle.
+  Both are computed from the state at Begin, never from accumulated per-frame steps. The
+  viewport previews with `frontend/snap.js`, the same rules in JavaScript; both implementations
+  run the cases in `internal/workspace/testdata/snap_cases.json`, so the preview and the stored
+  result agree.
+- **Interactive lifecycle** (`frontend/transform-model.js`): IDLE → TRANSLATING | ROTATING → IDLE,
+  each operation with Begin (snapshot: the body's identity matrix, the start ray or angle), Update
+  (only the body's matrix changes: no rebuild, no serialization, no request, no history, no agent
+  event), Confirm (one tool call; a no-op confirm is a cancel) and Cancel (identity matrix: the
+  original exactly). Planes seen nearly edge-on drag on a camera-facing plane and keep only the
+  in-plane part of the motion; an axis pointing at the camera holds still; the rotation angle
+  unwraps across ±180°.
+
 ## 7. Commands and ChangeSets
 
 Commands are small, serializable and **exactly invertible**:

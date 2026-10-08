@@ -707,6 +707,10 @@ func (a *App) ApplyTool(name string, args []byte, policy Policy) Outcome {
 			return out
 		}
 		out.Committed = true
+		if tools.IsTransformTool(name) {
+			a.Bus.Publish(events.ObjectTransformed, map[string]any{"tool": name, "changeset": cs.ID,
+				"objects": cs.Affected, "intent": cs.Intent})
+		}
 	}
 	return out
 }

@@ -3,6 +3,7 @@ package workspace
 import (
 	"encoding/json"
 	"math"
+	"os"
 	"strings"
 	"testing"
 )
@@ -336,5 +337,58 @@ func TestSchemaAndSafeDecoding(t *testing.T) {
 	got, _, _ = Decode([]byte(`{"snap":{"translation_increment":null}}`), base)
 	if got.Snap.TranslationIncrement != nil || got.TranslationStep() != 10 {
 		t.Fatalf("null increment: %v", got.Snap.TranslationIncrement)
+	}
+}
+
+// The shared cases hold the Go SnapService and its JavaScript twin (frontend/snap.js, which
+// the viewport's interactive Move/Rotate preview with) to the same answers.
+func TestSharedSnapCases(t *testing.T) {
+	raw, err := os.ReadFile("testdata/snap_cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Cases []struct {
+			Name     string
+			Op       string
+			Settings json.RawMessage
+			Start    [3]float64
+			Delta    [3]float64
+			Free     [3]bool
+			Rad      float64
+			Want     json.RawMessage
+			Snapped  bool
+		}
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range file.Cases {
+		s, warns, err := Decode(c.Settings, Defaults())
+		if err != nil || len(warns) > 0 {
+			t.Fatalf("%s: settings %v %v", c.Name, err, warns)
+		}
+		ctx := Context{Settings: s}
+		switch c.Op {
+		case "move":
+			var want [3]float64
+			_ = json.Unmarshal(c.Want, &want)
+			got, ok := SnapMove(c.Start, c.Delta, c.Free, ctx)
+			if got != want || ok != c.Snapped {
+				t.Errorf("%s: SnapMove = %v (%v), want %v (%v)", c.Name, got, ok, want, c.Snapped)
+			}
+		case "angle":
+			var want float64
+			_ = json.Unmarshal(c.Want, &want)
+			got, ok := SnapAngle(c.Rad, ctx)
+			if math.Abs(got-want) > 1e-12 || ok != c.Snapped {
+				t.Errorf("%s: SnapAngle = %v (%v), want %v (%v)", c.Name, got, ok, want, c.Snapped)
+			}
+		default:
+			t.Fatalf("%s: unknown op %q", c.Name, c.Op)
+		}
 	}
 }

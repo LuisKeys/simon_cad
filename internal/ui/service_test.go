@@ -431,3 +431,39 @@ func TestDimensionEditInReviewKeepsTheObjectSelected(t *testing.T) {
 		t.Fatalf("undo: %+v", st)
 	}
 }
+
+// The viewport's interactive Move/Rotate commit through CallTool: applied at once even at Review
+// (direct manipulation, like a typed dimension), one undo step, and the moved object stays
+// selected with its transform available for the next drag.
+func TestInteractiveTransformCommitsAtReviewAndKeepsSelection(t *testing.T) {
+	s := newSvc(t)
+	s.CallTool("create_box", json.RawMessage(`{"id":"plate","dx":120,"dy":80,"dz":40}`))
+	st, _ := s.State()
+	if _, err := s.Commit(st.Pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := s.Pick(PickRequest{Body: "plate", Kind: "face", Index: 0, Triangle: -1})
+	if err != nil || len(sel.Transforms) != 1 || !sel.Transforms[0].Transformable || sel.Transforms[0].Origin != [3]float64{} {
+		t.Fatalf("a selected object carries its transform: %+v %v", sel.Transforms, err)
+	}
+	o, err := s.CallTool("move_object", json.RawMessage(`{"object_id":"plate","dx":12.5,"dy":0,"dz":0}`))
+	if err != nil || !o.OK || !o.Committed {
+		t.Fatalf("an interactive move commits at Review level: %+v %v", o, err)
+	}
+	v := s.Selection()
+	if len(v.Selectors) != 1 || v.Selectors[0] != "body(feature=move)" || len(v.Transforms) != 1 || v.Transforms[0].Origin != [3]float64{12.5, 0, 0} {
+		t.Fatalf("the moved object stays selected: %+v", v)
+	}
+	if o, _ := s.CallTool("rotate_object", json.RawMessage(`{"angle":90,"axis":"z","pivot":"center"}`)); !o.Committed {
+		t.Fatalf("rotating the selected object: %+v", o)
+	}
+	if v = s.Selection(); len(v.Selectors) != 1 || v.Selectors[0] != "body(feature=rotate)" {
+		t.Fatalf("the rotated object stays selected: %+v", v.Selectors)
+	}
+	if _, err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); !st.CanUndo || !st.CanRedo {
+		t.Fatal("one undo step per transform")
+	}
+}

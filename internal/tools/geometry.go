@@ -29,6 +29,9 @@ func Default() *Registry {
 	for _, t := range dimensionTools() {
 		r.Register(t)
 	}
+	for _, t := range transformTools() {
+		r.Register(t)
+	}
 	for _, t := range editTools() {
 		r.Register(t)
 	}

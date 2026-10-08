@@ -42,8 +42,9 @@ func (g Grid) GridToWorld(q [3]float64) [3]float64 {
 	return out
 }
 
-// SnapService: deterministic snapping in world coordinates. Nothing calls it from the mouse
-// yet; it is the calculation interactive transforms will use.
+// SnapService: deterministic snapping in world coordinates. The move/rotate tools use it, and
+// the viewport's interactive Move/Rotate use its JavaScript twin (frontend/snap.js), which is
+// held to the same answers by the shared cases in testdata/snap_cases.json.
 
 // Context is what a snap is computed against.
 type Context struct {
@@ -132,4 +133,36 @@ func SnapAngle(rad float64, c Context) (float64, bool) {
 	}
 	deg := snapTo(rad*180/math.Pi, c.Settings.Snap.RotationIncrement)
 	return deg * math.Pi / 180, true
+}
+
+// SnapMove snaps a move of a reference point (an object's origin) from start by delta, and
+// returns the snapped delta. Only the free axes move: a constrained axis keeps its coordinate
+// exactly. Snapping is absolute — computed from start and the whole delta every time, never
+// from accumulated per-frame steps — so a drag lands on the same value however the mouse got
+// there:
+//   - with grid snapping, a free axis in the grid plane lands on a grid line
+//     (grid origin + k·spacing), negative coordinates included;
+//   - any other free axis (the plane's normal, or every axis when only translation snapping
+//     is on) moves by a whole multiple of the translation increment.
+func SnapMove(start, delta [3]float64, free [3]bool, c Context) ([3]float64, bool) {
+	g := c.Settings.Grid
+	ax := PlaneAxes(g.Plane)
+	grid, trans := c.GridSnapActive(), c.TranslationSnapActive()
+	step := c.Settings.TranslationStep()
+	snapped := false
+	var out [3]float64
+	for i := 0; i < 3; i++ {
+		if !free[i] {
+			continue
+		}
+		out[i] = delta[i]
+		switch {
+		case grid && (i == ax[0] || i == ax[1]):
+			at := clean(g.Origin[i] + snapTo(start[i]+delta[i]-g.Origin[i], g.Spacing))
+			out[i], snapped = clean(at-start[i]), true
+		case trans:
+			out[i], snapped = snapTo(delta[i], step), true
+		}
+	}
+	return out, snapped
 }

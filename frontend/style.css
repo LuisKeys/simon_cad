@@ -476,6 +476,21 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 @media (max-width: 900px) { .vc-body, .vc-info { grid-template-columns: 1fr; } .vc-panes { grid-template-columns: 1fr; } }
 
 /* ---- settings ------------------------------------------------------------------------------ */
+.dialog.shortcuts { width: min(760px, calc(100vw - 24px)); max-height: 80vh; padding: 0; gap: 0; }
+.sc-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.sc-head b { font-size: 16px; }
+.sc-head .spacer { flex: 1; }
+.sc-head a { color: var(--accent); }
+.sc-body { overflow: auto; padding: 12px 16px 16px; columns: 2 320px; column-gap: 28px; }
+.sc-sec { break-inside: avoid; margin-bottom: 14px; }
+.sc-sec h3 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.sc-row { display: grid; grid-template-columns: minmax(130px, auto) 1fr; gap: 12px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.sc-row:last-child { border-bottom: 0; }
+.sc-keys { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px; white-space: nowrap; }
+.sc-keys kbd { color: var(--text); border: 1px solid var(--line); }
+.sc-keys .plus, .sc-keys .or { color: var(--faint); font-size: 11px; }
+.sc-keys .or { margin: 0 2px; }
+.sc-label { color: var(--muted); }
 .dialog.settings { width: min(480px, calc(100vw - 24px)); overflow: auto; }
 .dialog.settings .dtitle { font-size: 16px; font-weight: 600; }
 .dialog.settings h2 { margin: 8px 0 0; }
@@ -492,3 +507,12 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .dialog.settings .row:last-child { align-items: center; margin-top: 6px; }
 .dialog.settings .bad { color: var(--bad); font-size: 12px; }
 @media (max-width: 480px) { .srow { grid-template-columns: 1fr; gap: 4px; } }
+
+/* ---- interactive Move / Rotate (transform.js) -------------------------------------------- */
+/* The HUD sits at the bottom of the viewport, clear of the object, and never takes the mouse. */
+.xform-hud { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: calc(100% - 32px); z-index: 6;
+  background: rgba(0, 0, 0, .78); color: #fff; border: 1px solid var(--accent-line); border-radius: var(--radius-lg);
+  padding: 6px 12px; font-size: 12.5px; pointer-events: none; font-variant-numeric: tabular-nums; text-align: center; }
+.xform-hud .main { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xform-hud .hint { color: #c8c8c8; font-size: 11.5px; margin-top: 2px; }
+@media (max-width: 720px) { .xform-hud .main { white-space: normal; } .xform-hud .hint { display: none; } }

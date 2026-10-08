@@ -45,6 +45,14 @@ user guide with copy-paste example prompts for every feature, the tool reference
 It is served by the same embedded static handler, so it ships in the binary. When you add a tool or a
 user-visible feature, update the prompts in `help.html` and the `TOOLS` table in `help.js`.
 
+## Shortcuts panel
+
+The header's keyboard button, **More → Keyboard shortcuts** or <kbd>?</kbd> (outside text fields) opens a
+popup over the main screen listing every keyboard and mouse shortcut, grouped and ordered from most to
+least used. <kbd>?</kbd> again, <kbd>Esc</kbd>, ✕ or a click outside closes it; while it is open no other
+shortcut fires. The list lives in `frontend/shortcuts-model.js` (`SECTIONS`); when you add or change a
+shortcut, update it there and in the shortcuts table of `help.html`.
+
 ## Selectors are topology-backed now
 
 Phase 1 resolved faces from bounding boxes, which is wrong for pocketed or filleted parts. Now:
@@ -113,6 +121,29 @@ backlog item "round only the outer edges after pocketing".
   (DimensionRenderer, DimensionEditor) and `frontend/dimensions-model.js` (line placement,
   parsing; unit tested). See [architecture.md §6a](architecture.md) for the measurement and the
   resize.
+- **Interactive Move / Rotate:** with one object selected, **G** (move) or **R** (rotate) — or
+  right-click → **Transform → Move / Rotate**, or the action bar's Move/Rotate — starts a modal
+  operation (Blender style) in the view under the mouse; the shortcuts only fire when the viewport
+  was the last thing clicked or is under the mouse, and never while typing. The object follows the
+  mouse from the position it had when the operation began (no jump). Move defaults to the
+  workspace grid plane; **X/Y/Z** constrain it to an axis and **Shift+X/Y/Z** to the plane normal
+  to that axis (pressing the active one again returns to the default). Rotate defaults to the grid
+  plane's normal; **X/Y/Z** pick the axis and **P** toggles the pivot between the object's origin
+  and its box center. Snapping uses the project's settings (grid lines for the object's origin,
+  translation and rotation increments) and is computed from the start every frame, never from
+  accumulated steps; holding **Ctrl** suspends it. A HUD at the bottom of the viewport shows the
+  constraint, the move and the resulting position (or the angle and pivot) in display units, and
+  the scene shows the constraint axis/plane, the pivot and a rotation ring. **Left-click/Enter**
+  confirms: one `move_object` / `rotate_object` call, applied at once even in Review, one undo step,
+  the moved object stays selected. **Esc/right-click** (or clicking elsewhere in the app) cancels:
+  the body's matrix goes back to the identity — nothing was sent, so there is nothing to undo.
+  While it runs nothing reaches the server (the preview is the body's matrix; no rebuild, no
+  history, no agent event) and the other shortcuts are disabled; middle-drag and the wheel still
+  navigate. If the target is rebuilt underneath (an agent edit, undo, a project switch) or the
+  selection changes, the operation is cancelled safely. Pieces: `frontend/transform.js`
+  (InteractiveTransformController, TransformPreview), `frontend/transform-model.js` (the state
+  machine and drag/rotation math; unit tested) and `frontend/snap.js` (the SnapService twin). See
+  [architecture.md §6c](architecture.md).
 - **Coordinate axes:** X red `#E05252`, Y green `#56B870`, Z blue `#4A90E2`, defined once in
   `frontend/axes.js` and shared by the two places that show them: the axes through the true origin
   (both directions, the negative half fainter, labels at the positive ends) and the axis gizmo in a
@@ -147,8 +178,8 @@ backlog item "round only the outer edges after pocketing".
   tool takes one target (move, rotate, scale); duplicate and align send the whole selection as one
   ChangeSet. Face actions take one face per body (a second face of the same body is picked again on
   the result).
-- **Top bar:** project-name menu (New / Open), Undo, Redo, Save, Export, Help and an overflow menu
-  (command palette, agent level). Panels can be hidden from the bar's outer buttons.
+- **Top bar:** project-name menu (New / Open), Undo, Redo, Save, Export, Help, Shortcuts and an overflow
+  menu (command palette, keyboard shortcuts, agent level). Panels can be hidden from the bar's outer buttons.
 - **Panels:** the design tree (left) and Simon Agent (right) are resizable (drag the splitter,
   arrow keys when focused, double-click to reset) and collapsible; sizes persist in `localStorage`.
   The tree collapses first on narrow screens; below 760 px the panels become overlays.
@@ -196,6 +227,7 @@ backlog item "round only the outer edges after pocketing".
 | Selection context with a non-extreme face | eval `08_hole_in_pocket_floor`; dogfood `TestDogfoodElbowClevis` |
 | Selective fillet removes exactly the expected material | `TestSelectiveFilletOfSelectedEdges` (analytic volume to 1e-6) |
 | Dimension edits: only the edited dimension changes, local axes, anchors, lock, undo/redo, replay | `app.TestSetObjectDimensionChangesOnlyThatDimension` and the other tests in `internal/app/dimensions_test.go`; `ui.TestDimensionEditInReviewKeepsTheObjectSelected`; `e2e/dimensions.mjs` (real browser, Single and Quad) |
+| Interactive move/rotate: axes, planes, snapping, pivots, ±180°, confirm/cancel, one undo step, component placements, agent/UI agreement | `internal/app/transform_test.go`; `internal/transform` unit tests; `ui.TestInteractiveTransformCommitsAtReviewAndKeepsSelection`; `frontend/transform-model.test.mjs`; `frontend/snap.test.mjs` + `workspace.TestSharedSnapCases` (same cases for both SnapServices); `e2e/transform.mjs` (real browser) |
 
 ## Not done / not verified
 
