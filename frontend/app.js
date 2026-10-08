@@ -784,10 +784,22 @@ function addChat(m) {
   scheduleRefresh();
 }
 
+// A failed tool call is hidden when the agent recovered within the same turn: the turn's last tool call succeeded
+// (the same tool retried, or another tool reaching the goal). If the turn ends on a failure, every failure stays visible.
+function retriedOk(chat, i) {
+  const m = chat[i];
+  if (m.role !== 'tool' || m.ok) return false;
+  let last = null;
+  for (let j = i + 1; j < chat.length && chat[j].role !== 'user'; j++) {
+    if (chat[j].role === 'tool') last = chat[j];
+  }
+  return !!last && last.ok;
+}
+
 function renderChat(st) {
   const el = $('chat');
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-  const nodes = st.chat.map((m) => {
+  const nodes = st.chat.filter((m, i) => !retriedOk(st.chat, i)).map((m) => {
     chatSeen.add(m.seq);
     const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
     if (m.role === 'draft') return draftCard(m, st);
