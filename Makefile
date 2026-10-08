@@ -10,7 +10,7 @@ export LD_LIBRARY_PATH := $(OCCT)/lib:$(LD_LIBRARY_PATH)
 STAMP = $(shell shasum $(NATIVE)/libsimon_occ.a 2>/dev/null | cut -c1-12)
 export CGO_CFLAGS = -DSIMON_NATIVE_STAMP=$(STAMP)
 
-.PHONY: occt native build build-go test test-go leakcheck bracket eval demo docs ui e2e
+.PHONY: occt native build build-go test test-go test-js leakcheck bracket eval demo docs ui e2e
 
 occt:
 	bash scripts/build-occt.sh
@@ -29,6 +29,7 @@ build-go:
 test: native
 	$(NATIVE)/bridge_test
 	$(MAKE) --no-print-directory test-go
+	$(MAKE) --no-print-directory test-js
 
 test-go:
 	$(GO) vet ./cmd/... ./internal/...
@@ -56,6 +57,24 @@ docs: build
 ui: build
 	./out/simoncad $(ARGS)
 
-# Browser end-to-end flow: select face -> prompt -> preview -> commit -> undo (needs Chrome).
+# Browser end-to-end flows: M2 (select face -> prompt -> preview -> commit -> undo), image to
+# CAD, materials, body/face modeling (align, duplicate, scale, group, extrude, inset) and visual
+# closed-loop refinement, Single/Quad views, interactive dimensions, units & grid, primary/fallback models, interactive move/rotate, shortcuts panel. Needs Chrome.
 e2e: build
 	node e2e/m2.mjs
+	node e2e/image.mjs
+	node e2e/materials.mjs
+	node e2e/modeling.mjs
+	node e2e/components.mjs
+	node e2e/viewports.mjs
+	node e2e/dimensions.mjs
+	node e2e/workspace.mjs
+	node e2e/rendering.mjs
+	node e2e/visual.mjs
+	node e2e/models.mjs
+	node e2e/transform.mjs
+	node e2e/shortcuts.mjs
+
+# Pure frontend helpers (confidence bands, SVG geometry, ambiguity edits); needs Node >= 18.
+test-js:
+	node --test frontend/

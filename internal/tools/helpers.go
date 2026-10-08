@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -62,7 +63,29 @@ func newNode(env Env, a Args, id, typ string, params map[string]any, deps ...str
 		Metadata:      cadir.Metadata{Name: name, Created: stamp, Modified: stamp},
 		SelectionRefs: env.SelectionRefs(),
 	}
+	// A feature that modifies a body becomes the visible body in its place, so it carries on
+	// that body's appearance (color, material, opacity, visibility), group and dimension
+	// editing preference.
+	if up := env.Graph().Get(modifiedBody(params, deps)); up != nil {
+		n.Appearance = up.Appearance.Clone()
+		n.Group = up.Group
+		n.LockProportions = up.LockProportions
+	}
 	return n
+}
+
+// modifiedBody is the feature whose body a new node replaces: its target (hole, fillet,
+// boolean, extrude onto a body…), else its source (patterns, copies), else its first dependency.
+func modifiedBody(params map[string]any, deps []string) string {
+	for _, k := range []string{"target", "source"} {
+		if s, _ := params[k].(string); s != "" {
+			return s
+		}
+	}
+	if len(deps) > 0 {
+		return deps[0]
+	}
+	return ""
 }
 
 // copyOpt copies the listed optional numeric/string/bool args into params.
@@ -152,3 +175,6 @@ func withMeta(p props) props {
 	p["intent"] = text("The engineering intent in natural language, e.g. 'Mount plate for the shoulder servo'.")
 	return p
 }
+
+func jsonMarshal(v any) ([]byte, error)   { return json.Marshal(v) }
+func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }

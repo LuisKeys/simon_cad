@@ -1,0 +1,21 @@
+{
+  "id": "anodized_black_aluminum",
+  "name": "Black Anodized Aluminum",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "aluminum",
+    "anodized",
+    "black",
+    "robotics"
+  ],
+  "baseColor": "#2A2C2F",
+  "metalness": 0.9,
+  "roughness": 0.4,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

@@ -12,8 +12,9 @@ The only code that touches OpenCascade.
 | `include/occ_bridge.h` | The stable C ABI. No OCCT type crosses it. `occ_handle` is a `uint64` (0 = invalid); `occ_status` 0 = OK. |
 | `bridge.cpp` | Handle table (mutex-guarded map), thread-local error message, `guarded()` exception→status translation, release, translate / rotate / mirror, `occ_is_valid`, `occ_mass_props`. |
 | `primitives.cpp` | `occ_box`, `occ_cylinder`, `occ_cone`, `occ_extrude_polygon` (closed XY polygon prism). |
-| `booleans.cpp` | `occ_boolean_union`, `occ_boolean_subtract` (inputs not consumed). |
+| `booleans.cpp` | `occ_boolean_union`, `occ_boolean_subtract`, `occ_boolean_intersect` (inputs not consumed). |
 | `fillets.cpp` | `occ_fillet_all_edges`, `occ_chamfer_all_edges`, and the selective `occ_fillet_edges`, `occ_chamfer_edges` (kernel edge indices). |
+| `modify.cpp` | `occ_scale` (uniform `gp_Trsf` / non-uniform `gp_GTrsf`), `occ_unify_faces`, face edits by kernel index: `occ_face_get`, `occ_face_inset` (`BRepOffsetAPI_MakeOffset`), `occ_face_imprint_inset` (`BRepFeat_SplitShape`), `occ_offset_face` (`BRepOffset_MakeOffset::SetOffsetOnFace`, result re-closed into a valid solid). |
 | `mesh.cpp` | `occ_tessellate` / `occ_mesh_*`: per-face triangle ranges, edge polylines, topological vertices and per-face/edge descriptors; numbering in `TopExp::MapShapes` order. |
 | `export.cpp` | STEP export/import, STL export. Silences OCCT's stdout messages so `--json` output stays clean. |
 | `tests/bridge_test.cpp` | ABI test: validity, volumes, error paths, handle-count returns to 0 after churn. Runs under valgrind. |
@@ -110,10 +111,15 @@ properties + `Bounds()`), and `Ctx` (kernel, node, resolved params, already-buil
 | `extrude` | `profile` (rectangle/circle/slot/polygon), `mode` add/cut, `target`, `plane` XY/XZ/YZ, `offset`, `depth`, `symmetric`, `through`, profile fields | Planes map by cyclic permutation. Slot = box + two end cylinders. |
 | `linear_pattern` | `source`, `count`, `dx dy dz` | Repeats a hole / extrude source. |
 | `circular_pattern` | `source`, `count`, `cx cy cz`, `axis`, `total_angle_deg` | 360° spreads evenly; less spans end to end. |
-| `union` / `subtract` | `target`, `tool` | Consume both inputs. |
+| `union` / `subtract` / `intersect` | `target`, `tool` | Consume both inputs. |
 | `fillet` / `chamfer` | `target`, `radius` / `distance` | All edges; size must be below half the thinnest dimension. |
 | `transform` | `target`, `dx dy dz`, `angle_deg`, `ax ay az`, `ox oy oz` | Rotate first, then translate. |
 | `mirror` | `target`, `plane`, `offset` | Result = original ∪ mirrored copy. |
+| `scale` | `target`, `factor` or `sx sy sz`, `about` center/base/origin/point, `ox oy oz` | Fixed point resolved from the target's bounds at build time. |
+| `copy` | `source`, `dx dy dz` | Linked duplicate; does **not** consume `source` (`KeepsInputs`). |
+| `face_extrude` | `target`, `distance` (signed), `references.face` (planar) | Prism of the face along its normal; + union, − cut; seams unified. |
+| `face_inset` | `target`, `inset` (>0), `depth` (signed, optional), `references.face` (planar) | With depth: prism of the inset face; without: the inset outline is imprinted (face split). |
+| `face_offset` | `target`, `distance` (signed), `references.face` (any surface) | Kernel per-face offset; planar faces fall back to a face sweep. |
 
 Intermediate shapes are tracked in an `arena` so every error path releases them.
 
@@ -195,12 +201,114 @@ leak check, incremental-rebuild budget, and the servo-bracket dogfood test.
 | File | Contents |
 |---|---|
 | `types.go` | Provider-neutral `Message`, `Block`, `ToolDef`, `Request`, `Response`, `Provider` interface |
-| `provider.go` | `NewProviderFromEnv` — `SIMONCAD_PROVIDER` → Claude / OpenAI / Ollama |
-| `claude.go` | Anthropic Messages API client (retries on 429 / 5xx) |
-| `openai.go` | Chat Completions client for OpenAI and Ollama; converts between the neutral blocks and OpenAI messages / tool calls |
+| `provider.go` | `NewProviderFromEnv` — `SIMONCAD_PROVIDER` → Claude / OpenAI / Ollama; `NewNamedProviderFromEnv` builds any one of them |
+| `capabilities.go` | Provider capability registry: `ProviderCapabilities` (text, vision, attachments, structured output, tool calls), `ModelCapabilities(flavor, model)` (Ollama vision by model family or `OLLAMA_VISION`), `CapabilitiesOf` |
+| `router.go` | Model router: `Router.Route(need)` → the selected provider if it has the capabilities, else OpenAI, else Claude, else `CapabilityUnavailableError` |
+| `claude.go` | Anthropic Messages API client (retries on 429 / 5xx); image and PDF document blocks |
+| `openai.go` | Responses API client for OpenAI (images, PDF `input_file`) and Chat Completions for Ollama (image parts for multimodal models); converts between the neutral blocks and OpenAI messages / tool calls |
 | `replay.go` | `Recording`, `Replay` provider, `Recorder` wrapper |
-| `runtime.go` | `Capability` interface, `Runtime.Run` tool-call loop, `Result` |
+| `runtime.go` | `Capability` interface, `Runtime.Run`, `Conversation` (`Begin` / `Send` / `Finish`: the tool-call loop, reusable one plan step at a time), `ImageInterpreter` hook for providers without vision, `Result` |
 | `eval.go` | `Case`, `RunCase`, `LoadCases`, `Match`, `Suite` |
+
+## `internal/agent/attachments` — attachment processor
+
+`Classify` sorts an upload into `IMAGE` / `TEXT` / `DOCUMENT` (PDF) / `UNKNOWN`; `Requirements`
+maps each kind to the provider capabilities it needs (vision, text, attachments). `Processor`
+routes the work through the model router: with a text-only selected provider (e.g. Ollama) an
+image goes to a vision model that runs `analyze_image` (no model edits) and returns a structured
+description, which the selected provider then works from as the CAD agent; `ExtractDocument`
+turns a PDF into text on a document-capable model. Nothing is routed by provider name.
+
+## `internal/agent/workflow` — autonomous workflow
+
+`User request → Plan → Execute → Validate → Correct → Final result`, with the states `IDLE`,
+`PLANNING`, `EXECUTING`, `VALIDATING`, `CORRECTING`, `COMPLETED`, `FAILED` reported through
+`Agent.OnState`.
+
+| File | Contents |
+|---|---|
+| `planner.go` | `NeedsPlan` (simple edits skip planning), `Planner` (one `submit_plan` call → `Plan`: analysis, steps with refs and dependencies, expectations) |
+| `executor.go` | `Executor` runs steps one `Conversation.Send` at a time; `StepResult` per step; dependents of a failed step are skipped; refs map to feature ids |
+| `validator.go` | Deterministic `Validator`: failed/skipped steps, missing refs, dangling dependencies, failed or empty bodies, dimensions (2 % / 0.5 mm), position, material/color, body count; each issue blamed on a step |
+| `correction.go` | `Corrector`: re-executes failed steps and their dependents, otherwise one targeted repair request; `MaxAutocorrectionAttempts = 3` |
+| `agent.go` | `Agent.Run` orchestration; an attempt that adds structural problems is undone (latest valid state); final summary |
+
+The UI uses the workflow by default (`SIMONCAD_AUTONOMOUS=off` disables it); the CLI with
+`--autonomous`. Recorded evals keep using `Runtime.Run`.
+
+## `internal/components` — reusable projects
+
+Projects are composable. A **component is a project with `reusable` set**; an instance of one in
+another project is a `component_instance` node holding a reference and a placement, never a copy
+of the geometry. Four wheels are four references to one project.
+
+Three jobs, deliberately kept apart from rendering and UI logic:
+
+| File | Responsibility |
+|---|---|
+| `library.go` | Which reusable projects exist and where. Scans search roots, reading only `project.json` (cached on mtime+size). Also `Dependencies`/`Manifest`: the derived `components.json`. |
+| `resolver.go` | `ComponentInstance → geometry`. Implements `features.ComponentResolver`. |
+| `graph.go` | `DependencyGraph`: direct and transitive dependencies, cycle detection, traversal. Reads parameters only — a cycle check costs no kernel time. |
+
+Three properties are load-bearing:
+
+- **Search roots are anchored on the open project** (its parent, its `projects_output`) plus the
+  configured library root — never the process working directory. Resolving by CWD would make the
+  same `.scadproj` rebuild to different geometry from a different shell, breaking the determinism
+  contract.
+- **`rebuild.Engine` is not reentrant**: `Rebuild` holds its mutex across the builders. A component
+  is therefore never resolved on the engine asking for it — each `(project, content, overrides)`
+  frame gets its own engine, bounded by an LRU and reachable from the owning engine's `Close` so
+  no OCCT shape leaks. A cycle is detected *before* entering a nested engine, or `A → B → A` would
+  deadlock instead of returning an error.
+- **The content hash lives in the node's parameters**, not in a side channel. That single choice is
+  what makes a component edit visible to the rebuild cache key, `Graph.Hash()`, checkpoints,
+  ChangeSet staleness and the selection check at once, and makes "update to the latest component"
+  an ordinary undoable `SetParameter`.
+
+Tools (`internal/tools/components.go`, Geometry capability): `list_components`,
+`search_components`, `open_component` (queries); `create_component`, `insert_component`,
+`sync_component`, `detach_component` (plans). `create_component` requires a selection that is
+closed over `EffectiveDeps` in **both** directions — nothing outside may depend on it, and it may
+not depend on anything outside — because an open selection would either write a project that
+cannot be reopened or produce a ChangeSet that `RemoveFeature` rejects.
+
+Writing the new project to disk is the one part of "create component" that is not a ChangeSet. The
+directory is content-addressed so undo→redo lands on the same one; undoing without redoing leaves
+the library project behind, which the UI says plainly.
+
+## `internal/visual` — deterministic visual measurement
+
+No language model and no geometry edits. `camera.go`: fixed cameras (left/right/front/rear/top
+orthographic, front_3q/rear_3q perspective; azimuth 0 = front, 90 = left side) and a fixed
+`Frame`, so renders of successive iterations share their pixel scale. `raster.go`: z-buffered
+software rasterizer over the tessellated bodies (shaded with outlines, or silhouette: object
+white, background black). `mask.go`: reference segmentation (alpha, or border-colour background
+estimate + largest component + hole filling), normalization, IoU, chamfer contour distance,
+bounding-box aspect, mirroring for side views, difference images. `proportions.go`: landmarks in
+normalized image coordinates, ratios (wheelbase, height/length, overhangs, cabin, wheel diameter,
+windshield, roof width), ratio comparison and landmark alignment. `scoring.go`: the stages
+BLOCKOUT → PRIMARY → SECONDARY → MATERIALS with thresholds and per-stage weights. `state.go`:
+references and calibrations, regions and locks, the render store (session only), the iteration
+history and failed corrections (saved in `agent-history.json` under `visual`).
+
+## `internal/agent/refine` — visual closed-loop refinement
+
+Separate roles: `Planner` (modeling strategy: design parameters, regions, stage contents),
+`Builder` (the CAD builder: the ordinary tool loop, at most 3 structural changes per correction
+via `Runtime.MaxStructural`), the renderer (`App.RenderCamera`), `VisionCritic` (structured JSON
+only, no tools that edit), `Analyzer` (reference view, calibration, landmarks) and `Controller`
+(the loop: render → measure + critique → advance the stage when its thresholds pass, otherwise
+apply ≤ 3 corrections → render → revert if the overall score drops by more than the tolerance,
+remembering the failed correction; every iteration gets a checkpoint). The builder never needs
+vision; the critic and analyzer use a vision model chosen by the router.
+
+Design parameters are `parameters` nodes (no geometry) referenced by feature expressions
+(`vehicle.wheelbase`); tools `define_parameters`, `set_parameter`, `bind_parameters`. Region
+tools `define_region`, `lock_region`, `unlock_region`; `render_model`,
+`calibrate_reference_image`, `get_visual_state` (capability `visual`). Locks are enforced in
+`App.ApplyTool` for every caller (agent, UI, CLI): geometry of a locked region cannot change,
+appearance can.
 
 ## `internal/agent/capabilities/geometry`
 

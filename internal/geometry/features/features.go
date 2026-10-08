@@ -54,6 +54,8 @@ func (p Params) Positive(name string) (float64, error) {
 type Body struct {
 	Shape *api.Shape
 	Props api.Props
+	// Sketch marks a non-solid body (planar faces); it never counts as model geometry.
+	Sketch bool
 
 	topoOnce sync.Once
 	topo     *selectors.Topology
@@ -125,6 +127,19 @@ func (b *Body) Bounds() selectors.Bounds {
 	}
 }
 
+// ComponentResolver turns a reference to a reusable project into geometry. It is declared
+// here, in the leaf package, so the implementation (internal/components, which needs the
+// rebuild engine and the persistence layer) can depend on features without a cycle.
+type ComponentResolver interface {
+	// Shape builds the component identified by projectID at version, with the instance's
+	// parameter overrides applied. contentHash is the graph hash the instance is pinned to;
+	// an empty hash means "whatever is on disk now". The caller owns the shape and releases it.
+	Shape(projectID, version, contentHash string, overrides map[string]any) (*api.Shape, error)
+	// Hash is the current geometry hash of the component on disk, used to detect instances
+	// that have fallen behind their component.
+	Hash(projectID, version string) (string, error)
+}
+
 // Ctx is everything a builder may read. Bodies holds every already-built node.
 type Ctx struct {
 	K      *api.Kernel
@@ -134,6 +149,8 @@ type Ctx struct {
 	// ParamsOf returns the resolved parameters of an already-built node.
 	ParamsOf func(id string) (Params, bool)
 	NodeOf   func(id string) *cadir.Node
+	// Components resolves component_instance nodes. Nil when no library is configured.
+	Components ComponentResolver
 }
 
 func (c *Ctx) body(id string) (*Body, error) {
@@ -144,12 +161,20 @@ func (c *Ctx) body(id string) (*Body, error) {
 	if !ok || b == nil {
 		return nil, fmt.Errorf("node %q has no geometry", id)
 	}
+	if b.Sketch {
+		return nil, fmt.Errorf("node %q is a sketch, not a solid", id)
+	}
 	return b, nil
 }
 
+// KindSketch marks features whose result is planar faces rather than a solid.
+const KindSketch = "sketch"
+
 // Feature describes one buildable node type.
 type Feature struct {
-	Type  string
+	Type string
+	// Kind is "" for solid-producing features and KindSketch for planar, non-solid ones.
+	Kind  string
 	Build func(*Ctx) (*api.Shape, error)
 	// Tool is set for features that apply a tool shape to a target (hole, extrude). Patterns
 	// reuse it. subtract=false means union.
@@ -157,6 +182,15 @@ type Feature struct {
 	// Target returns the node ID this feature modifies ("" for primitives); used for
 	// suppression pass-through.
 	Target func(Params) string
+	// KeepsInputs marks features that read their dependencies without consuming them (copy):
+	// the inputs stay visible bodies.
+	KeepsInputs bool
+}
+
+// Consumes reports whether a node of type t consumes its dependencies (unknown types do).
+func Consumes(t string) bool {
+	f, ok := registry[t]
+	return !ok || !f.KeepsInputs
 }
 
 var registry = map[string]*Feature{}

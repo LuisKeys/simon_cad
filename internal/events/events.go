@@ -27,6 +27,18 @@ const (
 	ProjectSaved        = "ProjectSaved"
 	ExportCompleted     = "ExportCompleted"
 	AgentResponseFinal  = "AgentResponseFinal"
+	// WorkspaceChanged records a change of the project's units, grid or snapping settings
+	// (not CAD state, so not a ChangeSet).
+	WorkspaceChanged = "WorkspaceChanged"
+	// Component lifecycle. These are the only operations that touch a project other than the
+	// open one, so the trace would be blind to them without their own event types.
+	ComponentCreated  = "ComponentCreated"
+	ComponentInserted = "ComponentInserted"
+	ComponentDetached = "ComponentDetached"
+	ComponentSynced   = "ComponentSynced"
+	// ObjectTransformed is published once per committed move/rotate (an interactive drag or
+	// an agent call), never for the previews in between.
+	ObjectTransformed = "ObjectTransformed"
 )
 
 type Event struct {

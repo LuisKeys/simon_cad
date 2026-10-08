@@ -7,7 +7,7 @@ package bridge
 #cgo CFLAGS: -I${SRCDIR}/../../../native/occ/include
 #cgo LDFLAGS: -L${SRCDIR}/../../../out/native -lsimon_occ
 #cgo LDFLAGS: -L${SRCDIR}/../../../third_party/occt-install/lib -Wl,-rpath,${SRCDIR}/../../../third_party/occt-install/lib
-#cgo LDFLAGS: -lTKDESTEP -lTKDESTL -lTKMesh -lTKBO -lTKBool -lTKFillet -lTKOffset -lTKTopAlgo -lTKPrim
+#cgo LDFLAGS: -lTKDESTEP -lTKDESTL -lTKMesh -lTKFeat -lTKBO -lTKBool -lTKFillet -lTKOffset -lTKTopAlgo -lTKPrim
 #cgo LDFLAGS: -lTKGeomAlgo -lTKGeomBase -lTKBRep -lTKG3d -lTKG2d -lTKMath -lTKXSBase -lTKShHealing -lTKernel -lstdc++
 #include <stdlib.h>
 #include "occ_bridge.h"
@@ -61,6 +61,18 @@ func Cylinder(r, h float64) (Handle, error) {
 	return Handle(out), err
 }
 
+func Sphere(r float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("sphere", C.occ_sphere(C.double(r), &out))
+	return Handle(out), err
+}
+
+func Torus(major, minor float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("torus", C.occ_torus(C.double(major), C.double(minor), &out))
+	return Handle(out), err
+}
+
 func Union(a, b Handle) (Handle, error) {
 	var out C.occ_handle
 	err := check("union", C.occ_boolean_union(C.occ_handle(a), C.occ_handle(b), &out))
@@ -70,6 +82,12 @@ func Union(a, b Handle) (Handle, error) {
 func Subtract(a, b Handle) (Handle, error) {
 	var out C.occ_handle
 	err := check("subtract", C.occ_boolean_subtract(C.occ_handle(a), C.occ_handle(b), &out))
+	return Handle(out), err
+}
+
+func Intersect(a, b Handle) (Handle, error) {
+	var out C.occ_handle
+	err := check("intersect", C.occ_boolean_intersect(C.occ_handle(a), C.occ_handle(b), &out))
 	return Handle(out), err
 }
 
@@ -183,11 +201,107 @@ func ExtrudePolygon(xy []float64, h float64) (Handle, error) {
 	return Handle(out), err
 }
 
+// Seg2D mirrors occ_seg2d: kind 0 line (x1,y1,x2,y2), 1 arc (x1,y1,xm,ym,x2,y2), 2 circle (cx,cy,r).
+type Seg2D struct {
+	Kind int32
+	A    [6]float64
+}
+
+// MakeFace builds a planar face (XY plane, +Z normal) from loops of segments; loop 0 is the outer boundary.
+func MakeFace(segs []Seg2D, loopSizes []int32) (Handle, error) {
+	if len(segs) == 0 || len(loopSizes) == 0 {
+		return 0, fmt.Errorf("%w: sketch needs at least one loop", ErrKernel)
+	}
+	cs := make([]C.occ_seg2d, len(segs))
+	for i, sg := range segs {
+		cs[i].kind = C.int32_t(sg.Kind)
+		for j := 0; j < 6; j++ {
+			cs[i].a[j] = C.double(sg.A[j])
+		}
+	}
+	var out C.occ_handle
+	err := check("make_face", C.occ_make_face(&cs[0], (*C.int32_t)(unsafe.Pointer(&loopSizes[0])), C.int32_t(len(loopSizes)), &out))
+	return Handle(out), err
+}
+
+// Prism sweeps a shape along (dx,dy,dz).
+func Prism(s Handle, dx, dy, dz float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("prism", C.occ_prism(C.occ_handle(s), C.double(dx), C.double(dy), C.double(dz), &out))
+	return Handle(out), err
+}
+
+// Place moves a shape from the local XY/+Z frame onto the frame (origin o, normal z, x direction x).
+func Place(s Handle, o, z, x [3]float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("place", C.occ_place(C.occ_handle(s), (*C.double)(&o[0]), (*C.double)(&z[0]), (*C.double)(&x[0]), &out))
+	return Handle(out), err
+}
+
+// FaceFrame returns origin, outward normal and x direction of a planar face.
+func FaceFrame(s Handle, face int) (origin, normal, xdir [3]float64, err error) {
+	var buf [9]C.double
+	err = check("face_frame", C.occ_face_frame(C.occ_handle(s), C.int32_t(face), &buf[0]))
+	for i := 0; i < 3; i++ {
+		origin[i], normal[i], xdir[i] = float64(buf[i]), float64(buf[3+i]), float64(buf[6+i])
+	}
+	return
+}
+
 func Mirror(s Handle, ox, oy, oz, nx, ny, nz float64) (Handle, error) {
 	var out C.occ_handle
 	err := check("mirror", C.occ_mirror(C.occ_handle(s), C.double(ox), C.double(oy), C.double(oz),
 		C.double(nx), C.double(ny), C.double(nz), &out))
 	return Handle(out), err
+}
+
+// Scale scales a shape about (ox,oy,oz) by per-axis factors.
+func Scale(s Handle, ox, oy, oz, sx, sy, sz float64) (Handle, error) {
+	var out C.occ_handle
+	err := check("scale", C.occ_scale(C.occ_handle(s), C.double(ox), C.double(oy), C.double(oz),
+		C.double(sx), C.double(sy), C.double(sz), &out))
+	return Handle(out), err
+}
+
+func faceOp(op string, fn func(C.occ_handle, C.int32_t, C.double, *C.occ_handle) C.occ_status, s Handle, face int, d float64) (Handle, error) {
+	var out C.occ_handle
+	err := check(op, fn(C.occ_handle(s), C.int32_t(face), C.double(d), &out))
+	return Handle(out), err
+}
+
+// UnifyFaces merges same-domain neighbouring faces and edges.
+func UnifyFaces(s Handle) (Handle, error) {
+	var out C.occ_handle
+	err := check("unify_faces", C.occ_unify_faces(C.occ_handle(s), &out))
+	return Handle(out), err
+}
+
+// FaceGet copies one face of a shape.
+func FaceGet(s Handle, face int) (Handle, error) {
+	var out C.occ_handle
+	err := check("face_get", C.occ_face_get(C.occ_handle(s), C.int32_t(face), &out))
+	return Handle(out), err
+}
+
+// FaceInset is the planar face shrunk by d from its boundary.
+func FaceInset(s Handle, face int, d float64) (Handle, error) {
+	return faceOp("face_inset", func(h C.occ_handle, i C.int32_t, v C.double, o *C.occ_handle) C.occ_status {
+		return C.occ_face_inset(h, i, v, o)
+	}, s, face, d)
+}
+
+// FaceImprintInset splits the face along its inset outline.
+func FaceImprintInset(s Handle, face int, d float64) (Handle, error) {
+	return faceOp("face_imprint_inset", func(h C.occ_handle, i C.int32_t, v C.double, o *C.occ_handle) C.occ_status {
+		return C.occ_face_imprint_inset(h, i, v, o)
+	}, s, face, d)
+}
+
+// OffsetFace moves one face along its outward normal by d.
+func OffsetFace(s Handle, face int, d float64) (Handle, error) {
+	return faceOp("offset_face", func(h C.occ_handle, i C.int32_t, v C.double, o *C.occ_handle) C.occ_status {
+		return C.occ_offset_face(h, i, v, o)
+	}, s, face, d)
 }
 
 // Face, Edge and Mesh mirror occ_face_info, occ_edge_info and the occ_mesh buffers.
@@ -217,9 +331,12 @@ type Mesh struct {
 }
 
 // Tessellate meshes a shape and copies the result out, freeing the native mesh.
-func Tessellate(s Handle, deflection float64) (*Mesh, error) {
+func Tessellate(s Handle, deflection float64) (*Mesh, error) { return TessellateAngular(s, deflection, 0.5) }
+
+// TessellateAngular is Tessellate with an explicit angular deflection (radians).
+func TessellateAngular(s Handle, deflection, angular float64) (*Mesh, error) {
 	var m *C.occ_mesh
-	if err := check("tessellate", C.occ_tessellate(C.occ_handle(s), C.double(deflection), &m)); err != nil {
+	if err := check("tessellate", C.occ_tessellate_ex(C.occ_handle(s), C.double(deflection), C.double(angular), &m)); err != nil {
 		return nil, err
 	}
 	defer C.occ_mesh_free(m)

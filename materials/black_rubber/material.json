@@ -1,0 +1,27 @@
+{
+  "id": "black_rubber",
+  "name": "Black Rubber",
+  "category": "Rubber",
+  "tags": [
+    "rubber",
+    "black",
+    "grip",
+    "seal",
+    "wheel"
+  ],
+  "baseColor": "#161616",
+  "metalness": 0.0,
+  "roughness": 0.85,
+  "sheen": 0.25,
+  "textures": {
+    "baseColor": "color.jpg",
+    "normal": "normal.jpg",
+    "roughness": "roughness.jpg"
+  },
+  "textureScale": 60,
+  "license": {
+    "source": "ambientCG Rubber004",
+    "license": "CC0-1.0",
+    "url": "https://ambientcg.com/view?id=Rubber004"
+  }
+}

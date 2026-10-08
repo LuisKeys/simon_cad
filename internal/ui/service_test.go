@@ -94,50 +94,32 @@ func TestM2SelectPromptPreviewCommitUndo(t *testing.T) {
 	}
 
 	s.NewProvider = scripted(t, `add_hole {"face":"face(feature=plate,side=+Z)","diameter":3.2,"positions":[[10,10],[90,10],[10,50],[90,50]],"intent":"Four M3 clearance holes"}`)
-	if err := s.Prompt("Add four M3 holes here"); err != nil {
+	if err := s.Prompt("Add four M3 holes here", true); err != nil {
 		t.Fatal(err)
 	}
 	waitIdle(t, s)
 	st, _ = s.State()
-	if len(st.Pending) != 1 || st.Pending[0].Intent != "Four M3 clearance holes" || len(st.Tree) != 1 {
-		t.Fatalf("agent should leave one proposed ChangeSet; pending=%+v tree=%d", st.Pending, len(st.Tree))
+	if len(st.Pending) != 0 || len(st.Draft) != 1 || len(st.Tree) != 2 {
+		t.Fatalf("review turn should apply one draft step; pending=%+v draft=%v tree=%d", st.Pending, st.Draft, len(st.Tree))
 	}
-	if st.Chat[len(st.Chat)-1].Text != "Done." {
+	if st.Chat[len(st.Chat)-1].Role != "draft" {
 		t.Fatalf("chat %+v", st.Chat)
 	}
-	csID := st.Pending[0].ID
-
-	// Preview: the ghost replaces the plate, the live model is untouched.
-	vol := st.Volume
-	g, err := s.Preview(csID)
-	if err != nil {
+	if err := s.KeepDraft(); err != nil {
 		t.Fatal(err)
 	}
-	if len(g.Added) != 1 || g.Added[0].ID != "hole" || len(g.Removed) != 1 || g.Removed[0] != "plate" {
-		t.Fatalf("ghost %+v", g)
-	}
-	if g.ChangeSet.VolumeAfter >= g.ChangeSet.VolumeBefore {
-		t.Fatalf("holes must remove material: %+v", g.ChangeSet)
-	}
-	if st2, _ := s.State(); st2.Volume != vol || len(st2.Tree) != 1 {
-		t.Fatal("preview changed the live model")
-	}
-
-	c, err := s.Commit(csID)
-	if err != nil || c.State != "committed" {
-		t.Fatalf("commit: %v %+v", err, c)
-	}
 	st, _ = s.State()
-	if len(st.Tree) != 2 || st.Volume >= vol || !st.CanUndo || len(st.Selection.Selectors) != 0 {
-		t.Fatalf("after commit: tree=%d vol=%v sel=%v", len(st.Tree), st.Volume, st.Selection.Selectors)
+	if len(st.Draft) != 0 || len(st.Selection.Selectors) != 0 {
+		t.Fatalf("after keep: draft=%v sel=%v", st.Draft, st.Selection.Selectors)
 	}
-	if last := st.Checkpoints[len(st.Checkpoints)-1]; last.Label != "Four M3 clearance holes" || !last.Current {
+	if last := st.Checkpoints[len(st.Checkpoints)-1]; last.Label != "Add four M3 holes here" || !last.Current {
 		t.Fatalf("semantic checkpoint %+v", last)
 	}
+	vol := st.Volume
 	if _, err := s.Undo(); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ = s.State(); len(st.Tree) != 1 || st.Volume != vol || !st.CanRedo {
+	if st, _ = s.State(); len(st.Tree) != 1 || st.Volume <= vol || !st.CanRedo {
 		t.Fatalf("undo: tree=%d vol=%v", len(st.Tree), st.Volume)
 	}
 	// Provenance: everything traces to validated tool calls.
@@ -154,7 +136,7 @@ func TestEditsRejectedWhileAgentWorks(t *testing.T) {
 	if _, err := s.CallTool("create_box", json.RawMessage(`{"dx":1,"dy":1,"dz":1}`)); err != ErrBusy {
 		t.Fatalf("got %v", err)
 	}
-	if err := s.Prompt("hello"); err != ErrBusy {
+	if err := s.Prompt("hello", true); err != ErrBusy {
 		t.Fatalf("got %v", err)
 	}
 	if _, err := s.State(); err != nil {
@@ -263,5 +245,225 @@ func TestPaletteListsEveryToolAndIntentVerb(t *testing.T) {
 		if !tools[n] {
 			t.Fatalf("tool %s missing from palette", n)
 		}
+	}
+}
+
+func TestReviewTurnRunsSeveralStepsAndDiscards(t *testing.T) {
+	s := newSvc(t)
+	s.NewProvider = scripted(t,
+		`create_box {"id":"cube","dx":50,"dy":50,"dz":50}`,
+		`fillet {"target":"cube","radius":4}`)
+	if err := s.Prompt("rounded cube", true); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	st, _ := s.State()
+	if len(st.Draft) != 2 || len(st.Tree) != 2 || len(st.Pending) != 0 {
+		t.Fatalf("draft=%v tree=%d pending=%d", st.Draft, len(st.Tree), len(st.Pending))
+	}
+	if err := s.DiscardDraft(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 0 || len(st.Draft) != 0 {
+		t.Fatalf("after discard: tree=%d draft=%v", len(st.Tree), st.Draft)
+	}
+}
+
+// Toggling visibility at the Review level applies immediately: nothing pending, no draft,
+// no new checkpoint.
+func TestAppearanceNeedsNoApprovalInReview(t *testing.T) {
+	s := newSvc(t)
+	s.CallTool("create_box", json.RawMessage(`{"id":"plate","dx":100,"dy":60,"dz":4}`))
+	st, _ := s.State()
+	if _, err := s.Commit(st.Pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	before := len(s.app.Hist.Checkpoints)
+	o, err := s.CallTool("set_visibility", json.RawMessage(`{"features":["plate"],"visible":false}`))
+	if err != nil || !o.OK || !o.Committed {
+		t.Fatalf("visibility should commit at Review level: %+v %v", o, err)
+	}
+	st, _ = s.State()
+	if len(st.Pending) != 0 || len(st.Draft) != 0 || len(s.app.Hist.Checkpoints) != before {
+		t.Fatalf("pending=%d draft=%d checkpoints %d->%d", len(st.Pending), len(st.Draft), before, len(s.app.Hist.Checkpoints))
+	}
+}
+
+func TestDeleteSelectionThroughService(t *testing.T) {
+	s := newSvc(t)
+	for i, call := range []struct{ tool, args string }{
+		{"create_box", `{"id":"b","dx":20,"dy":20,"dz":5}`},
+		{"create_box", `{"id":"c","dx":5,"dy":5,"dz":5}`},
+		{"add_hole", `{"target":"b","diameter":3}`},
+	} {
+		o, _ := s.CallTool(call.tool, json.RawMessage(call.args))
+		if !o.OK {
+			t.Fatalf("step %d: %s", i, o.Error)
+		}
+		if !o.Committed {
+			if _, err := s.Commit(o.ChangeSet.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// Faces/edges are never deleted: the service asks whether to delete the owning feature.
+	s.Pick(PickRequest{Body: "hole", Kind: "face", Index: 0, Triangle: -1})
+	r, err := s.Delete(DeleteRequest{})
+	if err != nil || r.NeedsConfirm != "owner" || r.Analysis.SubEntities[0].Owner != "hole" {
+		t.Fatalf("want owner question, got %+v err=%v", r, err)
+	}
+	if st, _ := s.State(); len(st.Tree) != 3 {
+		t.Fatal("a question must not change the model")
+	}
+
+	// A feature other features depend on warns first.
+	r, err = s.Delete(DeleteRequest{Features: []string{"b"}})
+	if err != nil || r.NeedsConfirm != "dependents" || len(r.Analysis.Dependents) != 1 {
+		t.Fatalf("want dependents question, got %+v err=%v", r, err)
+	}
+	// Confirming deletes target + dependents in ONE ChangeSet, committed and undoable.
+	r, err = s.Delete(DeleteRequest{Features: []string{"b"}, Cascade: true})
+	if err != nil || !r.OK || !r.Committed || len(r.ChangeSet.Removed) != 2 {
+		t.Fatalf("cascade delete: %+v err=%v", r, err)
+	}
+	st, _ := s.State()
+	if len(st.Tree) != 1 || st.Tree[0].ID != "c" || !st.CanUndo {
+		t.Fatalf("tree after delete: %+v", st.Tree)
+	}
+	if _, err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 3 {
+		t.Fatalf("undo: %d nodes", len(st.Tree))
+	}
+	if _, err := s.Redo(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A selected body deletes straight away and the selection is cleared.
+	s.Pick(PickRequest{Body: "c", Kind: "body", Index: -1, Triangle: -1})
+	r, err = s.Delete(DeleteRequest{})
+	if err != nil || !r.OK || !r.Committed {
+		t.Fatalf("selection delete: %+v err=%v", r, err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 0 || len(st.Selection.Selectors) != 0 {
+		t.Fatalf("after delete: tree=%d sel=%v", len(st.Tree), st.Selection.Selectors)
+	}
+}
+
+// "delete these objects" from the agent: delete_objects over the selection, one ChangeSet,
+// and discarding the draft undoes it.
+func TestAgentDeletesSelectedObjects(t *testing.T) {
+	s := newSvc(t)
+	s.SetLevel(LevelAuto)
+	s.CallTool("create_box", json.RawMessage(`{"id":"a","dx":10,"dy":10,"dz":5}`))
+	s.CallTool("create_box", json.RawMessage(`{"id":"b","dx":10,"dy":10,"dz":5}`))
+	s.Pick(PickRequest{Body: "a", Kind: "body", Index: -1, Triangle: -1})
+	s.Pick(PickRequest{Body: "b", Kind: "body", Index: -1, Triangle: -1, Mode: "add"})
+
+	// At the Auto level a delete is never low-risk: it waits for approval.
+	s.NewProvider = scripted(t, `delete_objects {"intent":"Remove the selected parts"}`)
+	if err := s.Prompt("delete these objects", false); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	if st, _ := s.State(); len(st.Tree) != 2 || len(st.Pending) != 1 {
+		t.Fatalf("auto level must leave the delete pending: tree=%d pending=%d", len(st.Tree), len(st.Pending))
+	}
+	if err := s.Reject(s.app.Pending()[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	s.SetLevel(LevelReview)
+	s.NewProvider = scripted(t, `delete_objects {"intent":"Remove the selected parts"}`)
+	if err := s.Prompt("delete these objects", false); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	st, _ := s.State()
+	if len(st.Tree) != 0 || len(st.Draft) != 1 {
+		t.Fatalf("agent delete should apply one draft ChangeSet: tree=%d draft=%v pending=%d", len(st.Tree), st.Draft, len(st.Pending))
+	}
+	if err := s.DiscardDraft(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); len(st.Tree) != 2 {
+		t.Fatalf("discard must restore both objects, tree=%d", len(st.Tree))
+	}
+}
+
+// A typed dimension is applied at once even in Review (like an inline parameter edit), stays
+// undoable, and the object stays selected with its updated dimensions for the next edit.
+func TestDimensionEditInReviewKeepsTheObjectSelected(t *testing.T) {
+	s := newSvc(t)
+	s.CallTool("create_box", json.RawMessage(`{"id":"plate","dx":120,"dy":80,"dz":40}`))
+	st, _ := s.State()
+	if _, err := s.Commit(st.Pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := s.Pick(PickRequest{Body: "plate", Kind: "face", Index: 0, Triangle: -1})
+	if err != nil || len(sel.Dimensions) != 1 || sel.Dimensions[0].Width != 120 {
+		t.Fatalf("a selected face shows its object's dimensions: %+v %v", sel.Dimensions, err)
+	}
+	o, err := s.CallTool("set_object_dimension", json.RawMessage(`{"axis":"width","value":150}`))
+	if err != nil || !o.OK || !o.Committed {
+		t.Fatalf("a dimension edit should commit at Review level: %+v %v", o, err)
+	}
+	v := s.Selection()
+	if len(v.Selectors) != 1 || v.Selectors[0] != "body(feature=resize)" || len(v.Dimensions) != 1 {
+		t.Fatalf("the resized object stays selected: %+v", v)
+	}
+	if d := v.Dimensions[0]; d.Width != 150 || d.Depth != 80 || d.Height != 40 {
+		t.Fatalf("dimensions after the edit: %+v", d)
+	}
+	// The next edit folds into the same resize feature: the object is still selected.
+	if o, _ := s.CallTool("set_object_dimension", json.RawMessage(`{"object_id":"resize","axis":"height","value":25}`)); !o.Committed {
+		t.Fatalf("second edit: %+v", o)
+	}
+	if v = s.Selection(); len(v.Dimensions) != 1 || v.Dimensions[0].Height != 25 || v.Dimensions[0].Width != 150 {
+		t.Fatalf("after a folded edit: %+v", v)
+	}
+	if _, err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.State(); st.CanUndo != true || len(st.Pending) != 0 {
+		t.Fatalf("undo: %+v", st)
+	}
+}
+
+// The viewport's interactive Move/Rotate commit through CallTool: applied at once even at Review
+// (direct manipulation, like a typed dimension), one undo step, and the moved object stays
+// selected with its transform available for the next drag.
+func TestInteractiveTransformCommitsAtReviewAndKeepsSelection(t *testing.T) {
+	s := newSvc(t)
+	s.CallTool("create_box", json.RawMessage(`{"id":"plate","dx":120,"dy":80,"dz":40}`))
+	st, _ := s.State()
+	if _, err := s.Commit(st.Pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := s.Pick(PickRequest{Body: "plate", Kind: "face", Index: 0, Triangle: -1})
+	if err != nil || len(sel.Transforms) != 1 || !sel.Transforms[0].Transformable || sel.Transforms[0].Origin != [3]float64{} {
+		t.Fatalf("a selected object carries its transform: %+v %v", sel.Transforms, err)
+	}
+	o, err := s.CallTool("move_object", json.RawMessage(`{"object_id":"plate","dx":12.5,"dy":0,"dz":0}`))
+	if err != nil || !o.OK || !o.Committed {
+		t.Fatalf("an interactive move commits at Review level: %+v %v", o, err)
+	}
+	v := s.Selection()
+	if len(v.Selectors) != 1 || v.Selectors[0] != "body(feature=move)" || len(v.Transforms) != 1 || v.Transforms[0].Origin != [3]float64{12.5, 0, 0} {
+		t.Fatalf("the moved object stays selected: %+v", v)
+	}
+	if o, _ := s.CallTool("rotate_object", json.RawMessage(`{"angle":90,"axis":"z","pivot":"center"}`)); !o.Committed {
+		t.Fatalf("rotating the selected object: %+v", o)
+	}
+	if v = s.Selection(); len(v.Selectors) != 1 || v.Selectors[0] != "body(feature=rotate)" {
+		t.Fatalf("the rotated object stays selected: %+v", v.Selectors)
+	}
+	if _, err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.State(); !st.CanUndo || !st.CanRedo {
+		t.Fatal("one undo step per transform")
 	}
 }

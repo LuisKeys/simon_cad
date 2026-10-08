@@ -10,11 +10,12 @@ import (
 	"time"
 
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
+	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/app"
 )
 
-func caps() []runtime.Capability { return []runtime.Capability{geo.New()} }
+func caps() []runtime.Capability { return []runtime.Capability{geo.New(), vis.New()} }
 
 // Recorded evals run in CI with no network.
 func TestRecordedEvals(t *testing.T) {
@@ -202,21 +203,6 @@ func TestOpenAIResponsesWireFormatAndToolRoundTrip(t *testing.T) {
 	}
 	if len(resp.Content) != 2 || resp.Content[0].Type != "reasoning" {
 		t.Fatalf("reasoning block not preserved: %+v", resp.Content)
-	}
-}
-
-func TestOllamaUsesChatCompletions(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			t.Errorf("path %s", r.URL.Path)
-		}
-		w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{}}`))
-	}))
-	defer srv.Close()
-	o := &runtime.OpenAI{Flavor: "ollama", BaseURL: srv.URL, Model: "m", HTTP: srv.Client()}
-	resp, err := o.Complete(context.Background(), runtime.Request{Messages: []runtime.Message{{Role: "user", Content: []runtime.Block{{Type: "text", Text: "hi"}}}}})
-	if err != nil || resp.Text() != "ok" {
-		t.Fatalf("resp=%+v err=%v", resp, err)
 	}
 }
 

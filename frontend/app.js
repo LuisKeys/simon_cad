@@ -1,15 +1,45 @@
 // Simon CAD UI: panels over the ui.Service API. Every mutation here is a call that ends in
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
-import { api, subscribe, h, mm3 } from './api.js';
+import { api, subscribe, h, materialUrl } from './api.js';
 import { Viewport } from './viewport.js';
+import { initVision } from './vision.js';
+import { initVisualPanel } from './visualcmp.js';
+import { MaterialLibrary } from './materials/library.js';
+import { ThumbnailRenderer } from './materials/pbr.js';
+import { materialEditor, materialMenu, DND_TYPE, noteRecentMaterial } from './materials/panel.js';
+import { icon, featureIcon } from './icons.js';
+import { selectionContext, actionsFor, groupRuns, ACTIONS } from './actions.js';
+import { openSettings, loadTheme } from './settings.js';
+import { initPanels, getPref, setPref } from './panels.js';
+import { initComponents, openComponent, createComponent, replaceComponent, publishProject } from './components.js';
+import { DimensionRenderer } from './dimensions.js';
+import { ANCHORS, AXIS_LABEL, PANEL_ORDER } from './dimensions-model.js';
+import { units, setUnits } from './units.js';
+import { InteractiveTransformController } from './transform.js';
+import { initShortcuts } from './shortcuts.js';
+import { isToggleKey } from './shortcuts-model.js';
 
 const $ = (id) => document.getElementById(id);
-const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false };
+const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
+  openNode: null, renaming: null, histSel: null, histOpen: getPref('history', true) };
+
+// Icons are declared in the markup (data-icon) and drawn here, so there is one icon set.
+function hydrateIcons(root = document) {
+  for (const el of root.querySelectorAll('[data-icon]:not([data-ic])')) { el.dataset.ic = '1'; el.prepend(icon(el.dataset.icon)); }
+}
+hydrateIcons();
+const panels = initPanels({ layout: $('layout'), toggles: { left: $('btn-panel-left'), right: $('btn-panel-right') } });
 
 // ---- viewport wiring -----------------------------------------------------------------
 
-const vp = new Viewport($('gl'), $('cube'), {
+// Visual materials: presentation only, resolved from the library at render time.
+const library = new MaterialLibrary();
+const textureUrl = (id, file) => materialUrl(id, file);
+
+let dimOverlay = null; // the selected objects' editable dimensions (created right after the viewport)
+const vp = new Viewport($('gl'), {
+  library, textureUrl,
   onPick: async (p, mods) => {
     try {
       const mode = mods.shift || mods.ctrl ? 'add' : 'replace';
@@ -17,6 +47,35 @@ const vp = new Viewport($('gl'), $('cube'), {
       const sel = await api('pick', body);
       applySelection(sel);
     } catch (e) { toast(e.message, 'bad'); }
+  },
+  onBoxSelect: async (ids, mods) => {
+    try {
+      const picked = ids.map((id) => `body(feature=${id})`);
+      const cur = S.selection?.selectors ?? [];
+      const selectors = mods.shift || mods.ctrl ? [...new Set([...cur, ...picked])] : picked;
+      applySelection(await api('select', { selectors }));
+    } catch (e) { toast(e.message, 'bad'); }
+  },
+  onContext: async (p, at) => {
+    try {
+      // Right-clicking an object that is not part of the selection selects it first.
+      if (p && !(S.selection?.selectors ?? []).some((x) => featureOf(x) === p.body)) {
+        applySelection(await api('pick', { body: p.body, kind: p.kind, index: p.index ?? -1, triangle: p.triangle ?? -1, mode: 'replace' }));
+      } else if (!p) applySelection(await api('select', { selectors: [] }));
+    } catch (e) { toast(e.message, 'bad'); return; }
+    const n = S.selection?.selectors?.length ?? 0;
+    const ids = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
+    const hasMat = (S.state?.tree ?? []).some((t) => ids.includes(t.id) && t.appearance?.material_id);
+    const bodySel = (S.selection?.selectors ?? []).every((x) => x.startsWith('body('));
+    const movable = ids.length === 1 && (S.selection?.transforms ?? []).some((t) => t.object_id === ids[0]);
+    showMenu(at, [
+      ...(movable ? [{ head: 'Transform' },
+        { label: 'Move', icon: 'move', key: 'G', data: { xform: 'move' }, run: () => xform.begin('translate', { at }) },
+        { label: 'Rotate', icon: 'rotate', key: 'R', data: { xform: 'rotate' }, run: () => xform.begin('rotate', { at }) }, { sep: true }] : []),
+      ...(ids.length ? [...materialMenu(materialCtx, ids, { hasMaterial: hasMat, openPanel: openMaterialPanel }), { sep: true }] : []),
+      ...(ids.length && bodySel ? [{ label: 'Duplicate…', icon: 'duplicate', key: 'Ctrl+D', run: () => actionEnv.duplicate() },
+        { label: 'Group…', icon: 'group', key: 'Ctrl+G', run: () => actionEnv.group() }, { sep: true }] : []),
+      { label: n > 1 ? `Delete ${n} selected` : 'Delete', icon: 'trash', key: 'Del', danger: true, disabled: n === 0, run: () => deleteObjects() }]);
   },
   onHover: (p) => {
     $('hud').textContent = p ? `${p.kind} ${p.kind === 'body' ? p.body : '#' + p.index} on ${p.body}` : hudStats();
@@ -26,13 +85,150 @@ const vp = new Viewport($('gl'), $('cube'), {
     if (!m) { label.hidden = true; $('hud').textContent = vp.measure.on ? 'Measure: click two points' : hudStats(); return; }
     const d = m.d;
     label.hidden = false;
-    label.textContent = `${m.distance.toFixed(3)} mm  (Δ ${d.x.toFixed(2)}, ${d.y.toFixed(2)}, ${d.z.toFixed(2)})`;
-    $('hud').textContent = `distance ${m.distance.toFixed(3)} mm`;
+    label.textContent = `${units.length(m.distance)}  (Δ ${[d.x, d.y, d.z].map((v) => units.length(v, { unit: false })).join(', ')})`;
+    $('hud').textContent = `distance ${units.length(m.distance)}`;
     placeMeasureLabel(m.mid);
   },
-  onFrame: () => { if (vp.measure.pts.length === 2) placeMeasureLabel(vp.measure.pts[0].clone().lerp(vp.measure.pts[1], 0.5)); },
+  onFrame: () => {
+    if (vp.measure.pts.length === 2) placeMeasureLabel(vp.measure.pts[0].clone().lerp(vp.measure.pts[1], 0.5));
+    dimOverlay?.update();
+  },
+  onPaneMenu: (i, el) => showPaneMenu(i, el),
+  onLayout: (st) => views.save(st),
 });
-window.simonViewport = vp; // for e2e tests and debugging
+window.simonViewport = vp;
+dimOverlay = new DimensionRenderer(vp, { onEdit: (id, axis, value) => editDimension(id, axis, value), onInvalid: (msg) => toast(msg, 'bad') });
+window.simonDimensions = dimOverlay;
+
+// Interactive Move (G) / Rotate (R): a modal operation previewed on the body's matrix and
+// committed as one move_object / rotate_object call (the same TransformService the agent uses).
+const xform = new InteractiveTransformController(vp, {
+  selection: () => S.selection,
+  workspace: () => S.state?.workspace,
+  commit: async (cmds) => {
+    try {
+      let ok = true;
+      for (const { name, args } of cmds) {
+        const o = await api('tool', { name, args });
+        if (!o.ok) { toast(o.error, 'bad'); ok = false; break; }
+        if (!o.committed) toast(`${name === 'move_object' ? 'Move' : 'Rotate'} proposed: review it in the conversation`, 'ok');
+      }
+      await refresh();
+      return ok;
+    } catch (e) { toast(e.message, 'bad'); await refresh(); return false; }
+  },
+  // The editable dimensions would float at the old place: hidden while the object moves.
+  onModal: (on) => { dimOverlay?.set(on ? [] : S.selection?.dimensions ?? []); document.body.classList.toggle('transforming', on); },
+  notify: (msg, kind) => toast(msg, kind),
+});
+window.simonTransform = xform;
+// The viewport has keyboard focus for G/R when it was the last thing clicked or is under the mouse.
+document.addEventListener('pointerdown', (e) => { S.vpFocus = $('viewport').contains(e.target); }, true);
+const viewportFocused = () => S.vpFocus || $('viewport').matches(':hover');
+
+// ---- materials: library, thumbnails, drag & drop --------------------------------------
+
+let thumbs = null;                 // lazy: needs the viewport's environment map
+const thumbCache = new Map();      // id@version -> data URL promise
+const materialCtx = {
+  library,
+  thumb: (def) => {
+    const key = `${def.id}@${library.version}`;
+    if (!thumbCache.has(key)) {
+      thumbs ??= new ThumbnailRenderer(textureUrl);
+      thumbCache.set(key, thumbs ? thumbs.render(def) : Promise.resolve(''));
+    }
+    return thumbCache.get(key);
+  },
+  apply: (tool, ids, extra) => applyAppearance(tool, ids, extra),
+  // The picker can be open in the selection panel and in an expanded tree row; repaint both.
+  rerender: () => { renderSelection(S.selection); if (S.state) renderTree(S.state); },
+};
+
+let materialsFor = null;
+async function loadMaterials(path) {
+  if (materialsFor === path && library.version) return;
+  try {
+    library.load(await api('materials'));
+    materialsFor = path;
+    thumbCache.clear();
+    vp.reapplyMaterials();
+    if (library.warnings.length) console.warn('materials:', library.warnings);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+const hasMat = (e) => [...(e.dataTransfer?.types ?? [])].includes(DND_TYPE);
+async function dropMaterial(e, bodyId) {
+  e.preventDefault();
+  const id = e.dataTransfer.getData(DND_TYPE);
+  if (!id || !bodyId) return;
+  // Dropping on a selected object applies to the whole selection; otherwise just to that object.
+  const sel = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
+  noteRecentMaterial(id);
+  applyAppearance('set_material', sel.includes(bodyId) ? sel : [bodyId], { material_id: id });
+}
+$('viewport').addEventListener('dragover', (e) => { if (hasMat(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+$('viewport').addEventListener('drop', (e) => { if (hasMat(e)) dropMaterial(e, vp.pick(e)?.body); });
+$('tree').addEventListener('dragover', (e) => { if (hasMat(e) && e.target.closest?.('[data-id]')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+$('tree').addEventListener('drop', (e) => { if (hasMat(e)) dropMaterial(e, e.target.closest?.('[data-id]')?.dataset.id); }); // for e2e tests and debugging
+
+// ---- viewport layout: Single / Quad views ------------------------------------------------
+// The layout, split and each view's orientation and camera are presentation state, saved per
+// project in localStorage (never in the project file or its history).
+
+const ORIENT_KEYS = ['perspective', 'top', 'bottom', 'front', 'back', 'left', 'right'];
+const views = {
+  key: null,
+  timer: null,
+  /** Restores the views saved for `project`; with none saved, the current views carry over. */
+  load(project) {
+    const key = `views.v1:${project}`;
+    if (key === this.key) return;
+    this.flush();
+    this.key = key;
+    const saved = getPref(key, null);
+    if (saved) vp.layout.restore(saved); else this.save(vp.layout.serialize());
+    renderCtxBar();
+  },
+  save(st) {
+    this.pending = st;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.flush(), 300);
+  },
+  flush() {
+    clearTimeout(this.timer);
+    if (!this.pending) return;
+    if (this.key) setPref(this.key, this.pending);
+    this.pending = null;
+  },
+};
+addEventListener('pagehide', () => views.flush());
+
+function setLayoutMode(mode) { vp.layout.setMode(mode); renderCtxBar(); }
+
+function layoutMenuItems() {
+  const quad = vp.layout.mode === 'quad';
+  return [{ head: 'Viewport layout' },
+    { label: 'Single View', checked: !quad, key: 'Ctrl+Alt+4', data: { layout: 'single' }, run: () => setLayoutMode('single') },
+    { label: 'Quad View', checked: quad, key: 'Ctrl+Alt+4', data: { layout: 'quad' }, run: () => setLayoutMode('quad') }];
+}
+
+/** The menu of a view's label: its orientation, fit, maximize and the layout. */
+function showPaneMenu(i, el) {
+  const pane = vp.layout.panes[i];
+  const lay = vp.layout;
+  showMenu({ el }, [
+    { head: 'View' },
+    ...ORIENT_KEYS.map((o) => ({ label: o[0].toUpperCase() + o.slice(1), checked: pane.config.orientation === o, data: { orientation: o },
+      run: () => lay.setOrientation(i, o) })),
+    { sep: true },
+    { label: 'Fit to scene', icon: 'fit', key: 'F', run: () => { lay.setActive(i); vp.fit(); } },
+    lay.mode === 'quad' ? { label: lay.maximized === i ? 'Restore quad view' : 'Maximize view', icon: lay.maximized === i ? 'minimize' : 'maximize',
+      key: 'Double-click', run: () => lay.toggleMaximize(i) } : null,
+    { label: pane.config.showAxisGizmo !== false ? 'Hide axis gizmo' : 'Show axis gizmo', icon: 'view', run: () => lay.setGizmoVisible(i, pane.config.showAxisGizmo === false) },
+    { sep: true },
+    ...layoutMenuItems()]);
+}
 
 function placeMeasureLabel(mid) {
   const s = vp.projectToPixels(mid);
@@ -48,6 +244,9 @@ function applySelection(sel) {
   S.selection = sel;
   vp.setSelection(sel.highlights ?? []);
   renderSelection(sel);
+  if (S.state) renderTree(S.state);
+  renderCtxBar();
+  xform.validate();
 }
 
 // ---- data refresh --------------------------------------------------------------------
@@ -61,7 +260,8 @@ async function refreshScene() {
       S.sceneAgain = false;
       const delta = await api('scene', { known: vp.known });
       vp.applyDelta(delta);
-      $('empty').hidden = vp.bodies.size > 0;
+      xform.validate(); // an agent edit, undo or project switch may have replaced the target
+      $('empty').hidden = vp.bodies.size > 0 || (delta.sketches ?? []).length > 0;
       $('hud').textContent = hudStats();
     } while (S.sceneAgain);
   } catch (e) { toast(e.message, 'bad'); } finally { S.busyScene = false; }
@@ -85,47 +285,293 @@ function scheduleRefresh() {
 }
 
 subscribe((n) => {
+  visualPanel.onNotice(n);
+  if (n.kind === 'refine' && n.refine) { S.refineState = n.refine; renderAgentState(); return; }
+  if (n.kind === 'visual') return;
   if (n.kind === 'chat' && n.chat) { addChat(n.chat); return; }
   if (n.kind === 'selection') { api('state').then((st) => { S.state = st; applySelection(st.selection); }).catch(() => {}); return; }
+  if (n.kind === 'agent_state' && n.state) { S.agentState = n.state; renderAgentState(); return; }
+  if (n.kind === 'model' && n.model) { S.model = n.model; renderModel(); return; }
   if (n.kind === 'state' || n.kind === 'agent_done') scheduleRefresh();
 });
 
 // ---- rendering of panels ---------------------------------------------------------------
 
+// Remote fallback authorization. When the local primary model cannot serve a request and the fallback is a cloud
+// model, the server refuses it (code "fallback_consent") until the user decides; `run` is sent again once allowed.
+// Nothing is sent remotely on Cancel, and a remembered answer is saved in Settings (Fallback Model › Remote data).
+async function withFallbackConsent(run) {
+  try { return await run(); } catch (err) {
+    if (err.code !== 'fallback_consent') throw err;
+    const fb = err.data?.fallback ?? {};
+    const remote = `${({ openai: 'OpenAI', claude: 'Anthropic' })[fb.provider] ?? fb.provider} · ${fb.model}`;
+    const { ok, remember } = await confirmBox({ title: 'Send this request to a remote model?',
+      body: `${err.data?.selected ?? 'The local model'} cannot handle it locally. To process it, SimonCAD will send the attachments `
+        + `and the context the request needs to the fallback model, ${remote}, outside this computer.`,
+      ok: 'Allow', okClass: 'primary', remember: true });
+    if (ok || remember) await api('fallback/consent', { allow: ok, remember });
+    if (!ok) { const e = new Error('Cancelled: nothing was sent to the remote model.'); e.cancelled = true; throw e; }
+    return run();
+  }
+}
+
+// Image-to-CAD: attachments, interpretation panel (all changes still go through tool calls).
+const vision = initVision({
+  $, toast: (...a) => toast(...a), getState: () => S.state, getSelection: () => S.selection,
+  showPreview: (id) => showPreview(id), refresh: () => refresh(), withFallbackConsent,
+});
+
+// Visual comparison panel and closed-loop refinement (reference images stay constraints).
+const visualPanel = initVisualPanel({
+  $, toast: (...a) => toast(...a), getState: () => S.state, withFallbackConsent,
+  attachmentIds: () => vision.attachmentIds(), clearAttachments: () => vision.clearAttachments(),
+});
+
+// Workspace settings of the project (units, grid, snapping): the grid redraws at once and every
+// displayed length follows the display units. Values stay canonical millimetres underneath.
+function applyWorkspace(ws) {
+  if (!ws) return;
+  vp.setWorkspace(ws);
+  if (setUnits(ws)) {
+    dimOverlay?.refresh();
+    if (S.selection) renderSelection(S.selection);
+  }
+}
+
 function render(st) {
-  $('project').replaceChildren(...[h('span', {}, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, ' ●') : null].filter(Boolean));
+  S.selection = st.selection;
+  if (!st.refine_state) S.refineState = null;
+  S.level = st.level;
+  loadMaterials(st.path ?? st.name);
+  views.load(st.path ?? st.name);
+  applyWorkspace(st.workspace);
+  // replaceChildren stringifies null into a "null" text node, so drop absent children first.
+  $('project').replaceChildren(...[h('span', { class: 'pname' }, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, '●') : null, icon('down')].filter(Boolean));
   $('btn-undo').disabled = !st.can_undo || st.busy;
+  $('btn-clear').disabled = st.busy || (st.chat.length === 0 && !(st.specs ?? []).length);
   $('btn-redo').disabled = !st.can_redo || st.busy;
-  $('level').value = st.level;
-  $('btn-play').disabled = st.frames === 0 || S.playing;
   $('send').disabled = st.busy;
-  $('send').textContent = st.busy ? 'Working…' : 'Send';
+  $('send').classList.toggle('busy', !!st.busy);
+  $('send').title = st.busy ? 'Working…' : 'Send (Enter)';
   renderTree(st);
   renderSelection(st.selection);
   renderTimeline(st);
   renderChat(st);
+  renderUsage(st.usage);
+  S.model = st.model ?? null; S.primary = st.primary ?? null;
+  renderModel();
+  renderCtxBar();
+  components.render(st);
+  vision.onState(st);
 }
+
+// Touch equivalent of right-click: press and hold. A click that follows a long-press is swallowed.
+function onLongPress(el, fn, ms = 500) {
+  let t = null, x0 = 0, y0 = 0;
+  const cancel = () => { clearTimeout(t); t = null; };
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
+    x0 = e.clientX; y0 = e.clientY; cancel();
+    t = setTimeout(() => { t = null; el._lp = performance.now(); fn({ x: x0, y: y0 }); }, ms);
+  });
+  el.addEventListener('pointermove', (e) => { if (t && Math.hypot(e.clientX - x0, e.clientY - y0) > 8) cancel(); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, cancel);
+}
+const justLongPressed = (el) => performance.now() - (el._lp ?? -1e9) < 700;
 
 function renderTree(st) {
   const el = $('tree');
   if (!st.tree.length) { el.replaceChildren(h('div', { class: 'muted' }, 'No features yet.')); return; }
-  const selFeatures = new Set((st.selection.selectors ?? []).map(featureOf));
-  el.replaceChildren(...st.tree.map((n) => {
+  const sel = S.selection ?? st.selection;
+  const selFeatures = new Set((sel.selectors ?? []).map(featureOf));
+  const nodeEl = (n) => {
     const open = S.openNode === n.id;
-    const row = h('div', { class: 'row', role: 'treeitem', 'aria-expanded': String(open), tabindex: '0',
-      onclick: () => { S.openNode = open ? null : n.id; renderTree(S.state); },
-      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } } },
-      h('span', { class: `dot ${n.status === 'ok' && !n.suppressed ? '' : n.suppressed ? 'suppressed' : n.status}`, title: n.suppressed ? 'suppressed' : n.status }),
-      h('span', { class: 'name', title: n.id }, n.name),
-      h('span', { class: 'type' }, n.type),
-      h('span', { class: `badge ${n.created_by}`, title: n.capability ? `${n.created_by} · ${n.capability}` : n.created_by }, n.created_by || '—'),
-      n.visible ? null : h('span', { class: 'badge hidden', title: 'Consumed by a later feature' }, 'input'));
+    const selected = selFeatures.has(n.id);
+    const hiddenApp = n.appearance?.visible === false;
+    const renaming = S.renaming === n.id;
+    const row = h('div', { class: 'row', role: 'treeitem', 'aria-selected': String(selected), 'aria-expanded': String(open), tabindex: '0',
+      title: n.intent ? `${n.type} — ${n.intent}` : n.type, dataset: { id: n.id },
+      oncontextmenu: (e) => { e.preventDefault(); if (!justLongPressed(row)) treeMenu(n, { x: e.clientX, y: e.clientY }); },
+      onclick: (e) => { if (justLongPressed(row)) return; rowClick(n, e); },
+      ondblclick: () => startRename(n),
+      onkeydown: (e) => {
+        if (e.target !== row) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); rowClick(n, e); }
+        else if (e.key === 'F2') { e.preventDefault(); startRename(n); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const rows = [...el.querySelectorAll('.row')];
+          rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+        }
+      } },
+      n.visible ? h('button', { type: 'button', class: 'eye', 'aria-pressed': String(!hiddenApp),
+        'aria-label': `${hiddenApp ? 'Show' : 'Hide'} ${n.name}`, title: hiddenApp ? 'Show' : 'Hide',
+        onclick: (e) => { e.stopPropagation(); applyAppearance('set_visibility', [n.id], { visible: hiddenApp }); } },
+        icon(hiddenApp ? 'eye-off' : 'eye')) : h('span', { style: 'width:34px;flex:none' }),
+      h('span', { class: 'ficon' }, icon(featureIcon(n.type))),
+      n.suppressed || n.status !== 'ok' ? h('span', { class: `dot ${n.suppressed ? 'suppressed' : n.status}`, title: n.suppressed ? 'suppressed' : n.status }) : null,
+      renaming ? renameInput(n) : h('span', { class: 'name' }, n.name),
+      n.component ? h('span', { class: `src component${n.out_of_date ? ' stale' : ''}`,
+        title: n.out_of_date ? `references the component ${n.component}, which has changed since` : `references the component ${n.component}` },
+        n.out_of_date ? 'Component ·' : 'Component') : null,
+      n.created_by === 'agent' ? h('span', { class: 'src agent', title: n.capability ? `agent · ${n.capability}` : 'created by the agent' }, 'agent') : null,
+      n.visible ? null : h('span', { class: 'src', title: 'Consumed by a later feature' }, 'input'),
+      selected ? h('button', { type: 'button', class: 'more', 'aria-haspopup': 'menu', 'aria-label': `Actions for ${n.name}`,
+        onclick: (e) => { e.stopPropagation(); treeMenu(n, { el: e.currentTarget }); } }, icon('more')) : null);
+    onLongPress(row, (pt) => treeMenu(n, pt));
     const kids = [row];
-    if (n.intent) kids.push(h('div', { class: 'intent' }, n.intent));
-    if (n.errors.length) kids.push(h('div', { class: 'errors' }, n.errors[0]));
-    if (open) kids.push(paramEditor(n));
-    return h('div', { class: `node${selFeatures.has(n.id) ? ' sel' : ''}`, role: 'none' }, ...kids);
-  }));
+    if (open) {
+      kids.push(h('div', { class: 'detail' },
+        n.intent ? h('div', { class: 'intent' }, n.intent) : null,
+        h('div', { class: 'meta' }, h('span', {}, n.type), h('span', {}, '·'), h('span', {}, n.id), n.created_by ? h('span', {}, '· ' + n.created_by) : null),
+        n.errors.length ? h('div', { class: 'errors' }, n.errors[0]) : null,
+        n.visible ? appearanceEditor([n]) : null, paramEditor(n)));
+    } else if (n.errors.length) kids.push(h('div', { class: 'detail' }, h('div', { class: 'errors' }, n.errors[0])));
+    return h('div', { class: `node${selected ? ' sel' : ''}${n.suppressed || hiddenApp ? ' off' : ''}`, role: 'none', dataset: { type: n.type } }, ...kids);
+  };
+  // Grouped features are listed under their group, which sits where its first member is.
+  const out = [];
+  const done = new Set();
+  for (const n of st.tree) {
+    if (!n.group) { out.push(nodeEl(n)); continue; }
+    if (done.has(n.group)) continue;
+    done.add(n.group);
+    const members = st.tree.filter((t) => t.group === n.group);
+    out.push(groupEl(n.group, members, selFeatures, nodeEl));
+  }
+  el.replaceChildren(...out);
+  if (S.renaming) el.querySelector('input.rename')?.focus();
+}
+
+// A design-tree group: organization only. Clicking it selects its visible bodies.
+S.collapsed = new Set(getPref('collapsedGroups', []));
+function groupEl(name, members, selFeatures, nodeEl) {
+  const bodies = members.filter((m) => m.visible);
+  const closed = S.collapsed.has(name);
+  const allSel = bodies.length > 0 && bodies.every((m) => selFeatures.has(m.id));
+  const hidden = bodies.length > 0 && bodies.every((m) => m.appearance?.visible === false);
+  const fold = () => {
+    if (closed) S.collapsed.delete(name); else S.collapsed.add(name);
+    setPref('collapsedGroups', [...S.collapsed]);
+    renderTree(S.state);
+  };
+  const select = async (e) => {
+    const mode = e?.shiftKey || e?.ctrlKey || e?.metaKey ? 'add' : 'replace';
+    const cur = mode === 'add' ? (S.selection?.selectors ?? []) : [];
+    try { applySelection(await api('select', { selectors: [...new Set([...cur, ...bodies.map((m) => `body(feature=${m.id})`)])] })); } catch (err) { toast(err.message, 'bad'); }
+  };
+  const row = h('div', { class: 'row grp', role: 'treeitem', 'aria-expanded': String(!closed), 'aria-selected': String(allSel), tabindex: '0',
+    title: `Group “${name}” · ${members.length} feature${members.length === 1 ? '' : 's'}`, dataset: { group: name },
+    onclick: (e) => { if (!justLongPressed(row)) select(e); },
+    oncontextmenu: (e) => { e.preventDefault(); if (!justLongPressed(row)) groupMenu(name, members, { x: e.clientX, y: e.clientY }); },
+    onkeydown: (e) => {
+      if (e.target !== row) return;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(e); }
+      else if (e.key === 'ArrowLeft' && !closed || e.key === 'ArrowRight' && closed) { e.preventDefault(); fold(); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const rows = [...$('tree').querySelectorAll('.row')];
+        rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+      }
+    } },
+  h('button', { type: 'button', class: 'eye fold', 'aria-label': `${closed ? 'Expand' : 'Collapse'} ${name}`, title: closed ? 'Expand' : 'Collapse',
+    onclick: (e) => { e.stopPropagation(); fold(); } }, icon(closed ? 'right' : 'down')),
+  h('span', { class: 'ficon' }, icon('group')),
+  h('span', { class: 'name' }, name),
+  h('span', { class: 'src' }, String(bodies.length || members.length)),
+  bodies.length ? h('button', { type: 'button', class: 'eye', 'aria-pressed': String(!hidden), 'aria-label': `${hidden ? 'Show' : 'Hide'} group ${name}`, title: hidden ? 'Show group' : 'Hide group',
+    onclick: (e) => { e.stopPropagation(); applyAppearance('set_visibility', bodies.map((m) => m.id), { visible: hidden }); } }, icon(hidden ? 'eye-off' : 'eye')) : null,
+  h('button', { type: 'button', class: 'more', 'aria-haspopup': 'menu', 'aria-label': `Actions for group ${name}`,
+    onclick: (e) => { e.stopPropagation(); groupMenu(name, members, { el: e.currentTarget }); } }, icon('more')));
+  onLongPress(row, (pt) => groupMenu(name, members, pt));
+  return h('div', { class: `group${allSel ? ' sel' : ''}${closed ? ' closed' : ''}`, role: 'group', 'aria-label': `Group ${name}` },
+    h('div', { class: `node${allSel ? ' sel' : ''}${hidden ? ' off' : ''}`, role: 'none' }, row),
+    closed ? null : h('div', { class: 'members' }, ...members.map(nodeEl)));
+}
+
+function groupMenu(name, members, at) {
+  const ids = members.map((m) => m.id);
+  const bodies = members.filter((m) => m.visible).map((m) => m.id);
+  showMenu(at, [
+    { label: 'Rename group…', icon: 'pencil', run: async () => {
+      const v = await formDialog({ title: `Rename group “${name}”`, ok: 'Rename', fields: [{ key: 'name', label: 'Name', text: true, value: name }] });
+      if (v?.name?.trim() && v.name.trim() !== name) await callTool('group', { features: ids, name: v.name.trim() }, 'Rename group');
+    } },
+    { label: 'Duplicate group', icon: 'duplicate', disabled: !bodies.length, run: async () => {
+      if (!bodies.length) return;
+      applySelection(await api('select', { selectors: bodies.map((id) => `body(feature=${id})`) }));
+      actionEnv.duplicate();
+    } },
+    { label: 'Ungroup', icon: 'ungroup', run: () => callTool('ungroup', { group: name }, 'Ungroup') },
+    { sep: true },
+    { label: `Delete group contents`, icon: 'trash', danger: true, disabled: !bodies.length, run: () => deleteObjects({ features: bodies }) },
+  ]);
+}
+
+// Click selects the object (and shows its details); Shift adds, Ctrl/Cmd toggles; clicking
+// the one selected object again folds its details away.
+async function rowClick(n, e) {
+  if (S.renaming) return;
+  const redraw = () => { if (S.state) renderTree(S.state); };
+  if (!n.visible) { S.openNode = S.openNode === n.id ? null : n.id; redraw(); return; } // consumed features cannot be picked, only inspected
+  const sels = S.selection?.selectors ?? [];
+  const mode = e.shiftKey ? 'add' : (e.ctrlKey || e.metaKey) ? 'toggle' : 'replace';
+  if (mode === 'replace' && sels.length === 1 && /^body\(/.test(sels[0]) && featureOf(sels[0]) === n.id) { S.openNode = S.openNode === n.id ? null : n.id; redraw(); return; }
+  S.openNode = mode === 'replace' ? n.id : null;
+  try { applySelection(await api('pick', { body: n.id, kind: 'body', index: -1, triangle: -1, mode })); } catch (err) { toast(err.message, 'bad'); }
+}
+
+function renameInput(n) {
+  let done = false;
+  const finish = async (commit) => {
+    if (done) return; done = true;
+    const v = input.value.trim();
+    S.renaming = null;
+    if (S.state) renderTree(S.state);
+    if (commit && v && v !== n.name) await callTool('rename_feature', { feature: n.id, name: v });
+  };
+  const input = h('input', { type: 'text', class: 'rename', value: n.name, 'aria-label': `Rename ${n.name}`,
+    onclick: (e) => e.stopPropagation(), ondblclick: (e) => e.stopPropagation(),
+    onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); } },
+    onblur: () => finish(true) });
+  setTimeout(() => input.select(), 0);
+  return h('span', { class: 'name' }, input);
+}
+function startRename(n) { S.renaming = n.id; renderTree(S.state); }
+
+function treeMenu(n, at) {
+  const selIds = [...new Set((S.selection?.selectors ?? []).map(featureOf).filter(Boolean))];
+  const ids = selIds.includes(n.id) && selIds.length > 1 ? selIds : [n.id];
+  const hiddenApp = n.appearance?.visible === false;
+  const nodes = ids.map((id) => S.state.tree.find((t) => t.id === id)).filter(Boolean);
+  showMenu(at, [
+    n.visible && { label: hiddenApp ? 'Show' : 'Hide', icon: hiddenApp ? 'eye' : 'eye-off', run: () => applyAppearance('set_visibility', ids, { visible: hiddenApp }) },
+    { label: 'Rename', icon: 'pencil', key: 'F2', disabled: ids.length > 1, run: () => startRename(n) },
+    { label: n.suppressed ? 'Unsuppress' : 'Suppress', icon: 'ban', run: async () => { for (const t of nodes) await callTool('suppress_feature', { feature: t.id, suppressed: !n.suppressed }); } },
+    { sep: true },
+    // Component instances are references: they are opened, re-pinned, swapped or turned into
+    // local geometry. Everything else can become a component.
+    n.component && { label: 'Open component', icon: 'folder', run: () => openComponent(n.component) },
+    n.component && n.out_of_date && { label: 'Update to latest', icon: 'restore', run: () => callTool('sync_component', { instances: [n.id] }, 'Update component') },
+    n.component && { label: 'Replace component…', icon: 'component', run: () => replaceComponent(n) },
+    n.component && { label: 'Detach component', icon: 'ungroup', run: () => callTool('detach_component', { instance: n.id }, 'Detach component') },
+    !n.component && n.visible && { label: 'Create component…', icon: 'component', run: () => withSelected(ids, () => createComponent(ids)) },
+    { sep: true },
+    n.visible && { label: 'Duplicate…', icon: 'duplicate', key: 'Ctrl+D', run: () => withSelected(ids, actionEnv.duplicate) },
+    { label: 'Group…', icon: 'group', key: 'Ctrl+G', run: () => withSelected(ids, actionEnv.group) },
+    nodes.some((t) => t.group) && { label: 'Remove from group', icon: 'ungroup', run: () => callTool('ungroup', { features: nodes.filter((t) => t.group).map((t) => t.id) }, 'Ungroup') },
+    { sep: true },
+    { label: ids.length > 1 ? `Delete ${ids.length} objects` : `Delete ${n.name}`, icon: 'trash', key: 'Del', danger: true, run: () => deleteObjects({ features: ids }) },
+  ]);
+}
+
+// Runs a selection-based action on `ids` (a tree menu may target rows that are not selected).
+async function withSelected(ids, fn) {
+  const cur = new Set(selIds());
+  if (ids.length !== cur.size || ids.some((id) => !cur.has(id))) {
+    try { applySelection(await api('select', { selectors: ids.map((id) => `body(feature=${id})`) })); } catch (e) { toast(e.message, 'bad'); return; }
+  }
+  fn();
 }
 
 function paramEditor(n) {
@@ -149,20 +595,230 @@ function paramEditor(n) {
   return h('div', { class: 'params' }, ...rows);
 }
 
+// ---- delete ------------------------------------------------------------------------------
+// Delete is a ChangeSet like any other (delete_objects → RemoveFeature commands, one set for
+// the whole selection, undoable). The server first reports what would happen; the UI only
+// asks the two questions it may come back with. B-Rep faces/edges/vertices are never edited:
+// they resolve to their owning feature, which is offered instead.
+
+// confirmBox resolves true/false; with `remember` it shows a "Remember my choice" box and resolves { ok, remember }.
+function confirmBox({ title, body, ok = 'Delete', okClass = 'danger', remember = false }) {
+  return new Promise((resolve) => {
+    const d = $('confirm');
+    $('confirm-title').textContent = title;
+    $('confirm-body').textContent = body;
+    $('confirm-ok').textContent = ok;
+    $('confirm-ok').className = okClass;
+    $('confirm-remember').hidden = !remember;
+    $('confirm-remember-box').checked = true;
+    d.hidden = false;
+    $('confirm-cancel').focus();
+    const close = (v) => {
+      d.hidden = true; $('confirm-form').onsubmit = null; $('confirm-cancel').onclick = null;
+      resolve(remember ? { ok: v, remember: $('confirm-remember-box').checked } : v);
+    };
+    $('confirm-form').onsubmit = (e) => { e.preventDefault(); close(true); };
+    $('confirm-cancel').onclick = () => close(false);
+  });
+}
+
+async function deleteObjects(req = {}) {
+  if (S.state?.busy) return;
+  try {
+    for (let round = 0; round < 3; round++) {
+      const r = await api('delete', req);
+      if (r.needs_confirm === 'owner') {
+        const owners = [...new Set(r.analysis.sub_entities.map((s) => s.owner))];
+        const what = [...new Set(r.analysis.sub_entities.map((s) => s.kind))].join('/');
+        const yes = await confirmBox({ title: `A ${what} cannot be deleted directly`,
+          body: `Faces, edges and vertices are derived from features. ${owners.length > 1 ? 'They belong' : 'It belongs'} to ${owners.join(', ')}. Delete ${owners.length > 1 ? 'those features' : 'that feature'} instead? (To change the shape, edit its parameters in the design tree.)`,
+          ok: `Delete ${owners.join(', ')}` });
+        if (!yes) return;
+        req = { ...req, resolve_owner: true };
+        continue;
+      }
+      if (r.needs_confirm === 'dependents') {
+        const yes = await confirmBox({ title: 'Other features depend on this',
+          body: `${r.analysis.dependents.join(', ')} depend${r.analysis.dependents.length > 1 ? '' : 's'} on ${r.analysis.targets.join(', ')}. Delete ${r.analysis.dependents.length > 1 ? 'them' : 'it'} too, in the same undoable change?`,
+          ok: 'Delete all' });
+        if (!yes) return;
+        req = { ...req, cascade: true };
+        continue;
+      }
+      if (!r.ok) toast(r.error, 'bad');
+      else toast(`Deleted ${r.changeset.removed.join(', ')} · Ctrl+Z to undo`, 'ok');
+      break;
+    }
+  } catch (e) { toast(e.message, 'bad'); }
+  scheduleRefresh();
+}
+
+// A small menu shared by the viewport, the design tree, the top bar and the action bar.
+// `at` is a point {x, y} or an anchor {el}. Items: {label, icon, key, run, danger, disabled,
+// checked (radio), data} plus {sep: true} and {head: 'Title'}.
+function showMenu(at, items) {
+  const m = $('ctxmenu');
+  const opener = document.activeElement;
+  const close = (restore = false) => {
+    m.hidden = true; document.removeEventListener('pointerdown', away, true);
+    if (restore && opener?.focus) opener.focus();
+  };
+  const away = (e) => { if (!m.contains(e.target)) close(); };
+  const focusable = () => [...m.querySelectorAll('li[tabindex]')];
+  m.replaceChildren(...items.filter(Boolean).map((it) => {
+    if (it.sep) return h('li', { class: 'sep', role: 'separator' });
+    if (it.head) return h('li', { class: 'head', role: 'presentation' }, it.head);
+    const radio = it.checked !== undefined;
+    return h('li', { role: radio ? 'menuitemradio' : 'menuitem', tabindex: '-1', class: it.danger ? 'danger' : '', 'aria-disabled': String(!!it.disabled),
+      'aria-checked': radio ? String(!!it.checked) : null, dataset: it.data,
+      onclick: () => { if (it.disabled) return; close(); it.run?.(); },
+      onkeydown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); }
+        else if (e.key === 'Escape') { e.preventDefault(); close(true); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const f = focusable(); const i = f.indexOf(e.currentTarget);
+          f[(i + (e.key === 'ArrowDown' ? 1 : -1) + f.length) % f.length]?.focus();
+        }
+      } },
+    it.icon ? icon(it.icon) : radio ? (it.checked ? icon('check') : h('span', { class: 'ic' })) : null,
+    h('span', { class: 'lbl' }, it.label), it.key ? h('kbd', {}, it.key) : null);
+  }));
+  m.hidden = false;
+  const w = m.offsetWidth, ht = m.offsetHeight;
+  let x, y;
+  if (at.el) {
+    const r = at.el.getBoundingClientRect();
+    x = r.left; y = r.bottom + 4;
+    if (y + ht > innerHeight - 8) y = Math.max(8, r.top - ht - 4);
+  } else { x = at.x; y = at.y; }
+  m.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(y, innerHeight - ht - 8)) + 'px';
+  document.addEventListener('pointerdown', away, true);
+  focusable()[0]?.focus();
+}
+
+// ---- appearance (color / opacity / visibility) -----------------------------------------
+// Edits go through the tool registry like any other change. They are presentation only:
+// the viewport updates from the CAD-IR without a geometry rebuild.
+
+async function applyAppearance(tool, ids, extra = {}) {
+  try {
+    const o = await api('tool', { name: tool, args: { features: ids, ...extra } });
+    if (!o.ok && !/already as requested/.test(o.error ?? '')) toast(o.error, 'bad');
+  } catch (err) { toast(err.message, 'bad'); }
+  scheduleRefresh();
+}
+
+const HEX_RE = /^#?([0-9a-f]{6})$/i;
+function parseColor(text) {
+  const t = text.trim();
+  const m = HEX_RE.exec(t);
+  if (m) return '#' + m[1].toUpperCase();
+  const rgb = /^rgb\(?\s*(\d{1,3})\s*[, ]\s*(\d{1,3})\s*[, ]\s*(\d{1,3})\s*\)?$/i.exec(t);
+  if (rgb && [1, 2, 3].every((i) => Number(rgb[i]) <= 255)) {
+    return '#' + [1, 2, 3].map((i) => Number(rgb[i]).toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+  return null;
+}
+
+/** Appearance controls for one or many tree nodes; differing values show as "mixed". */
+function appearanceEditor(nodes) {
+  const ids = nodes.map((n) => n.id);
+  const uniq = (f) => { const v = new Set(nodes.map(f)); return v.size === 1 ? [...v][0] : undefined; };
+  const color = uniq((n) => n.appearance?.color ?? '');  // color overrides the material's base color
+  const opacity = uniq((n) => n.appearance?.opacity ?? 1);
+  const visible = uniq((n) => n.appearance?.visible !== false);
+  const key = ids.join('-');
+
+  const picker = h('input', { id: `ap-c-${key}`, type: 'color', value: color || '#9FB2C8', 'aria-label': 'Color',
+    onchange: (e) => applyAppearance('set_color', ids, { color: e.target.value.toUpperCase() }) });
+  const hex = h('input', { id: `ap-h-${key}`, type: 'text', value: color ?? '', placeholder: color === undefined ? 'mixed' : 'default',
+    'aria-label': 'Color as hex or rgb', spellcheck: 'false',
+    onchange: (e) => {
+      if (!e.target.value.trim()) { applyAppearance('reset_appearance', ids); return; }
+      const c = parseColor(e.target.value);
+      if (!c) { toast('Use #RRGGBB or rgb(r,g,b)', 'bad'); e.target.value = color ?? ''; return; }
+      applyAppearance('set_color', ids, { color: c });
+    } });
+  const pct = h('output', {}, opacity === undefined ? 'mixed' : `${Math.round(opacity * 100)}%`);
+  const slider = h('input', { id: `ap-o-${key}`, type: 'range', min: '0', max: '100', value: String(Math.round((opacity ?? 1) * 100)),
+    'aria-label': 'Opacity',
+    oninput: (e) => { pct.textContent = `${e.target.value}%`; },
+    onchange: (e) => applyAppearance('set_opacity', ids, { opacity: Number(e.target.value) / 100 }) });
+  const vis = h('input', { id: `ap-v-${key}`, type: 'checkbox', checked: visible !== false, 'aria-label': 'Visible',
+    onchange: (e) => applyAppearance('set_visibility', ids, { visible: e.target.checked }) });
+  if (visible === undefined) vis.indeterminate = true;
+  const reset = h('button', { type: 'button', class: 'small', onclick: () => applyAppearance('reset_appearance', ids) }, 'Reset appearance');
+
+  return h('div', { class: 'params appearance', role: 'group', 'aria-label': ids.length > 1 ? `Appearance of ${ids.length} objects` : 'Appearance' },
+    h('label', { for: picker.id }, 'color'), h('span', { class: 'color-row' }, picker, hex),
+    h('label', { for: slider.id }, 'opacity'), h('span', { class: 'color-row' }, slider, pct),
+    h('label', { for: vis.id }, 'visible'), vis,
+    ...materialEditor(materialCtx, nodes),
+    h('span', {}), reset);
+}
+
 function featureOf(sel) { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1].trim() : ''; }
+
+// ---- dimensions (informational + editable) ------------------------------------------------
+// The server measures (DimensionService); a typed size is a set_object_dimension tool call,
+// applied at once and undoable. The anchor is a per-user editing preference.
+
+const dimAnchor = () => (ANCHORS.some(([v]) => v === getPref('dimAnchor', 'center')) ? getPref('dimAnchor', 'center') : 'center');
+
+async function editDimension(id, axis, value) {
+  try {
+    const o = await api('tool', { name: 'set_object_dimension', args: { object_id: id, axis, value, anchor: dimAnchor() } });
+    if (!o.ok) toast(o.error, 'bad');
+  } catch (err) { toast(err.message, 'bad'); }
+  await refresh();
+}
+
+async function setLockProportions(id, enabled) {
+  try {
+    const o = await api('tool', { name: 'set_object_proportional_scaling', args: { object_id: id, enabled } });
+    if (!o.ok) toast(o.error, 'bad');
+  } catch (err) { toast(err.message, 'bad'); }
+  await refresh();
+}
+
+/** The Dimensions section of the object properties: width, height, depth, lock and anchor. */
+function dimensionsEditor(d) {
+  const rows = [];
+  for (const axis of PANEL_ORDER) {
+    const id = `dim-${axis}`;
+    const input = h('input', { id, type: 'text', inputmode: 'decimal', value: units.compact(d[axis]), 'aria-label': `${AXIS_LABEL[axis]} (${units.symbol})`,
+      onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.target.value = units.compact(d[axis]); e.target.blur(); } else if (e.key === 'Enter') e.target.blur(); },
+      onchange: (e) => {
+        const r = units.parseLength(e.target.value);
+        if (!r.ok) { toast(r.error, 'bad'); e.target.value = units.compact(d[axis]); return; }
+        if (Math.abs(r.value - d[axis]) > 1e-9) editDimension(d.object_id, axis, r.value);
+      } });
+    rows.push(h('label', { for: id }, AXIS_LABEL[axis]), h('span', { class: 'dim-row' }, input, h('span', { class: 'muted' }, units.symbol)));
+  }
+  const lock = h('input', { id: 'dim-lock', type: 'checkbox', checked: !!d.lock_proportions, 'aria-label': 'Lock proportions',
+    onchange: (e) => setLockProportions(d.object_id, e.target.checked) });
+  const anchor = h('select', { id: 'dim-anchor', 'aria-label': 'Resize anchor', onchange: (e) => setPref('dimAnchor', e.target.value) },
+    ...ANCHORS.map(([v, label]) => h('option', { value: v, selected: v === dimAnchor() }, label)));
+  rows.push(h('label', { for: lock.id }, 'Lock proportions'), lock, h('label', { for: anchor.id }, 'Anchor'), anchor);
+  return h('div', { class: 'params dimensions', role: 'group', 'aria-label': `Dimensions of ${d.object_id}` }, ...rows,
+    d.rotated ? h('span', { class: 'muted dim-note' }, 'Measured along the object’s own (rotated) axes.') : null);
+}
 
 function renderSelection(sel) {
   const list = $('sel-list'), chips = $('chips');
   const ents = sel?.entities ?? [];
-  if (!ents.length) {
-    list.replaceChildren(h('div', { class: 'muted' }, 'Click a face, edge or vertex in the viewport. Shift-click adds to the selection.'));
-    chips.replaceChildren();
-    return;
-  }
-  list.replaceChildren(...ents.map((e) => h('div', { class: 'sel-item' },
+  dimOverlay?.set(sel?.dimensions ?? []);
+  $('sel-section').hidden = !ents.length;
+  if (!ents.length) { list.replaceChildren(); chips.replaceChildren(); return; }
+  const selNodes = (S.state?.tree ?? []).filter((n) => n.visible && new Set(ents.map((e) => featureOf(e.selector))).has(n.id));
+  const dims = sel?.dimensions ?? [];
+  list.replaceChildren(...(dims.length === 1 ? [h('div', { class: 'sel-item' }, h('b', {}, `Dimensions · ${dims[0].object_id}`), dimensionsEditor(dims[0]))] : []),
+    ...(selNodes.length ? [h('div', { class: 'sel-item' }, h('b', {}, `Appearance · ${selNodes.length} object${selNodes.length > 1 ? 's' : ''}`), appearanceEditor(selNodes))] : []), ...ents.map((e) => h('div', { class: 'sel-item' },
     h('code', {}, e.selector),
-    h('div', { class: 'muted' }, [e.surface_type, e.area ? `${e.area.toFixed(1)} mm²` : null,
-      `at (${e.centroid.map((v) => v.toFixed(1)).join(', ')})`].filter(Boolean).join(' · ')))));
+    h('div', { class: 'muted' }, [e.surface_type, e.area ? units.area(e.area) : null,
+      `at (${e.centroid.map((v) => units.length(v, { unit: false })).join(', ')}) ${units.symbol}`].filter(Boolean).join(' · ')))));
   chips.replaceChildren(...ents.map((e) => h('span', { class: 'chip', title: e.selector },
     h('span', {}, shortSel(e.selector)),
     h('button', { type: 'button', 'aria-label': `Remove ${e.selector} from the selection`, onclick: async () => {
@@ -184,19 +840,109 @@ function addChat(m) {
   scheduleRefresh();
 }
 
+// A failed tool call is hidden when the agent recovered within the same turn: the turn's last tool call succeeded
+// (the same tool retried, or another tool reaching the goal). If the turn ends on a failure, every failure stays visible.
+function retriedOk(chat, i) {
+  const m = chat[i];
+  if (m.role !== 'tool' || m.ok) return false;
+  let last = null;
+  for (let j = i + 1; j < chat.length && chat[j].role !== 'user'; j++) {
+    if (chat[j].role === 'tool') last = chat[j];
+  }
+  return !!last && last.ok;
+}
+
 function renderChat(st) {
   const el = $('chat');
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-  const nodes = st.chat.map((m) => {
+  const nodes = st.chat.filter((m, i) => !retriedOk(st.chat, i)).map((m) => {
     chatSeen.add(m.seq);
     const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
+    if (m.role === 'draft') return draftCard(m, st);
     if (m.role === 'tool') return h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`);
-    return h('div', { class: cls }, m.text);
+    return h('div', { class: cls }, m.text, vision.thumbs(m.images, m.docs));
   });
+  nodes.push(...vision.proposalCards(st));
   for (const cs of st.pending) nodes.push(changeSetCard(cs));
-  if (st.busy) nodes.push(h('div', { class: 'msg system' }, 'The agent is working…'));
+  if (st.busy) nodes.push(h('div', { id: 'agent-state', class: 'msg system' }, st.refine_state ? refineText(st.refine_state) : agentStateText(st.agent_state)));
   el.replaceChildren(...nodes);
   if (stick) el.scrollTop = el.scrollHeight;
+}
+
+const PROVIDER_LABELS = { openai: 'OpenAI', claude: 'Anthropic', ollama: 'Ollama' };
+const modelLabel = (m) => (m.provider ? `${PROVIDER_LABELS[m.provider] ?? m.provider} · ${m.model}` : m.model);
+
+// Simon Agent header: the model serving the request as the router reports it ("model" notices), then the one that
+// produced the last answer; before any request, the configured primary model, dimmed. A fallback says why on hover.
+function renderModel() {
+  const el = $('agent-model');
+  const m = S.model ?? S.primary;
+  if (!el) return;
+  if (!m?.model) { el.hidden = true; el.replaceChildren(); return; }
+  const label = modelLabel(m) + (m.fallback ? ' (Fallback)' : '');
+  el.hidden = false;
+  el.classList.toggle('fallback', !!m.fallback);
+  el.classList.toggle('idle', !S.model);
+  const where = m.local ? 'Local model' : 'Cloud model';
+  el.title = m.fallback
+    ? `${where} — fallback for ${m.requested || 'the primary model'}${m.reason ? `\n${m.reason}` : ''}`
+    : `${where}${S.model ? '' : ' (primary; no request yet)'}`;
+  el.replaceChildren(icon(m.local ? 'monitor' : 'cloud'), h('span', null, label));
+}
+
+// Token meter: the session total, with the last turn and the per-model split in the tooltip.
+// Cost is only shown when prices are configured in Settings; otherwise tokens stand alone.
+function renderUsage(u) {
+  const el = $('usage');
+  if (!el) return;
+  if (!u || !u.session?.total_tokens) { el.hidden = true; el.replaceChildren(); return; }
+  const n = (v) => v.toLocaleString();
+  const one = (cur, a) => `${cur} ${a < 0.01 ? a.toFixed(4) : a.toFixed(2)}`;
+  // Models priced in different currencies are listed side by side; no conversion is ever made.
+  const amount = (c) => (c.amounts ? Object.keys(c.amounts).sort().map((k) => one(k, c.amounts[k])).join(' + ') : one(c.currency, c.amount));
+  const parts = [`${n(u.session.total_tokens)} tokens`];
+  if (u.session.cost.known) parts.push(`≈ ${amount(u.session.cost)}${u.session.cost.partial ? '*' : ''}`);
+  else if (!u.session.cost.cloud_tokens && u.session.cost.local_tokens) parts.push('local');
+  // Cached input is billed at a lower rate, so it is worth showing next to the raw counts.
+  const cached = (c) => (c ? `, ${n(c)} cached` : '');
+  const lines = [`Session (${u.turns} turn${u.turns === 1 ? '' : 's'}): ${n(u.session.input_tokens)} in${cached(u.session.cached_input_tokens)} / ${n(u.session.output_tokens)} out`];
+  if (u.turn.total_tokens) lines.push(`Last turn: ${n(u.turn.input_tokens)} in${cached(u.turn.cached_input_tokens)} / ${n(u.turn.output_tokens)} out`);
+  // Local models are counted, never costed: only cloud models are API spend.
+  for (const m of u.session.models) lines.push(`${modelLabel(m)}${m.provider === 'ollama' ? ' (local, no cost)' : ''}: ${n(m.input_tokens)} in${cached(m.cached_input_tokens)} / ${n(m.output_tokens)} out (${m.calls} calls)`);
+  const cost = u.session.cost;
+  if (cost.local_tokens && cost.cloud_tokens) lines.push(`Local: ${n(cost.local_tokens)} tokens, no cost · Cloud: ${n(cost.cloud_tokens)} tokens`);
+  if (!cost.known && cost.cloud_tokens) lines.push('No token prices configured for the cloud models — set them in Settings to estimate cost.');
+  else if (!cost.cloud_tokens && cost.local_tokens) lines.push('Local models only — no API cost.');
+  else if (u.session.cost.partial) lines.push(`* no price for: ${u.session.cost.unpriced.join(', ')}`);
+  el.hidden = false;
+  el.title = lines.join('\n');
+  el.replaceChildren(h('span', { class: 'muted' }, parts.join('  ·  ')));
+}
+
+// Workflow progress: Planning… / Creating base… (2/5) / Validating model… / Correcting… / Done.
+function agentStateText(ev) {
+  if (!ev || !ev.message || ev.state === 'IDLE') return 'The agent is working…';
+  let t = ev.message;
+  if (ev.state === 'EXECUTING' && ev.step && ev.total) t += ` (${ev.step}/${ev.total})`;
+  if (ev.state === 'CORRECTING' && ev.attempt) t += ` (attempt ${ev.attempt}/3)`;
+  return t;
+}
+
+const refineText = (ev) => `Visual refinement — ${ev.message}${ev.scores?.overall !== undefined ? ` (overall ${Math.round(ev.scores.overall * 100)}%)` : ''}`;
+
+function renderAgentState() {
+  const el = document.getElementById('agent-state');
+  if (el) el.textContent = S.refineState ? refineText(S.refineState) : agentStateText(S.agentState);
+}
+
+function draftCard(m, st) {
+  const open = (st.draft || []).length > 0 && m.seq === Math.max(...st.chat.filter((x) => x.role === 'draft').map((x) => x.seq));
+  const act = (path) => async () => { try { await api(path, {}); } catch (err) { toast(err.message, 'bad'); } };
+  return h('div', { class: 'cs' },
+    h('div', { class: 'title' }, h('span', {}, m.text)),
+    open ? h('div', { class: 'actions' },
+      h('button', { class: 'primary', disabled: st.busy, onclick: act('draft/keep') }, 'Keep'),
+      h('button', { disabled: st.busy, onclick: act('draft/discard') }, 'Discard')) : null);
 }
 
 function changeSetCard(cs) {
@@ -211,7 +957,7 @@ function changeSetCard(cs) {
       cs.added.length ? h('li', {}, `adds ${cs.added.join(', ')}`) : null,
       cs.modified.length ? h('li', {}, `modifies ${cs.modified.join(', ')}`) : null,
       cs.removed.length ? h('li', {}, `removes ${cs.removed.join(', ')}`) : null,
-      h('li', {}, `volume ${mm3(cs.volume_before_mm3)} → ${mm3(cs.volume_after_mm3)} (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`),
+      h('li', {}, `volume ${units.volume(cs.volume_before_mm3)} → ${units.volume(cs.volume_after_mm3)} (${delta >= 0 ? '+' : ''}${units.volume(delta)})`),
       ...cs.warnings.map((w) => h('li', { class: 'warn' }, '⚠ ' + w)),
       ...checks),
     h('div', { class: 'actions' },
@@ -222,14 +968,37 @@ function changeSetCard(cs) {
 
 function renderTimeline(st) {
   const el = $('timeline');
-  if (!st.checkpoints.length) { el.replaceChildren(h('div', { class: 'none' }, 'Semantic timeline: checkpoints appear here as the design evolves.')); return; }
-  el.replaceChildren(...st.checkpoints.map((c) => h('div', { class: `cp${c.current ? ' current' : ''}`, title: `${c.label}\n${c.time}` },
-    h('div', { class: 'label' }, `${c.seq}. ${c.label}`),
-    h('div', { class: 'muted', style: 'font-size:11px' }, `${c.actor || 'user'} · ${c.changesets.length} change${c.changesets.length === 1 ? '' : 's'}`),
-    h('div', { class: 'acts' },
-      h('button', { disabled: c.current || st.busy, onclick: () => restoreCheckpoint(c) }, 'Restore'),
-      h('button', { onclick: () => compareCheckpoint(c) }, 'Compare')))));
+  const n = st.checkpoints.length;
+  $('hist-title').textContent = n ? `History · ${n} step${n === 1 ? '' : 's'}` : 'History';
+  const prev = el.scrollLeft, grew = n > (S.cpCount ?? 0);
+  S.cpCount = n;
+  if (S.histSel && !st.checkpoints.some((c) => c.id === S.histSel)) S.histSel = null;
+  if (!n) el.replaceChildren(h('div', { class: 'none' }, 'Checkpoints appear here as the design evolves.'));
+  else {
+    el.replaceChildren(...st.checkpoints.map((c) => {
+      const sel = S.histSel === c.id;
+      return h('button', { type: 'button', class: `cp${c.current ? ' current' : ''}${sel ? ' sel' : ''}`, 'aria-pressed': String(sel), title: `${c.label}\n${c.time}`,
+        onclick: () => { S.histSel = sel ? null : c.id; renderTimeline(S.state); } },
+        h('div', { class: 'label' }, h('span', { class: 'n' }, c.seq), c.label),
+        h('div', { class: 'sub' }, `${c.actor || 'user'} · ${c.changesets.length} change${c.changesets.length === 1 ? '' : 's'}`));
+    }));
+    el.scrollLeft = grew ? el.scrollWidth : prev;
+  }
+  // Restore / Compare exist only once a step is selected.
+  const c = st.checkpoints.find((x) => x.id === S.histSel);
+  const acts = $('hist-actions');
+  acts.hidden = !c;
+  if (c) acts.replaceChildren(
+    h('button', { type: 'button', disabled: c.current || st.busy, onclick: () => restoreCheckpoint(c) }, icon('restore'), 'Restore'),
+    h('button', { type: 'button', onclick: () => compareCheckpoint(c) }, icon('compare'), 'Compare'));
 }
+
+function applyHistoryOpen() {
+  $('history').dataset.open = String(S.histOpen);
+  $('hist-toggle').setAttribute('aria-expanded', String(S.histOpen));
+}
+$('hist-toggle').addEventListener('click', () => { S.histOpen = !S.histOpen; setPref('history', S.histOpen); applyHistoryOpen(); });
+applyHistoryOpen();
 
 // ---- ChangeSet lifecycle ----------------------------------------------------------------
 
@@ -238,9 +1007,10 @@ async function showPreview(id) {
     const g = await api(`changeset/${id}/preview`);
     S.previewing = id;
     vp.setGhost(g);
+    $('empty').hidden = true;
     const bar = $('ghost-bar');
     bar.hidden = false;
-    bar.replaceChildren(h('span', {}, `Preview · ${g.changeset.intent || id}: +${g.added.length} / −${g.removed.length} bodies`),
+    bar.replaceChildren(h('span', {}, `Preview · ${g.changeset.intent || id}: +${g.added.length} / −${g.removed.length} bodies${(g.sketches ?? []).length ? ` · ${g.sketches.length} sketch outline(s)` : ''}`),
       h('button', { class: 'primary', onclick: () => lifecycle('commit', id) }, 'Commit'),
       h('button', { onclick: () => lifecycle('reject', id) }, 'Reject'),
       h('button', { onclick: clearPreview }, 'Hide'));
@@ -251,6 +1021,7 @@ async function showPreview(id) {
 function clearPreview() {
   S.previewing = null;
   vp.setGhost(null);
+  $('empty').hidden = vp.bodies.size > 0 || (vp.sketches?.children.length ?? 0) > 0;
   $('ghost-bar').hidden = true;
   if (S.state) renderChat(S.state);
 }
@@ -279,7 +1050,7 @@ async function restoreCheckpoint(c) {
 async function compareCheckpoint(c) {
   try {
     const r = await api(`compare?a=${encodeURIComponent(c.id)}`);
-    const lines = [`vs “${r.label_a}”: ${r.features_a} → ${r.features_b} features, ${r.volume_a_mm3.toFixed(1)} → ${r.volume_b_mm3.toFixed(1)} mm³`];
+    const lines = [`vs “${r.label_a}”: ${r.features_a} → ${r.features_b} features, ${units.volume(r.volume_a_mm3)} → ${units.volume(r.volume_b_mm3)}`];
     if (r.diff.added?.length) lines.push('added: ' + r.diff.added.join(', '));
     if (r.diff.removed?.length) lines.push('removed: ' + r.diff.removed.join(', '));
     for (const ch of r.diff.changed ?? []) lines.push(`${ch.feature}.${ch.name}: ${ch.from} → ${ch.to}`);
@@ -294,18 +1065,34 @@ $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = $('prompt').value.trim();
   if (!text) return;
-  try { await api('prompt', { text }); $('prompt').value = ''; } catch (err) { toast(err.message, 'bad'); }
+  if (vision.uploading()) { toast('Wait until the attachments finish uploading.', 'bad'); return; }
+  try {
+    await withFallbackConsent(() => api('prompt', { text, thinking: $('thinking').checked, images: vision.attachmentIds() }));
+    $('prompt').value = ''; autosize();
+    vision.clearAttachments();
+  } catch (err) { toast(err.message, 'bad'); }
+});
+try { $('thinking').checked = localStorage.getItem('thinking') !== 'off'; } catch {}
+$('thinking').addEventListener('change', () => { try { localStorage.setItem('thinking', $('thinking').checked ? 'on' : 'off'); } catch {} });
+$('btn-clear').addEventListener('click', async () => {
+  try { await api('chat/clear', {}); chatSeen.clear(); } catch (err) { toast(err.message, 'bad'); }
 });
 $('prompt').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
 });
+// The prompt grows with its content (52px minimum, 40% of the window at most).
+function autosize() {
+  const p = $('prompt');
+  p.style.height = 'auto';
+  p.style.height = Math.min(p.scrollHeight, innerHeight * 0.4) + 'px';
+}
+$('prompt').addEventListener('input', autosize);
 
 // ---- playback ------------------------------------------------------------------------
 
-$('btn-play').addEventListener('click', async () => {
+async function playDesign() {
   if (S.playing || !S.state?.frames) return;
   S.playing = true;
-  $('btn-play').disabled = true;
   clearPreview();
   vp.clear();
   try {
@@ -313,74 +1100,391 @@ $('btn-play').addEventListener('click', async () => {
       const f = await api('playback', { index: i, known: vp.known });
       vp.applyDelta(f.scene);
       $('hud').textContent = i === 0 ? 'Playback…' : `${i}/${f.total} · ${f.changeset?.intent ?? ''}`;
-      if (i > 0) vp.fit();
+      if (i > 0) vp.fitAll();
       await new Promise((r) => setTimeout(r, 750));
     }
   } catch (e) { toast(e.message, 'bad'); }
   S.playing = false;
   vp.clear();
   await refresh();
-});
-
-// ---- toolbar -------------------------------------------------------------------------
-
-for (const b of document.querySelectorAll('[data-filter]')) {
-  b.addEventListener('click', () => {
-    vp.filter = b.dataset.filter;
-    document.querySelectorAll('[data-filter]').forEach((x) => x.classList.toggle('on', x === b));
-  });
 }
-$('btn-measure').addEventListener('click', () => {
+
+// ---- contextual action bar -------------------------------------------------------------
+// A pure function of the selection (see actions.js): only actions valid right now are shown.
+// It sits in a fixed strip above the viewport. Actions that do not fit move into "More".
+
+const FILTERS = [['auto', 'Auto'], ['body', 'Body'], ['face', 'Face'], ['edge', 'Edge'], ['vertex', 'Vertex']];
+const VIEWS = [['Front', [0, -1, 0]], ['Back', [0, 1, 0]], ['Left', [-1, 0, 0]], ['Right', [1, 0, 0]], ['Top', [0, 0, 1]], ['Bottom', [0, 0, -1]]];
+
+function setFilter(f) { S.filter = f; vp.filter = f; renderCtxBar(); }
+function toggleBoxSelect() {
+  const on = !vp.boxMode;
+  if (on && vp.measure.on) toggleMeasure();
+  vp.setBoxMode(on);
+  $('hud').textContent = on ? 'Box select: drag a rectangle' : hudStats();
+  renderCtxBar();
+}
+function toggleMeasure() {
+  if (!vp.measure.on && vp.boxMode) toggleBoxSelect();
   const on = !vp.measure.on;
-  $('btn-measure').classList.toggle('on', on);
   vp.setMeasure(on);
   $('measure-label').hidden = true;
   $('hud').textContent = on ? 'Measure: click two points' : hudStats();
-});
-$('btn-fit').addEventListener('click', () => vp.fit());
-$('sec-axis').addEventListener('change', () => {
-  const axis = $('sec-axis').value;
-  $('sec-off').disabled = !axis;
-  vp.setSection(axis, Number($('sec-off').value));
-});
-$('sec-off').addEventListener('input', () => vp.setSection($('sec-axis').value, Number($('sec-off').value)));
-$('btn-undo').addEventListener('click', doUndo);
-$('btn-redo').addEventListener('click', doRedo);
-$('level').addEventListener('change', async () => {
-  try { await api('level', { level: $('level').value }); } catch (e) { toast(e.message, 'bad'); }
-});
+  renderCtxBar();
+}
+function setSection(axis) { vp.setSection(axis, vp.section?.t ?? 0.5); renderCtxBar(); }
+function toggleMesh() { vp.setMeshOnly(!vp.meshOnly); renderCtxBar(); }
+
+let ctxKey = '';
+function renderCtxBar() {
+  const box = $('ctx-actions');
+  const sel = selectionContext(S.selection?.selectors ?? [], groupOf);
+  const actions = actionsFor(sel);
+  // Modes that are switched on stay reachable whatever is selected.
+  const keep = [vp.measure?.on && 'measure', vp.section?.axis && 'section', vp.meshOnly && 'view'].filter(Boolean);
+  for (const id of keep) {
+    if (actions.some((a) => a.id === id)) continue;
+    const at = actions.findIndex((a) => a.group === 'destructive');
+    actions.splice(at < 0 ? actions.length : at, 0, ACTIONS.find((a) => a.id === id));
+  }
+  const key = `${sel.ctx}:${actions.map((a) => a.id).join()}`;
+  if (key !== ctxKey) { ctxKey = key; box.classList.remove('swap'); void box.offsetWidth; box.classList.add('swap'); }
+  const hidden = new Set();
+  const draw = () => {
+    const shown = actions.filter((a) => !hidden.has(a.id));
+    const more = hidden.size ? ctxMore(actions.filter((a) => hidden.has(a.id)), sel) : null;
+    const groups = groupRuns(shown).map((run) => h('div', { class: `cgroup ${run.group}`, role: 'group', 'aria-label': run.group },
+      ...run.items.map((a) => ctxButton(a, sel))));
+    // "More" sits before the destructive group, which always stays last and set apart.
+    if (more) { const i = groups.findIndex((g) => g.classList.contains('destructive')); groups.splice(i < 0 ? groups.length : i, 0, h('div', { class: 'cgroup' }, more)); }
+    box.replaceChildren(...groups);
+  };
+  draw();
+  // Overflow: move the least important actions into "More" until the bar fits. Non-primary
+  // actions go first (from the end); then primary ones, but never the mode control, Delete or
+  // a mode that is switched on.
+  const room = () => $('ctxbar').clientWidth - 24;          // padding; the readout shrinks first
+  while (box.scrollWidth > room() && hidden.size < actions.length) {
+    const open = actions.filter((a) => !hidden.has(a.id) && a.group !== 'destructive' && a.group !== 'mode' && !keep.includes(a.id));
+    const cand = [...open].reverse().find((a) => !a.primary) ?? open[open.length - 1];
+    if (!cand) break;
+    hidden.add(cand.id);
+    draw();
+  }
+}
+new ResizeObserver(() => { cancelAnimationFrame(S.ctxRaf); S.ctxRaf = requestAnimationFrame(renderCtxBar); }).observe($('ctxbar'));
+
+function ctxMore(list, sel) {
+  return h('button', { type: 'button', class: 'abtn', 'aria-haspopup': 'menu', title: 'More actions', onclick: (e) => {
+    showMenu({ el: e.currentTarget }, list.map((a) => ({ label: a.labelFor?.(sel) ?? a.label, icon: a.icon, danger: a.destructive,
+      run: () => triggerAction(a, sel, e.currentTarget) })));
+  } }, icon('more'), h('span', { class: 'lbl' }, 'More'));
+}
+
+function ctxButton(a, sel) {
+  const label = a.labelFor?.(sel) ?? a.label;
+  const popup = ['pick-mode', 'menu', 'section', 'view'].includes(a.kind);
+  let on = a.id === 'measure' ? vp.measure?.on : a.id === 'section' ? !!vp.section?.axis : a.id === 'view' ? !!vp.meshOnly : false;
+  const lbl = a.kind === 'pick-mode' ? [h('span', { class: 'k' }, 'Select: '), h('b', {}, FILTERS.find(([k]) => k === S.filter)?.[1] ?? 'Auto')]
+    : a.id === 'section' && vp.section?.axis ? [`Section · ${vp.section.axis}`] : [label];
+  const btn = h('button', { type: 'button', id: a.id === 'measure' ? 'btn-measure' : `act-${a.id}`, class: `abtn${a.kind === 'pick-mode' ? ' mode' : ''}${a.destructive ? ' destructive' : ''}${on ? ' on' : ''}`,
+    title: a.title ?? label, 'aria-haspopup': popup ? 'menu' : null, 'aria-pressed': a.kind === 'toggle' ? String(!!on) : null,
+    onclick: (e) => triggerAction(a, sel, e.currentTarget) },
+  icon(a.icon), h('span', { class: 'lbl' }, ...lbl), popup ? icon('down') : null);
+  if (popup) btn.lastChild.classList.add('caret');
+  if (a.id !== 'section' || !vp.section?.axis) return btn;
+  // The section offset is part of the bar, next to its control (never floating over the model).
+  const slider = h('input', { id: 'sec-off', type: 'range', min: '0', max: '1', step: '0.001', value: String(vp.section.t ?? 0.5), 'aria-label': 'Section offset',
+    oninput: (e) => vp.setSection(vp.section.axis, Number(e.target.value)) });
+  return h('span', { class: 'section-ctl' }, btn, slider);
+}
+
+function triggerAction(a, sel, anchor) {
+  const at = { el: anchor };
+  switch (a.kind) {
+    case 'pick-mode':
+      return showMenu(at, FILTERS.map(([k, label]) => ({ label, checked: S.filter === k, data: { filter: k }, run: () => setFilter(k) })));
+    case 'menu':
+      return showMenu(at, a.items.map(([tool, label, ic]) => ({ label, icon: ic, run: () => openToolForm(tool) })));
+    case 'section':
+      return showMenu(at, [{ label: 'Off', checked: !vp.section?.axis, data: { axis: '' }, run: () => setSection('') },
+        ...['X', 'Y', 'Z'].map((ax) => ({ label: `${ax} plane`, checked: vp.section?.axis === ax, data: { axis: ax }, run: () => setSection(ax) }))]);
+    case 'view':
+      return showMenu(at, [
+        { label: 'Mesh view', icon: 'mesh', checked: !!vp.meshOnly, data: { view: 'mesh' }, run: toggleMesh },
+        { sep: true }, { head: 'Standard views' },
+        ...VIEWS.map(([label, dir]) => ({ label, icon: 'view', run: () => vp.viewFrom(dir) })),
+        { sep: true },
+        ...layoutMenuItems(),
+        { sep: true },
+        { label: 'Play design', icon: 'play', data: { view: 'play' }, disabled: !S.state?.frames || S.playing, run: playDesign }]);
+    default:
+      return a.run?.(actionEnv, a, { currentTarget: anchor });
+  }
+}
+
+// What the actions can do. Everything that changes the model ends in a tool call.
+// The component library panel. It only browses and does library bookkeeping; everything that
+// changes the model goes through callTool like every other mutation.
+const components = initComponents({ callTool, toast, formDialog, confirm: (title, body) => confirmBox({ title, body, ok: 'Delete' }), refresh: scheduleRefresh });
+$('comp-sync')?.addEventListener('click', () => callTool('sync_component', {}, 'Update components'));
+$('comp-publish')?.addEventListener('click', (e) => publishProject(e.currentTarget.dataset.reusable !== 'true'));
+
+const selIds = () => selectionContext(S.selection?.selectors ?? []).features;
+const groupOf = (id) => S.state?.tree?.find((t) => t.id === id)?.group ?? '';
+const nameOf = (ids) => (ids.length > 1 ? `${ids.length} objects` : ids[0]);
+
+async function callTool(name, args, label = name) {
+  try {
+    const o = await api('tool', { name, args });
+    toast(o.ok ? (o.committed ? `${label} applied` : o.changeset ? `${label} proposed: review it in the conversation` : `${label} ok`) : o.error, o.ok ? 'ok' : 'bad');
+    scheduleRefresh();
+    return o;
+  } catch (err) { toast(err.message, 'bad'); scheduleRefresh(); return null; }
+}
+
+function formDialog({ title, fields, ok = 'Apply' }) {
+  return new Promise((resolve) => {
+    const d = $('formdlg');
+    $('fd-title').textContent = title;
+    $('fd-ok').textContent = ok;
+    const inputs = fields.map((f) => {
+      const id = `fd-${f.key}`;
+      // Length fields hold mm and angle fields degrees; they are shown and typed in the display units.
+      const shown = (v) => (f.length ? Number(units.toDisplay(v).toFixed(6)) : f.angle ? Number(units.angleToDisplay(v).toFixed(6)) : v);
+      const input = f.options
+        ? h('select', { id }, ...f.options.map((o) => h('option', { value: o.value ?? o, selected: (o.value ?? o) === f.value }, o.label ?? o)))
+        : f.text ? h('input', { id, type: 'text', value: String(f.value ?? ''), spellcheck: 'false' })
+          : h('input', { id, type: 'number', step: 'any', value: String(shown(f.value ?? 0)), min: f.min === undefined ? undefined : shown(f.min), title: f.hint });
+      return [f, input];
+    });
+    $('fd-fields').replaceChildren(...inputs.flatMap(([f, i]) => [h('label', { for: i.id }, f.label), i]));
+    d.hidden = false;
+    inputs[0][1].focus(); inputs[0][1].select?.();
+    const close = (v) => { d.hidden = true; $('fd-form').onsubmit = null; $('fd-cancel').onclick = null; resolve(v); };
+    $('fd-form').onsubmit = (e) => {
+      e.preventDefault();
+      const out = {};
+      for (const [f, i] of inputs) {
+        out[f.key] = f.options || f.text ? i.value : Number(i.value);
+        if (f.length) out[f.key] = units.toMM(out[f.key]);
+        else if (f.angle) out[f.key] = units.angleToDeg(out[f.key]);
+      }
+      close(out);
+    };
+    $('fd-cancel').onclick = () => close(null);
+  });
+}
+
+const actionEnv = {
+  fit: () => vp.fit(),
+  createComponent: () => { const ids = selIds(); if (ids.length) createComponent(ids); },
+  toggleMeasure,
+  async transform(kind) {
+    const ids = selIds();
+    if (!ids.length) return;
+    xform.begin(kind === 'move' ? 'translate' : 'rotate');
+  },
+  async boolean(op) {
+    const ids = selIds();
+    if (ids.length !== 2) return;
+    let target = ids[0];
+    if (op === 'subtract') {
+      const v = await formDialog({ title: 'Subtract: which body keeps its volume?', ok: 'Subtract',
+        fields: [{ key: 'target', label: 'Keep', options: ids, value: ids[0] }] });
+      if (!v) return;
+      target = v.target;
+    }
+    await callTool('boolean', { op, target, tool: ids.find((i) => i !== target) }, op[0].toUpperCase() + op.slice(1));
+  },
+  async edgeOp(tool) {
+    const sels = S.selection?.selectors ?? [];
+    const edges = sels.filter((x) => x.startsWith('edge('));
+    const ids = edges.length ? [...new Set(edges.map(featureOf))] : selIds();
+    if (!ids.length) return;
+    const param = tool === 'fillet' ? 'radius' : 'distance';
+    const v = await formDialog({ title: `${tool === 'fillet' ? 'Fillet' : 'Chamfer'} ${edges.length ? `${edges.length} edge${edges.length > 1 ? 's' : ''}` : 'all edges'} (${units.symbol})`,
+      ok: tool === 'fillet' ? 'Fillet' : 'Chamfer', fields: [{ key: 'v', label: tool === 'fillet' ? 'Radius' : 'Distance', value: 1, min: 0.001, length: true }] });
+    if (!v || !(v.v > 0)) return;
+    for (const id of ids) {
+      const args = { target: id, [param]: v.v };
+      const mine = edges.filter((x) => featureOf(x) === id);
+      if (mine.length) args.edges = mine;
+      await callTool(tool, args, tool === 'fillet' ? 'Fillet' : 'Chamfer');
+    }
+  },
+  async scale() {
+    const ids = selIds();
+    if (!ids.length) return;
+    const v = await formDialog({ title: `Scale ${nameOf(ids)}`, ok: 'Scale', fields: [
+      { key: 'f', label: 'Uniform factor', value: 2, min: 0.001 },
+      { key: 'x', label: '× along X', value: 1, min: 0.001 }, { key: 'y', label: '× along Y', value: 1, min: 0.001 }, { key: 'z', label: '× along Z', value: 1, min: 0.001 },
+      { key: 'about', label: 'Fixed point', value: 'center', options: [{ value: 'center', label: 'Centre' }, { value: 'base', label: 'Base (stays on the bed)' }, { value: 'origin', label: 'World origin' }] }] });
+    if (!v) return;
+    const [sx, sy, sz] = [v.f * v.x, v.f * v.y, v.f * v.z];
+    if (![sx, sy, sz].every((s) => s > 0)) { toast('Scale factors must be greater than 0', 'bad'); return; }
+    const factors = sx === sy && sy === sz ? { factor: sx } : { sx, sy, sz };
+    for (const id of ids) await callTool('scale', { target: id, ...factors, about: v.about, intent: `Scale ${id}` }, 'Scale');
+  },
+  async duplicate() {
+    const ids = selIds();
+    if (!ids.length) return;
+    // Default: next to the selection along X, with a 5 mm gap.
+    const w = Math.max(0, ...ids.map((id) => vp.bodySize(id)?.[0] ?? 0));
+    const v = await formDialog({ title: `Duplicate ${nameOf(ids)}: offset (${units.symbol})`, ok: 'Duplicate',
+      fields: [{ key: 'dx', label: 'X', value: Math.round((w + 5) * 100) / 100, length: true }, { key: 'dy', label: 'Y', value: 0, length: true }, { key: 'dz', label: 'Z', value: 0, length: true }] });
+    if (!v) return;
+    await callTool('duplicate', { features: ids, dx: v.dx, dy: v.dy, dz: v.dz, intent: `Duplicate ${ids.join(', ')}` }, 'Duplicate');
+  },
+  async align() {
+    const ids = selIds();
+    if (!ids.length) return;
+    const multi = ids.length > 1;
+    const v = await formDialog({ title: `Align ${nameOf(ids)}`, ok: 'Align', fields: [
+      { key: 'axes', label: 'Along', value: multi ? 'x' : 'z', options: [{ value: 'x', label: 'X' }, { value: 'y', label: 'Y' }, { value: 'z', label: 'Z' }, { value: 'x,y', label: 'X and Y' }, { value: 'x,y,z', label: 'X, Y and Z' }] },
+      { key: 'mode', label: 'Match', value: multi ? 'center' : 'min', options: [{ value: 'min', label: 'Minimum side' }, { value: 'center', label: 'Centre' }, { value: 'max', label: 'Maximum side' }] },
+      { key: 'to', label: 'To', value: multi ? 'first' : 'origin', options: [
+        ...(multi ? [{ value: 'first', label: `First selected (${ids[0]})` }, { value: 'selection', label: 'Bounds of the selection' }] : []),
+        { value: 'origin', label: 'World origin (0)' }] }] });
+    if (!v) return;
+    await callTool('align', { features: ids, axes: v.axes.split(','), mode: v.mode, to: v.to }, 'Align');
+  },
+  async group() {
+    const ids = selIds();
+    if (!ids.length) return;
+    const taken = new Set((S.state?.tree ?? []).map((t) => t.group).filter(Boolean));
+    let n = taken.size + 1;
+    while (taken.has(`Group ${n}`)) n++;
+    const v = await formDialog({ title: `Group ${nameOf(ids)}`, ok: 'Group', fields: [{ key: 'name', label: 'Name', text: true, value: `Group ${n}` }] });
+    if (!v?.name?.trim()) return;
+    await callTool('group', { features: ids, name: v.name.trim() }, 'Group');
+  },
+  async ungroup() {
+    const ids = selIds().filter((id) => groupOf(id));
+    if (ids.length) await callTool('ungroup', { features: ids }, 'Ungroup');
+  },
+  async faceOp(tool) {
+    // One face per body: each edit becomes a new feature on that body, so a second face of the
+    // same body is picked again on the result.
+    const all = (S.selection?.selectors ?? []).filter((x) => x.startsWith('face('));
+    const faces = all.filter((x, i) => all.findIndex((y) => featureOf(y) === featureOf(x)) === i);
+    if (!faces.length) return;
+    if (faces.length < all.length) toast('Several faces of one body: only the first is used. Select the others again afterwards.', '', 6000);
+    const what = `${faces.length > 1 ? faces.length + ' faces' : 'face'}`;
+    const spec = {
+      face_extrude: { title: `Extrude ${what} (${units.symbol})`, ok: 'Extrude', fields: [{ key: 'distance', label: 'Distance (+ out / − in)', value: 5, length: true }] },
+      face_inset: { title: `Inset ${what} (${units.symbol})`, ok: 'Inset', fields: [{ key: 'inset', label: 'Inset from edges', value: 2, min: 0.001, length: true },
+        { key: 'depth', label: 'Depth (0 = split only, + pad, − pocket)', value: 0, length: true }] },
+      face_offset: { title: `Offset ${what} (${units.symbol})`, ok: 'Offset', fields: [{ key: 'distance', label: 'Distance (+ out of the material)', value: 1, length: true }] },
+    }[tool];
+    const v = await formDialog(spec);
+    if (!v) return;
+    if ('distance' in v && !v.distance) { toast('Distance must be non-zero', 'bad'); return; }
+    const args = { ...v };
+    if (tool === 'face_inset' && !args.depth) delete args.depth;
+    for (const face of faces) await callTool(tool, { face, ...args }, spec.ok);
+  },
+  toolDialog: (name) => openToolForm(name),
+  materialMenu(ev) {
+    const ids = selIds();
+    const hasMaterial = (S.state?.tree ?? []).some((t) => ids.includes(t.id) && t.appearance?.material_id);
+    showMenu({ el: ev.currentTarget }, materialMenu(materialCtx, ids, { hasMaterial, openPanel: openMaterialPanel }));
+  },
+  pickColor() {
+    const ids = selIds();
+    if (!ids.length) return;
+    let i = $('color-pop');
+    if (!i) { i = h('input', { id: 'color-pop', type: 'color', 'aria-label': 'Color', style: 'position:fixed;left:50%;top:40%;opacity:0;pointer-events:none;width:1px;height:1px' }); document.body.append(i); }
+    i.value = '#9fb2c8';
+    i.onchange = () => applyAppearance('set_color', ids, { color: i.value.toUpperCase() });
+    i.click();
+  },
+  hide: () => applyAppearance('set_visibility', selIds(), { visible: false }),
+  remove: () => deleteObjects(),
+};
+
+// The material picker lives in the Selection panel: make sure it is on screen.
+function openMaterialPanel() { panels.show('left'); materialCtx.rerender(); }
+
+// Tools without a dedicated form reuse the command palette's argument form, prefilled from
+// the selection.
+async function openToolForm(name) {
+  if (!S.paletteAll.length) { try { S.paletteAll = await api('palette'); } catch (e) { toast(e.message, 'bad'); return; } }
+  const e = S.paletteAll.find((x) => x.kind === 'tool' && x.id === name);
+  if (!e) { toast(`${name} is not available`, 'bad'); return; }
+  const tpl = JSON.parse(e.template || '{}');
+  const sels = S.selection?.selectors ?? [];
+  if (sels.some((x) => x.startsWith('face(')) && e.schema?.properties?.face !== undefined) tpl.face = '';
+  $('palette').hidden = false;
+  runPalette({ ...e, template: JSON.stringify(tpl) });
+}
 
 // ---- project dialogs ---------------------------------------------------------------------
 
-function ask({ title, value = '', format = false, ok = 'OK' }) {
+function ask({ title, value = '', format = false, ok = 'OK', choices = null }) {
   return new Promise((resolve) => {
     const d = $('dialog'), input = $('dialog-input'), fmt = $('dialog-format');
     $('dialog-title').textContent = title;
     input.value = value; fmt.hidden = !format; $('dialog-ok').textContent = ok;
+    const list = $('dialog-list');
+    list.replaceChildren();
+    list.hidden = !choices;
+    if (choices) {
+      if (!choices.length) {
+        const li = document.createElement('li'); li.className = 'd'; li.textContent = 'No saved projects yet'; list.append(li);
+      }
+      for (const c of choices) {
+        const li = document.createElement('li');
+        const k = document.createElement('span'); k.textContent = c.label;
+        const dsc = document.createElement('span'); dsc.className = 'd'; dsc.textContent = c.detail ?? '';
+        li.append(k, dsc);
+        li.onclick = () => close({ value: c.value, format: fmt.value });
+        list.append(li);
+      }
+    }
     d.hidden = false; input.focus(); input.select();
-    const close = (v) => { d.hidden = true; $('dialog-form').onsubmit = null; $('dialog-cancel').onclick = null; resolve(v); };
+    const close = (v) => { d.hidden = true; list.hidden = true; $('dialog-form').onsubmit = null; $('dialog-cancel').onclick = null; resolve(v); };
     $('dialog-form').onsubmit = (e) => { e.preventDefault(); close({ value: input.value.trim(), format: fmt.value }); };
     $('dialog-cancel').onclick = () => close(null);
   });
 }
 
-$('btn-new').addEventListener('click', async () => {
+async function newProject() {
   const r = await ask({ title: 'New project name', value: 'untitled', ok: 'Create' });
   if (!r) return;
   try { await api('project/new', { name: r.value }); clearPreview(); vp.clear(); } catch (e) { toast(e.message, 'bad'); }
   scheduleRefresh();
-});
-$('btn-open').addEventListener('click', async () => {
-  const r = await ask({ title: 'Path of the .scadproj directory', ok: 'Open' });
+}
+async function openProject() {
+  let projects = [];
+  try { projects = await api('project/list'); } catch { /* fall back to typing a path */ }
+  const choices = projects.map((p) => ({ label: p.name, value: p.path, detail: new Date(p.modified).toLocaleString() }));
+  const r = await ask({ title: 'Open a project (click one, or type a path)', ok: 'Open', choices });
   if (!r?.value) return;
   try { await api('project/open', { path: r.value }); clearPreview(); vp.clear(); } catch (e) { toast(e.message, 'bad'); }
   scheduleRefresh();
-});
+}
+// File actions live in the project-name menu; the rest of the bar is document-level.
+$('project').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
+  { label: 'New project…', icon: 'file-plus', run: newProject },
+  { label: 'Open project…', icon: 'folder', run: openProject }]));
+$('btn-settings').addEventListener('click', () => openSettings({ toast, onTheme: (t) => vp.setTheme(t), onViewport: (v) => vp.setViewPrefs(v), onRender: (r) => vp.setRenderPrefs(r),
+  workspace: S.state?.workspace, onWorkspace: (ws) => vp.setWorkspace(ws), onSaved: () => refresh() }));
+$('btn-more').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
+  { label: 'Command palette', icon: 'command', key: 'Ctrl+K', run: openPalette },
+  { label: 'Keyboard shortcuts', icon: 'keyboard', key: '?', run: () => shortcuts.open() },
+  { sep: true }, { head: 'Agent level' },
+  { label: 'Review — preview every change', checked: S.level === 'review', data: { level: 'review' }, run: () => setLevel('review') },
+  { label: 'Auto — commit low-risk changes', checked: S.level === 'auto', data: { level: 'auto' }, run: () => setLevel('auto') }]));
+async function setLevel(level) {
+  try { await api('level', { level }); S.level = level; } catch (e) { toast(e.message, 'bad'); }
+  scheduleRefresh();
+}
 async function save() {
   try {
     let path = S.state?.path;
     if (!path) {
-      const r = await ask({ title: 'Save project to (a .scadproj directory)', value: `${S.state?.name || 'project'}.scadproj`, ok: 'Save' });
+      const r = await ask({ title: 'Save project as (relative names go to projects_output)', value: `${S.state?.name || 'project'}.scadproj`, ok: 'Save' });
       if (!r?.value) return;
       path = r.value;
     }
@@ -431,7 +1535,7 @@ function drawPalette() {
 
 async function runPalette(e) {
   if (e.kind === 'ask') { closePalette(); $('prompt').value = e.template; $('composer').requestSubmit(); return; }
-  if (e.kind === 'intent') { closePalette(); $('prompt').value = e.template; $('prompt').focus(); return; }
+  if (e.kind === 'intent') { closePalette(); $('prompt').value = e.template; autosize(); $('prompt').focus(); return; }
   if (e.kind === 'tool') {
     $('pal-list').hidden = true; $('pal-form').hidden = false;
     $('pal-form-title').textContent = `${e.title} — ${e.description}`;
@@ -440,11 +1544,7 @@ async function runPalette(e) {
       let args;
       try { args = JSON.parse($('pal-args').value || '{}'); } catch (err) { toast('Arguments are not valid JSON: ' + err.message, 'bad'); return; }
       closePalette();
-      try {
-        const o = await api('tool', { name: e.id, args });
-        toast(o.ok ? (o.committed ? `${e.id} applied` : o.changeset ? `${e.id} proposed: review it in the conversation` : `${e.id} ok`) : o.error, o.ok ? 'ok' : 'bad');
-      } catch (err) { toast(err.message, 'bad'); }
-      scheduleRefresh();
+      await callTool(e.id, args);
     };
     $('pal-back').onclick = () => { $('pal-form').hidden = true; $('pal-list').hidden = false; $('pal-input').focus(); };
     $('pal-args').focus();
@@ -456,8 +1556,8 @@ async function runPalette(e) {
     case 'redo': return doRedo();
     case 'save': return save();
     case 'export_step': case 'export_stl': return $('btn-export').click();
-    case 'playback': return $('btn-play').click();
-    case 'new': return $('btn-new').click();
+    case 'playback': return playDesign();
+    case 'new': return newProject();
   }
 }
 
@@ -473,10 +1573,12 @@ function withSelection(args, e) {
     args.edges = edges;
     args.target = featureOf(edges[0]);
   }
+  // A single selected object fills the feature the tool acts on.
+  const feats = [...new Set(sels.map(featureOf).filter(Boolean))];
+  if (feats.length === 1) for (const k of ['target', 'source']) if (args[k] === '') args[k] = feats[0];
   return args;
 }
 
-$('btn-palette').addEventListener('click', openPalette);
 $('pal-input').addEventListener('input', (e) => filterPalette(e.target.value));
 $('pal-input').addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') { e.preventDefault(); pal.idx = Math.min(pal.idx + 1, pal.items.length - 1); drawPalette(); }
@@ -485,18 +1587,42 @@ $('pal-input').addEventListener('keydown', (e) => {
 });
 $('palette').addEventListener('mousedown', (e) => { if (e.target === $('palette')) closePalette(); });
 
+const shortcuts = initShortcuts($('shortcuts'));
+$('btn-shortcuts').addEventListener('click', () => shortcuts.toggle());
+
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
-  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('palette').hidden ? openPalette() : closePalette(); }
+  if (shortcuts.isOpen()) { // the panel is modal: only its own keys work while it is open
+    if (e.key === 'Escape' || isToggleKey(e, typing)) { e.preventDefault(); shortcuts.close(); }
+    return;
+  }
+  const overlay = !$('palette').hidden || !$('dialog').hidden || !$('confirm').hidden || !$('formdlg').hidden;
+  if (isToggleKey(e, typing) && !overlay && !S.playing && $('visual').hidden && $('settings').hidden && $('interp').hidden) { e.preventDefault(); $('ctxmenu').hidden = true; shortcuts.open(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !mod && !overlay && !S.playing && S.selection?.selectors?.length) {
+    e.preventDefault(); // Backspace must not navigate back
+    deleteObjects();
+  } else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('palette').hidden ? openPalette() : closePalette(); }
   else if (e.key === 'Escape') {
-    if (!$('palette').hidden) closePalette();
+    if (!$('ctxmenu').hidden) $('ctxmenu').hidden = true;
+    else if (!$('confirm').hidden) $('confirm-cancel').click();
+    else if (!$('formdlg').hidden) $('fd-cancel').click();
+    else if (!$('palette').hidden) closePalette();
     else if (!$('dialog').hidden) $('dialog-cancel').click();
-    else if (vp.measure.on) $('btn-measure').click();
+    else if (vp.boxMode) toggleBoxSelect();
+    else if (vp.measure.on) toggleMeasure();
     else if (S.selection?.selectors?.length) api('select', { selectors: [] }).then(applySelection).catch(() => {});
   } else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+  else if (mod && !typing && !overlay && e.key.toLowerCase() === 'd' && selIds().length) { e.preventDefault(); actionEnv.duplicate(); }
+  else if (mod && !typing && !overlay && e.key.toLowerCase() === 'g' && selIds().length) { e.preventDefault(); e.shiftKey ? actionEnv.ungroup() : actionEnv.group(); }
   else if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
-  else if (!typing && e.key === 'f') vp.fit();
+  else if (e.ctrlKey && e.altKey && !e.shiftKey && (e.code === 'Digit4' || e.code === 'Numpad4') && !typing && !overlay) { e.preventDefault(); vp.layout.toggleMode(); renderCtxBar(); }
+  else if (!typing && !mod && !overlay && !e.altKey && (e.key === 'g' || e.key === 'r') && !S.playing && viewportFocused()) {
+    e.preventDefault();
+    xform.begin(e.key === 'g' ? 'translate' : 'rotate');
+  } else if (!typing && !mod && !overlay && e.key === 'f') vp.fit();
+  else if (!typing && !mod && !overlay && e.key === 'm') toggleMeasure();
+  else if (!typing && !mod && !overlay && !e.altKey && e.key === 'b') toggleBoxSelect();
 });
 
 // ---- toast ---------------------------------------------------------------------------
@@ -509,5 +1635,6 @@ function toast(msg, kind = '', ms = 4500) {
   toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
+loadTheme((t) => vp.setTheme(t), (v) => vp.setViewPrefs(v), (r) => vp.setRenderPrefs(r));
 refresh();
 api('palette').then((p) => { S.paletteAll = p; }).catch(() => {}); // warm the palette so Ctrl+K is instant

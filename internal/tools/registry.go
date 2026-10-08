@@ -13,8 +13,13 @@ import (
 
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
+	"github.com/accelone/simoncad/internal/components"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/history"
+	"github.com/accelone/simoncad/internal/materials"
+	"github.com/accelone/simoncad/internal/vision"
+	"github.com/accelone/simoncad/internal/visual"
+	"github.com/accelone/simoncad/internal/workspace"
 )
 
 // Env is what tools may read. It is implemented by the app composition root.
@@ -27,8 +32,41 @@ type Env interface {
 	NextChangeSetID() string
 	SelectionRefs() []string
 	Checkpoints() *history.Log
+	// Vision holds image interpretations (proposals); Images the uploaded source images.
+	// Neither is CAD state: a proposal never changes the model.
+	Vision() *vision.Store
+	Images() *vision.ImageStore
+	// Materials is the visual material library (presentation only).
+	Materials() *materials.Library
+	// Components is the library of reusable projects; ComponentDeps answers dependency and
+	// cycle questions about them; ComponentResolver turns a reference into geometry.
+	Components() *components.Library
+	ComponentDeps() *components.DependencyGraph
+	ComponentResolver() *components.Resolver
+	// ProjectID is the open project's stable id ("" before it has one). A component instance
+	// references a project by this id, never by directory name.
+	ProjectID() string
+	// PublishComponent writes nodes out as a new reusable project and returns its id. It is a
+	// side effect outside the ChangeSet: the directory is content-addressed so that undo and
+	// redo land on the same one, but undoing the ChangeSet leaves the library project behind.
+	PublishComponent(name, description string, tags []string, nodes []*cadir.Node) (projectID string, err error)
+	// MeshDetail / SetMeshDetail: viewport mesh detail ("fine" | "normal" | "coarse").
+	// Display only; never CAD state.
+	MeshDetail() string
+	SetMeshDetail(level string)
+	// Workspace is the project's units, grid and snapping settings; SetWorkspace replaces them
+	// (validated) and WorkspaceDefaults are the global defaults new projects start from.
+	// Presentation and editing aids only: never CAD state, never a ChangeSet.
+	Workspace() workspace.Settings
+	SetWorkspace(s workspace.Settings) error
+	WorkspaceDefaults() workspace.Settings
 	// Export writes the current model ("step" or "stl") and returns a summary.
 	Export(format, path string, deflection float64) (map[string]any, error)
+	// Visual is the visual-refinement state (not CAD state); Render draws standard views
+	// offscreen into it; SilhouetteAgainstReference scores a render against its reference.
+	Visual() *visual.State
+	Render(views []string, w, h int, mode string) ([]*visual.Render, error)
+	SilhouetteAgainstReference(r *visual.Render) (visual.SilhouetteScore, bool)
 }
 
 // Args are decoded, schema-validated tool arguments.
@@ -53,6 +91,14 @@ type Plan struct {
 	Commands    []commands.Command
 	Intent      string
 	Explanation string
+	// Warnings are recorded on the ChangeSet (and stop it from auto-committing).
+	Warnings []string
+	// RequireApproval keeps the ChangeSet proposed (never auto-committed) whatever the policy,
+	// so the user always sees the preview first. Used for interpreted, possibly ambiguous input.
+	RequireApproval bool
+	// LowRisk marks several commands that form one non-destructive user gesture (align,
+	// duplicate several bodies): under the auto policy they commit like a single command.
+	LowRisk bool
 }
 
 // Tool is one registered capability-tagged operation.

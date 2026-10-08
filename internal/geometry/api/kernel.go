@@ -90,6 +90,16 @@ func (k *Kernel) Cylinder(radius, height float64) (*Shape, error) {
 	return k.wrap(func() (bridge.Handle, error) { return bridge.Cylinder(radius, height) })
 }
 
+// Sphere is centered at the origin.
+func (k *Kernel) Sphere(radius float64) (*Shape, error) {
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Sphere(radius) })
+}
+
+// Torus is centered at the origin with its axis along +Z.
+func (k *Kernel) Torus(major, minor float64) (*Shape, error) {
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Torus(major, minor) })
+}
+
 // Cone is a frustum with base radius r1 at z=0 and top radius r2 at z=h.
 func (k *Kernel) Cone(r1, r2, h float64) (*Shape, error) {
 	return k.wrap(func() (bridge.Handle, error) { return bridge.Cone(r1, r2, h) })
@@ -113,6 +123,14 @@ func (k *Kernel) Subtract(a, b *Shape) (*Shape, error) {
 		return nil, ErrReleased
 	}
 	return k.wrap(func() (bridge.Handle, error) { return bridge.Subtract(a.h, b.h) })
+}
+
+// Intersect keeps only the volume common to a and b.
+func (k *Kernel) Intersect(a, b *Shape) (*Shape, error) {
+	if a.h == 0 || b.h == 0 {
+		return nil, ErrReleased
+	}
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Intersect(a.h, b.h) })
 }
 
 func (k *Kernel) ImportSTEP(path string) (*Shape, error) {
@@ -175,6 +193,43 @@ func (s *Shape) Rotate(ox, oy, oz, ax, ay, az, angle float64) (*Shape, error) {
 	})
 }
 
+// Seg2D is one 2D sketch curve: Kind 0 line (x1,y1,x2,y2), 1 arc through a middle point
+// (x1,y1,xm,ym,x2,y2), 2 circle (cx,cy,r).
+type Seg2D = bridge.Seg2D
+
+// MakeFace builds a planar face in the XY plane from loops of segments (loop 0 outer, the rest holes).
+func (k *Kernel) MakeFace(segs []Seg2D, loopSizes []int) (*Shape, error) {
+	ls := toInt32(loopSizes)
+	cp := append([]Seg2D(nil), segs...)
+	return k.wrap(func() (bridge.Handle, error) { return bridge.MakeFace(cp, ls) })
+}
+
+// Prism sweeps the shape (typically a face) along (dx,dy,dz).
+func (s *Shape) Prism(dx, dy, dz float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.Prism(h, dx, dy, dz) })
+}
+
+// Place moves a shape built in the local XY/+Z frame onto the frame (origin, normal z, x direction).
+func (s *Shape) Place(origin, z, x [3]float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.Place(h, origin, z, x) })
+}
+
+// Frame is a right-handed placement frame on a planar face.
+type Frame struct{ Origin, Normal, X [3]float64 }
+
+// FaceFrame returns the placement frame of the planar face with the kernel index (as in Tessellate).
+func (s *Shape) FaceFrame(face int) (Frame, error) {
+	if s.h == 0 {
+		return Frame{}, ErrReleased
+	}
+	var (
+		f   Frame
+		err error
+	)
+	s.k.run(func() { f.Origin, f.Normal, f.X, err = bridge.FaceFrame(s.h, face) })
+	return f, err
+}
+
 func (s *Shape) IsValid() (bool, error) {
 	if s.h == 0 {
 		return false, ErrReleased
@@ -225,6 +280,37 @@ func (s *Shape) Mirror(ox, oy, oz, nx, ny, nz float64) (*Shape, error) {
 	})
 }
 
+// Scale scales the shape about (ox,oy,oz) by per-axis factors (all > 0).
+func (s *Shape) Scale(ox, oy, oz, sx, sy, sz float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.Scale(h, ox, oy, oz, sx, sy, sz) })
+}
+
+// UnifyFaces merges neighbouring faces on the same surface (and collinear edges), e.g. the
+// coplanar seams a push/pull union leaves behind.
+func (s *Shape) UnifyFaces() (*Shape, error) {
+	return s.unary(bridge.UnifyFaces)
+}
+
+// Face copies the face with the kernel index (as in Tessellate).
+func (s *Shape) Face(face int) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.FaceGet(h, face) })
+}
+
+// FaceInset returns the planar face shrunk by d (> 0) from every boundary, as a new face.
+func (s *Shape) FaceInset(face int, d float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.FaceInset(h, face, d) })
+}
+
+// ImprintInset returns the shape with the face split along its inset outline.
+func (s *Shape) ImprintInset(face int, d float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.FaceImprintInset(h, face, d) })
+}
+
+// OffsetFace returns the shape with one face moved by d along its outward normal.
+func (s *Shape) OffsetFace(face int, d float64) (*Shape, error) {
+	return s.unary(func(h bridge.Handle) (bridge.Handle, error) { return bridge.OffsetFace(h, face, d) })
+}
+
 // Mesh types are re-exported so callers never import the bridge package.
 type (
 	Mesh = bridge.Mesh
@@ -246,7 +332,11 @@ const (
 // Tessellate meshes the shape at the given linear deflection (mm). Faces, edges and
 // vertices are numbered deterministically, so an index identifies the same entity on
 // every rebuild of the same shape.
-func (s *Shape) Tessellate(deflection float64) (*Mesh, error) {
+func (s *Shape) Tessellate(deflection float64) (*Mesh, error) { return s.TessellateAngular(deflection, 0.5) }
+
+// TessellateAngular is Tessellate with an explicit angular deflection (radians): the widest
+// angle one segment of a curve may span. Larger values give fewer, longer segments.
+func (s *Shape) TessellateAngular(deflection, angular float64) (*Mesh, error) {
 	if s.h == 0 {
 		return nil, ErrReleased
 	}
@@ -254,7 +344,7 @@ func (s *Shape) Tessellate(deflection float64) (*Mesh, error) {
 		m   *Mesh
 		err error
 	)
-	s.k.run(func() { m, err = bridge.Tessellate(s.h, deflection) })
+	s.k.run(func() { m, err = bridge.TessellateAngular(s.h, deflection, angular) })
 	return m, err
 }
 

@@ -14,14 +14,22 @@ import (
 
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
+	"github.com/accelone/simoncad/internal/components"
+	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/export"
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/history"
+	"github.com/accelone/simoncad/internal/materials"
 	"github.com/accelone/simoncad/internal/persistence"
+	"github.com/accelone/simoncad/internal/rendering"
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
+	"github.com/accelone/simoncad/internal/vision"
+	"github.com/accelone/simoncad/internal/visual"
+	"github.com/accelone/simoncad/internal/workspace"
+	materialsdata "github.com/accelone/simoncad/materials"
 )
 
 // Policy decides whether a valid ChangeSet commits immediately.
@@ -53,9 +61,39 @@ type App struct {
 	Bus    *events.Bus
 	Reg    *tools.Registry
 	AH     persistence.AgentHistory
+	// Vision keeps image interpretations (proposals); Images the uploaded source images.
+	// Neither is CAD state.
+	Vision *vision.Store
+	Images *vision.ImageStore
+	// Materials is the visual material library (built-in plus the open project's own).
+	// Presentation only; it is never an input to geometry.
+	Materials *materials.Library
+	matDir    string // project dir whose assets/materials feed Materials ("" = none)
+	// Visual is the visual-refinement state (references, regions and locks, iteration
+	// history, offscreen renders). Not CAD state; region locks are enforced in ApplyTool.
+	Visual     *visual.State
+	offscreenR *rendering.Renderer
+	// meshDetail is the viewport mesh detail ("fine" | "normal" | "coarse"). Display only:
+	// it is not CAD state, is not saved and never changes geometry.
+	meshDetail string
+	// Workspace is the project's units, grid and snapping (workspace.json): presentation and
+	// editing aids, never an input to geometry. WorkspaceWarnings say what could not be read
+	// from the project's file and was replaced by defaults.
+	Workspace         workspace.Settings
+	WorkspaceWarnings []string
 
-	// Raw preserved files not interpreted in Phase 1.
-	components, constraints, materials json.RawMessage
+	// Raw preserved files not interpreted here. components.json is derived on save from the
+	// graph's component instances, so it is no longer carried through.
+	constraints, materials json.RawMessage
+	// Lib is the component library (which reusable projects exist and where); Resolver turns
+	// a component instance into geometry. Both are kept out of rendering and UI logic.
+	Lib      *components.Library
+	Resolver *components.Resolver
+	Deps     *components.DependencyGraph
+	dir      string // the project's directory, "" until saved or opened; anchors the library
+	// savedHash is the graph hash as of the last save; it decides whether a reusable project's
+	// component_version advances, so save → load → save stays byte-identical.
+	savedHash string
 
 	Clock     func() time.Time
 	actor     Actor
@@ -70,19 +108,27 @@ func newApp(clock func() time.Time) *App {
 		clock = time.Now
 	}
 	k := api.New()
+	lib := components.NewLibrary()
 	a := &App{K: k, Engine: rebuild.New(k), Graph: cadir.NewGraph(), Hist: &history.Log{}, Bus: events.NewBus(),
-		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI}}
+		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI},
+		Vision: vision.NewStore(), Images: vision.NewImageStore(), Visual: visual.NewState(),
+		Materials: materials.New(materialsdata.FS()),
+		Lib:       lib, Resolver: components.NewResolver(lib, k), Deps: components.NewDependencyGraph(lib)}
+	a.Engine.Components = a.Resolver
+	a.useLibraryRoots("")
 	a.Bus.Now = clock
 	a.Mgr = commands.NewManager(a.Graph, a, a.Bus)
 	a.Mgr.Now = clock
 	return a
 }
 
-// New starts an empty project.
+// New starts an empty project. Its workspace settings are a copy of the global defaults:
+// later changes to the defaults do not follow it.
 func New(name string, clock func() time.Time) *App {
 	a := newApp(clock)
-	a.Meta = persistence.Meta{SchemaVersion: persistence.SchemaVersion, Name: name, Units: "mm",
-		OCCTVersion: a.K.Version(), Created: a.Clock().UTC().Format(time.RFC3339)}
+	a.Meta = persistence.Meta{SchemaVersion: persistence.SchemaVersion, ID: persistence.NewID(),
+		Name: name, Units: "mm", OCCTVersion: a.K.Version(), Created: a.Clock().UTC().Format(time.RFC3339)}
+	a.Workspace = configWorkspaceDefaults().Clone()
 	return a
 }
 
@@ -94,8 +140,32 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 	}
 	a := newApp(clock)
 	a.Meta, a.AH = p.Meta, p.History
-	a.components, a.constraints, a.materials = p.Components, p.Constraints, p.Materials
+	// A project keeps its own workspace settings. One saved before they existed gets the
+	// factory defaults (what it was designed with), never the user's current global
+	// defaults: those must not silently change an existing project.
+	a.Workspace, a.WorkspaceWarnings = workspace.Defaults(), p.WorkspaceWarnings
+	if p.Workspace != nil {
+		a.Workspace = *p.Workspace
+	}
+	a.useProjectMaterials(dir)
+	a.useLibraryRoots(dir)
+	a.constraints, a.materials = p.Constraints, p.Materials
 	*a.Graph = *p.Graph
+	if len(a.AH.Interpretations) > 0 {
+		if err := json.Unmarshal(a.AH.Interpretations, a.Vision); err != nil {
+			return nil, fmt.Errorf("agent-history.json interpretations: %w", err)
+		}
+	}
+	if len(a.AH.Visual) > 0 {
+		if err := json.Unmarshal(a.AH.Visual, a.Visual); err != nil {
+			return nil, fmt.Errorf("agent-history.json visual: %w", err)
+		}
+	}
+	for _, im := range p.Images { // retained source images; the geometry never needs them
+		if put, err := a.Images.Put(im.Data); err == nil {
+			_ = a.Images.Retain(put.ID, true)
+		}
+	}
 	a.Mgr.Restore(a.AH.ChangeSets)
 	a.Hist.Checkpoints = a.AH.Checkpoints
 	a.Bus.Load(p.Events)
@@ -106,16 +176,81 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 		}
 	}
 	for _, id := range a.Mgr.CommittedIDs() {
-		if !covered[id] {
-			a.sinceCP = append(a.sinceCP, id)
+		if cs, ok := a.Mgr.Get(id); ok && !covered[id] {
+			a.trackForCheckpoint(cs)
 		}
 	}
+	a.savedHash = a.Graph.Hash()
 	return a, nil
 }
 
 func (a *App) Close() {
 	a.Engine.Close()
 	a.K.Close()
+}
+
+// useLibraryRoots points the component library at the project's own neighbourhood plus the
+// configured library root. The roots are never derived from the process working directory: a
+// component resolved by where the binary happens to run would make the same .scadproj rebuild
+// to different geometry from a different shell.
+func (a *App) useLibraryRoots(dir string) {
+	a.dir = dir
+	a.Lib.SetRoots(components.RootsFor(dir, configComponentLibrary())...)
+}
+
+// configComponentLibrary is the configured library root, indirected so tests can point the
+// library somewhere else without touching the user's settings.
+var configComponentLibrary = config.ComponentLibrary
+
+// configWorkspaceDefaults are the global workspace defaults, indirected like the library root.
+var configWorkspaceDefaults = config.WorkspaceDefaults
+
+// Dir is the project's directory ("" until it is saved or opened).
+func (a *App) Dir() string { return a.dir }
+
+// ProjectMaterialsDir is where a project keeps its own materials.
+const ProjectMaterialsDir = "assets/materials"
+
+// useProjectMaterials points the library at dir/assets/materials (a no-op layer when absent).
+func (a *App) useProjectMaterials(dir string) {
+	a.matDir = dir
+	root := filepath.Join(dir, filepath.FromSlash(ProjectMaterialsDir))
+	if st, err := os.Stat(root); err == nil && st.IsDir() {
+		a.Materials.SetProject(os.DirFS(root))
+		return
+	}
+	a.Materials.SetProject(nil)
+}
+
+// carryProjectMaterials copies project-specific materials when saving to a new location, so
+// "Save as" never strands the assets a project's materials reference.
+func (a *App) carryProjectMaterials(dir string) error {
+	if a.matDir == "" || a.matDir == dir {
+		return nil
+	}
+	src := filepath.Join(a.matDir, filepath.FromSlash(ProjectMaterialsDir))
+	if st, err := os.Stat(src); err != nil || !st.IsDir() {
+		return nil
+	}
+	dst := filepath.Join(dir, filepath.FromSlash(ProjectMaterialsDir))
+	err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), b, 0o644)
+	})
+	if err == nil {
+		a.useProjectMaterials(dir)
+	}
+	return err
 }
 
 // Save writes the project to dir.
@@ -137,14 +272,66 @@ func (a *App) Save(dir string) error {
 	if _, err := a.Model(); err != nil { // refresh derived status before writing
 		return err
 	}
-	return persistence.Save(dir, &persistence.Project{
+	if h := a.Graph.Hash(); a.Meta.Reusable && h != a.savedHash {
+		a.Meta.Version++ // a reusable project's version advances only when its content changed
+	}
+	a.AH.Interpretations = nil
+	if len(a.Vision.List()) > 0 {
+		b, err := json.Marshal(a.Vision)
+		if err != nil {
+			return err
+		}
+		a.AH.Interpretations = b
+	}
+	a.AH.Visual = nil
+	if !a.Visual.Empty() {
+		b, err := json.Marshal(a.Visual)
+		if err != nil {
+			return err
+		}
+		a.AH.Visual = b
+	}
+	var imgs []persistence.Image
+	for _, im := range a.Images.All() {
+		if !im.Retained {
+			continue
+		}
+		ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[im.MediaType]
+		imgs = append(imgs, persistence.Image{ID: im.ID, Ext: ext, Data: im.Data})
+	}
+	if err := persistence.Save(dir, &persistence.Project{
 		Meta: a.Meta, Graph: a.Graph, History: a.AH, Events: a.Bus.Events(),
-		Components: a.components, Constraints: a.constraints, Materials: a.materials,
-	})
+		Components: components.Manifest(a.Graph), Constraints: a.constraints, Materials: a.materials, Images: imgs,
+		Workspace: &a.Workspace,
+	}); err != nil {
+		return err
+	}
+	a.savedHash = a.Graph.Hash()
+	if err := a.carryProjectMaterials(dir); err != nil {
+		return err
+	}
+	a.useLibraryRoots(dir)
+	return nil
 }
 
 // SetActor sets who is driving subsequent tool calls.
 func (a *App) SetActor(ac Actor) { a.actor = ac }
+
+// ReIdentify mints a new stable project id, recording the one it was copied from. "Save as"
+// calls it so two directories never claim the same id and component references stay unambiguous.
+// A plain Save never does: copying a project directory by hand keeps it the same project.
+func (a *App) ReIdentify() {
+	a.Meta.DerivedFrom, a.Meta.ID = a.Meta.ID, persistence.NewID()
+}
+
+// SetReusable marks the project as a reusable component (or stops it being one) and sets its
+// library description and tags.
+func (a *App) SetReusable(reusable bool, description string, tags []string) {
+	a.Meta.Reusable, a.Meta.Description, a.Meta.Tags = reusable, description, tags
+	if !reusable {
+		a.Meta.Description, a.Meta.Tags, a.Meta.Version = "", nil, 0
+	}
+}
 
 // ---- model access -----------------------------------------------------------------
 
@@ -219,6 +406,29 @@ func (a *App) SelectionContext() selection.Context {
 	return c
 }
 
+// MeshDetail is the viewport mesh detail level (default "fine").
+func (a *App) MeshDetail() string {
+	if a.meshDetail == "" {
+		return "fine"
+	}
+	return a.meshDetail
+}
+
+// SetWorkspace validates and stores the project's workspace settings. It is what the
+// workspace tools call; geometry is never touched.
+func (a *App) SetWorkspace(s workspace.Settings) error {
+	s = s.Normalized()
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	if s.Equal(a.Workspace) {
+		return nil
+	}
+	a.Workspace = s.Clone()
+	a.Bus.Publish(events.WorkspaceChanged, a.Workspace)
+	return nil
+}
+
 // ---- tools.Env ----------------------------------------------------------------------
 
 type toolEnv struct{ a *App }
@@ -229,6 +439,29 @@ func (e toolEnv) Now() time.Time                 { return e.a.Clock() }
 func (e toolEnv) NextChangeSetID() string        { return fmt.Sprintf("cs_%04d", len(e.a.Mgr.Log)+1) }
 func (e toolEnv) SelectionRefs() []string        { return append([]string(nil), e.a.selection...) }
 func (e toolEnv) Checkpoints() *history.Log      { return e.a.Hist }
+func (e toolEnv) Vision() *vision.Store          { return e.a.Vision }
+func (e toolEnv) Images() *vision.ImageStore     { return e.a.Images }
+func (e toolEnv) Materials() *materials.Library  { return e.a.Materials }
+
+func (e toolEnv) Components() *components.Library            { return e.a.Lib }
+func (e toolEnv) ComponentDeps() *components.DependencyGraph { return e.a.Deps }
+func (e toolEnv) ComponentResolver() *components.Resolver    { return e.a.Resolver }
+func (e toolEnv) ProjectID() string                          { return e.a.Meta.ID }
+func (e toolEnv) PublishComponent(name, description string, tags []string, nodes []*cadir.Node) (string, error) {
+	return e.a.PublishComponent(name, description, tags, nodes)
+}
+func (e toolEnv) MeshDetail() string                      { return e.a.MeshDetail() }
+func (e toolEnv) SetMeshDetail(level string)              { e.a.meshDetail = level }
+func (e toolEnv) Workspace() workspace.Settings           { return e.a.Workspace.Clone() }
+func (e toolEnv) SetWorkspace(s workspace.Settings) error { return e.a.SetWorkspace(s) }
+func (e toolEnv) WorkspaceDefaults() workspace.Settings   { return configWorkspaceDefaults() }
+func (e toolEnv) Visual() *visual.State                   { return e.a.Visual }
+func (e toolEnv) Render(views []string, w, h int, mode string) ([]*visual.Render, error) {
+	return e.a.Render(views, w, h, mode)
+}
+func (e toolEnv) SilhouetteAgainstReference(r *visual.Render) (visual.SilhouetteScore, bool) {
+	return e.a.SilhouetteAgainstReference(r)
+}
 func (e toolEnv) Provenance() cadir.Provenance {
 	return cadir.Provenance{CreatedBy: e.a.actor.CreatedBy, Capability: e.a.actor.Capability,
 		ToolCallID: e.a.callID, Model: e.a.actor.Model}
@@ -325,6 +558,18 @@ func (a *App) RecordPrompt(text string) string {
 	a.promptID = p.ID
 	a.Bus.Publish(events.UserIntentReceived, map[string]any{"id": p.ID, "text": text, "selection": p.Selection})
 	return p.ID
+}
+
+// RecordPromptImages notes which uploaded images were attached to a prompt.
+func (a *App) RecordPromptImages(promptID string, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	for i := range a.AH.Prompts {
+		if a.AH.Prompts[i].ID == promptID {
+			a.AH.Prompts[i].Images = append([]string(nil), ids...)
+		}
+	}
 }
 
 // SetPromptSummary stores the agent's final explanation on the current prompt.
@@ -433,6 +678,7 @@ func (a *App) ApplyTool(name string, args []byte, policy Policy) Outcome {
 		return out
 	}
 	cs.Provenance.ToolCallID = a.callID
+	cs.Warnings = append(cs.Warnings, res.Plan.Warnings...)
 	out.ChangeSet, out.Message = cs, cs.Explanation
 	if !cs.Valid() {
 		for _, v := range cs.Validation {
@@ -444,14 +690,27 @@ func (a *App) ApplyTool(name string, args []byte, policy Policy) Outcome {
 		_ = a.Mgr.Reject(cs.ID)
 		return out
 	}
+	if reason := a.lockViolation(cs, res.Plan.Commands); reason != "" {
+		out.Error = reason
+		_ = a.Mgr.Reject(cs.ID)
+		return out
+	}
 	out.OK = true
-	commit := policy == PolicyCommit || policy == PolicyAuto && cs.AutoCommitEligible()
+	if res.Plan.RequireApproval {
+		policy = PolicyPreview
+	}
+	lowRisk := res.Plan.LowRisk && len(cs.Warnings) == 0
+	commit := policy == PolicyCommit || policy == PolicyAuto && (cs.AutoCommitEligible() || lowRisk)
 	if commit {
 		if err := a.commit(cs); err != nil {
 			out.OK, out.Error = false, err.Error()
 			return out
 		}
 		out.Committed = true
+		if tools.IsTransformTool(name) {
+			a.Bus.Publish(events.ObjectTransformed, map[string]any{"tool": name, "changeset": cs.ID,
+				"objects": cs.Affected, "intent": cs.Intent})
+		}
 	}
 	return out
 }
@@ -460,9 +719,23 @@ func (a *App) commit(cs *commands.ChangeSet) error {
 	if _, err := a.Mgr.Commit(cs.ID); err != nil {
 		return err
 	}
-	a.sinceCP = append(a.sinceCP, cs.ID)
+	a.trackForCheckpoint(cs)
+	a.noteInterpretations(cs)
 	_, err := a.refresh()
 	return err
+}
+
+// noteInterpretations records which nodes an image interpretation produced.
+func (a *App) noteInterpretations(cs *commands.ChangeSet) {
+	byInt := map[string][]string{}
+	for _, id := range cs.Affected {
+		if n := a.Graph.Get(id); n != nil && n.Provenance.InterpretationID != "" {
+			byInt[n.Provenance.InterpretationID] = append(byInt[n.Provenance.InterpretationID], id)
+		}
+	}
+	for id, nodes := range byInt {
+		a.Vision.MarkUsed(id, nodes)
+	}
 }
 
 // Commit approves a proposed ChangeSet.
@@ -494,9 +767,17 @@ func (a *App) Redo() (*commands.ChangeSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.sinceCP = append(a.sinceCP, cs.ID)
+	a.trackForCheckpoint(cs)
 	_, err = a.refresh()
 	return cs, err
+}
+
+// trackForCheckpoint queues a committed ChangeSet for the next checkpoint. Appearance-only
+// edits are skipped: they are undoable but are not engineering intent.
+func (a *App) trackForCheckpoint(cs *commands.ChangeSet) {
+	if !cs.AppearanceOnly() {
+		a.sinceCP = append(a.sinceCP, cs.ID)
+	}
 }
 
 func (a *App) dropFromSinceCP(id string) {

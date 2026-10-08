@@ -3,8 +3,10 @@ package tools
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
+	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
 )
 
@@ -13,23 +15,41 @@ import (
 var knownParams = map[string][]string{
 	"box":              {"dx", "dy", "dz", "x", "y", "z"},
 	"cylinder":         {"radius", "height", "axis", "x", "y", "z"},
+	"cone":             {"radius", "top_radius", "height", "axis", "x", "y", "z"},
+	"sphere":           {"radius", "x", "y", "z"},
+	"torus":            {"major_radius", "minor_radius", "axis", "x", "y", "z"},
 	"hole":             {"diameter", "depth", "kind", "cb_diameter", "cb_depth", "cs_diameter", "cs_angle_deg", "positions"},
-	"extrude":          {"mode", "plane", "offset", "depth", "symmetric", "through", "x", "y", "w", "h", "r", "x1", "y1", "x2", "y2", "width", "points"},
+	"extrude":          {"mode", "plane", "offset", "depth", "symmetric", "through", "reverse", "x", "y", "w", "h", "r", "x1", "y1", "x2", "y2", "width", "points"},
 	"linear_pattern":   {"count", "dx", "dy", "dz"},
 	"circular_pattern": {"count", "cx", "cy", "cz", "axis", "total_angle_deg"},
 	"fillet":           {"radius"},
 	"chamfer":          {"distance"},
 	"transform":        {"dx", "dy", "dz", "angle_deg", "ax", "ay", "az", "ox", "oy", "oz"},
 	"mirror":           {"plane", "offset"},
+	"sketch":           {"plane", "offset"}, // plus its dim_* dimension parameters
 	"union":            {},
 	"subtract":         {},
+	"intersect":        {},
+	"scale":            {"factor", "sx", "sy", "sz", "about", "ox", "oy", "oz", "frame_ax", "frame_ay", "frame_az", "frame_angle_deg"},
+	"copy":             {"dx", "dy", "dz"},
+	"face_extrude":     {"distance"},
+	"face_inset":       {"inset", "depth"},
+	"face_offset":      {"distance"},
+	// A component instance exposes only its placement. The reference itself (component,
+	// version, content_hash) identifies what is being instantiated and is changed through
+	// insert_component / sync_component, which validate it, not by editing a field.
+	"component_instance": {"dx", "dy", "dz", "angle_deg", "ax", "ay", "az", "ox", "oy", "oz", "sx", "sy", "sz"},
 }
+
+// signedParams are exceptions to strictlyPositive: signed distances of face edits.
+var signedParams = map[string]bool{"face_extrude.distance": true, "face_offset.distance": true, "face_inset.depth": true}
 
 // strictlyPositive parameters must be > 0.
 var strictlyPositive = map[string]bool{
 	"dx": false, "dy": false, "dz": false, // box extents are positive but pattern/transform deltas are not; checked per type
-	"radius": true, "height": true, "diameter": true, "depth": true, "distance": true,
+	"radius": true, "height": true, "major_radius": true, "minor_radius": true, "diameter": true, "depth": true, "distance": true,
 	"cb_diameter": true, "cb_depth": true, "cs_diameter": true, "w": true, "h": true, "r": true, "width": true,
+	"factor": true, "sx": true, "sy": true, "sz": true, "inset": true,
 }
 
 func isKnown(typ, name string) bool {
@@ -39,6 +59,34 @@ func isKnown(typ, name string) bool {
 		}
 	}
 	return false
+}
+
+// editable reports whether a parameter of an existing node may be edited. A sketch also
+// exposes the dimensions its entities refer to (dim_*), which must already exist.
+func editable(n *cadir.Node, name string) bool {
+	if isKnown(n.Type, name) {
+		return true
+	}
+	if (n.Type == "sketch" && strings.HasPrefix(name, "dim_")) || n.Type == "parameters" {
+		_, ok := n.Parameters[name].(float64)
+		return ok
+	}
+	return false
+}
+
+func editableList(n *cadir.Node) string {
+	list := append([]string(nil), knownParams[n.Type]...)
+	if n.Type == "sketch" || n.Type == "parameters" {
+		var dims []string
+		for k := range n.Parameters {
+			if strings.HasPrefix(k, "dim_") || n.Type == "parameters" {
+				dims = append(dims, k)
+			}
+		}
+		sort.Strings(dims)
+		list = append(list, dims...)
+	}
+	return strings.Join(list, ", ")
 }
 
 func editTools() []*Tool {
@@ -58,8 +106,8 @@ func editTools() []*Tool {
 					return nil, err
 				}
 				name := a.Str("parameter")
-				if !isKnown(n.Type, name) {
-					return nil, fmt.Errorf("%s features have no editable parameter %q (editable: %s)", n.Type, name, strings.Join(knownParams[n.Type], ", "))
+				if !editable(n, name) {
+					return nil, fmt.Errorf("%s features have no editable parameter %q (editable: %s)", n.Type, name, editableList(n))
 				}
 				val := a["value"]
 				switch v := val.(type) {
@@ -67,7 +115,7 @@ func editTools() []*Tool {
 					if !finite(v) {
 						return nil, fmt.Errorf("value must be finite")
 					}
-					if (strictlyPositive[name] || n.Type == "box" && (name == "dx" || name == "dy" || name == "dz")) && v <= 0 {
+					if (strictlyPositive[name] && !signedParams[n.Type+"."+name] || strings.HasPrefix(name, "dim_") || n.Type == "box" && (name == "dx" || name == "dy" || name == "dz")) && v <= 0 {
 						return nil, fmt.Errorf("%s must be greater than 0", name)
 					}
 					if name == "count" && (v < 2 || v != math.Trunc(v)) {
@@ -110,8 +158,8 @@ func editTools() []*Tool {
 					return &Plan{Intent: intentOr(a, "Clear expression"), Explanation: fmt.Sprintf("Clears the expression on %s.%s.", n.ID, name),
 						Commands: []commands.Command{&commands.SetExpression{ID: n.ID, Name: name, Delete: true}}}, nil
 				}
-				if !isKnown(n.Type, name) {
-					return nil, fmt.Errorf("%s features have no editable parameter %q (editable: %s)", n.Type, name, strings.Join(knownParams[n.Type], ", "))
+				if !editable(n, name) {
+					return nil, fmt.Errorf("%s features have no editable parameter %q (editable: %s)", n.Type, name, editableList(n))
 				}
 				return &Plan{Intent: intentOr(a, "Drive "+n.ID+"."+name+" by expression"),
 					Explanation: fmt.Sprintf("Drives %s.%s by %q.", n.ID, name, a.Str("expression")),

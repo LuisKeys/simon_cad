@@ -108,11 +108,14 @@ Every node carries the full schema from day one (even where unused yet):
 | `references` | Semantic selectors (e.g. `face` → `face(feature=plate,side=+Z)`) |
 | `constraints` | Reserved (symmetry, alignment, clearances…) |
 | `intent` | The engineering intent in natural language |
-| `manufacturing`, `component` | Reserved for Phases 3–4 |
+| `manufacturing` | Reserved for Phase 4 |
+| `component` | Reserved: tagging a node with the component it came from (see `component_instance` below) |
 | `selection_refs` | The selection context active when the node was created |
 | `provenance` | `created_by` (user/agent/cli), capability, tool call id, ChangeSet id, model |
 | `metadata` | Name, created/modified timestamps, tags |
 | `suppressed` | Authoritative suppress flag |
+| `appearance` | Optional `{color "#RRGGBB", opacity 0–1, visible}`; presentation only (see below) |
+| `lock_proportions` | Optional dimension-editing preference (see §6a); never an input to geometry |
 | `status`, `errors` | **Derived** by rebuild: `ok / failed / stale / suppressed` + cause chain |
 
 **Effective dependencies** are the union of explicit `dependencies`, nodes referenced from
@@ -120,8 +123,23 @@ expressions (`plate.dz` ⇒ `plate`) and features named in selector references. 
 topological order and "can I remove this?" all use effective dependencies, so a reference can never
 silently dangle.
 
+**Appearance is presentation, not geometry.** The pipeline forks after the CAD-IR:
+`Geometry → OCCT B-Rep → tessellation` and `Appearance → rendering / supported exports`.
+`appearance` is excluded from `Node.ContentKey()` and from the rebuild cache key, so
+`SetColor`, `SetOpacity`, `SetVisibility` and `ResetAppearance` (ordinary invertible commands, auto-committed
+as a group) never invoke the geometry kernel: the rebuild is all cache hits and the renderer re-tessellates
+nothing (`TestAppearanceChangeSetSkipsKernel`). `rendering.Delta.Appearance` carries the values to the
+viewport, which only mutates materials. Hidden bodies still exist and are still exported. STL discards
+appearance; the same `cadir.Appearance` type is reserved for component/assembly instances, catalog default
+appearances and 3MF/STEP color export, none of which exist yet.
+
+Visual (PBR) materials (`internal/materials`, library in `materials/`) follow the same rule: `SetMaterial`,
+`RemoveMaterial` and `SetMaterialScale` are appearance commands, so they never reach the kernel. They are
+separate from engineering materials, which will own density/mass/strength.
+
 `Graph.Hash()` is a content hash that **excludes** derived status/errors and timestamps; it is what
-checkpoints, stale-detection and replay verification compare.
+checkpoints, stale-detection and replay verification compare. It **includes** appearance;
+`Graph.GeometryHash()` ignores it and is what keeps a selection alive across appearance edits.
 
 ## 5. Rebuild engine
 
@@ -153,6 +171,24 @@ feature names a `target` (a node whose body it modifies) and produces a new body
 
 - **Tool features** (`hole`, `extrude`) expose a *tool generator* (the cutter or the added solid)
   and a `subtract` flag; their build is `target ∘ tool`.
+- **Body edits** `scale` (uniform or per axis, about the centre / base / origin / a point, resolved at
+  build time from the target's bounds; optionally along a rotated local frame, `frame_*`, see §6a) and the face edits `face_extrude`, `face_inset`, `face_offset`
+  (`references.face` on the target; push/pull results have coplanar seams merged) are ordinary
+  modifying features. Tools refuse them on a feature that a later one already consumes (that would
+  fork the chain); the error names the visible body to use instead.
+- **Copies** (`copy`, from the `duplicate` tool) are the one feature that does **not consume** its
+  input (`Feature.KeepsInputs`): source and copy are both leaves, and the copy follows the source's
+  parameters. `align` is a tool, not a feature: it computes per-body translations from the current
+  bounds and emits ordinary `transform` features.
+- **Low-risk multi-command plans:** `Plan.LowRisk` lets one gesture over several objects (duplicate
+  several bodies, align) auto-commit under the *auto* policy like a single command.
+- **Groups** (`Node.group`, `SetGroup`, tools `group` / `ungroup`) are presentation like appearance:
+  excluded from the content key and `GeometryHash`, auto-committed, never a checkpoint.
+- **Appearance and group follow the visible body.** Appearance lives on the node, and the viewport
+  shows the leaf's. A new feature that modifies a body (its `target`, else its `source`, else its
+  first dependency) therefore starts with a copy of that body's appearance and group, so a material
+  survives scale, fillet, holes, moves, face edits and booleans (the boolean's `tool` body does not
+  contribute). It is a copy taken at creation: restyling the result never edits its inputs.
 - **Patterns** (`linear_pattern`, `circular_pattern`) take a `source` hole/extrude feature,
   re-create its tool, transform copies of it and apply them to the source's output. That keeps
   patterns general without teaching them about holes.
@@ -160,11 +196,161 @@ feature names a `target` (a node whose body it modifies) and produces a new body
   oriented onto the face normal; positions are world coordinates where the component along the
   normal is ignored.
 
+### 6a. Dimensions: measuring and resizing objects
+
+SimonCAD stays a feature/B-Rep modeler; dimensions are **not** a parametric constraint engine.
+Three categories are kept apart:
+
+| Category | What it is | Where |
+|---|---|---|
+| Informational | Width, depth and height of an object, measured from its geometry; read only | `internal/dimensions` (DimensionService), `get_object_dimensions` |
+| Editable | Typing a new width/depth/height scales the object along that local axis | `set_object_dimension`, `resize_object`, `set_object_proportional_scaling` |
+| Parametric (future) | Constraints and relations that re-solve the model | reserved (`Node.constraints`); not implemented |
+
+- **Local axes.** Width, depth and height are the extents along the object's local X, Y and Z (Z up).
+  The local frame is the composition of the rotations of the object's own chain (`transform` and
+  `component_instance` placements, followed through `target` / a copy's `source`), so a rotated
+  part keeps its width as its width. The extents are the tight box of the body rotated into that
+  frame (`Body.BoundsInFrame`), not the world bounding box.
+- **Object origin** is the creating feature's placement point (a primitive's `x/y/z`, a component's
+  origin) carried through every move, rotation, copy offset and scale of the chain; a body with no
+  placement point uses the center of its first body.
+- **Resize** (MeshResizeService = `dimensions.Factors` + `tools.resizePlan`): `factor = target /
+  current` on the requested axis only (all three with Lock Proportions and a single dimension);
+  flat axes (< 1e-6 mm), non-positive values and factors beyond 1000× are refused. The result is a
+  `scale` feature in the object's frame (`frame_*` parameters: rotate into the frame, scale, rotate
+  back), about the box center or the object origin (resolved at plan time into `about=point`, so a
+  replay never re-derives it). The orientation and the anchor are preserved and nothing else is
+  touched. Consecutive edits fold into the object's own resize feature (tag `resize`) when it is the
+  visible body, nothing builds on it and the anchor and frame match; the composition of two scales
+  about the same fixed point is one scale, and a resize that cancels out is removed. Each edit is
+  still its own ChangeSet, so undo/redo step through them.
+- **Not repaired.** A non-uniform scale deforms features: a cylinder resized across its axis becomes
+  elliptical (its wall a B-spline), holes and wall thicknesses scale. That is expected; nothing is
+  rebuilt or preserved.
+- **Lock Proportions** is `Node.lock_proportions`, an editing preference committed through the
+  invertible `SetLockProportions` command. Like appearance and group it is presentation (excluded
+  from the content key and `GeometryHash`) and follows the visible body onto new features.
+
+### 6b. Workspace: units, grid and snapping
+
+Canonical units never change: every length (geometry, parameters, tool arguments, grid spacing,
+snapping) is **millimetres**, and angles are degrees in tool arguments and settings, radians in
+`SnapService` calculations. Display units only convert at the boundary, so switching a project to
+inches never rescales or moves anything (`TestSwitchingUnitsDoesNotModifyGeometry`).
+
+| Responsibility | Where |
+|---|---|
+| UnitService: conversion table, formatting, precision, angle normalization | `internal/workspace/units.go` (the only factor table; the UI receives it in `state.workspace.linear_units`) |
+| Settings schema, defaults, validation, safe decoding | `internal/workspace/settings.go` (`Settings`, `Validate`, `Decode`) |
+| GridService: world ↔ grid coordinates | `Grid.WorldToGrid` / `GridToWorld` (offset + axis permutation; grid axes are world axes) |
+| SnapService: `SnapPosition`, `SnapTranslation`, `SnapAngle` | `internal/workspace/snap.go` — deterministic (12-significant-digit cleanup, halves away from zero) |
+| Global defaults (user preference) | `config.WorkspaceDefaults`, Settings › `workspace` |
+| Project settings | `App.Workspace`, saved in `workspace.json` |
+
+**Scope.** A new project copies the global defaults; afterwards they are independent: changing
+the defaults never alters an existing project, open or saved. A project saved before
+`workspace.json` existed opens with the factory defaults (what it was made with), never with the
+user's current globals. `restore_workspace_defaults` copies the current globals (or the factory
+values) on request.
+
+**One path.** The Settings screen and the agent both change the project's settings through the
+workspace tools (`set_units`, `configure_grid`, `configure_snapping`,
+`restore_workspace_defaults`; reads `get_workspace_settings`, `snap_calculate`, `convert_units`),
+which validate with `workspace.Settings.Validate` and store through `App.SetWorkspace`. They are
+query tools, not ChangeSets: workspace settings are not CAD state, are not undone with undo and
+never trigger a rebuild; each call is still in `agent-history.json` and each change publishes a
+`WorkspaceChanged` event.
+
+**Grid rendering** (`frontend/grid.js`, lines from `grid-model.js`): lines at `origin + k·spacing`
+in world space, major lines every `major_interval` cells, centre lines in the axis colours. The
+perspective view shows the configured plane through the grid origin; orthographic views show the
+plane they face. To avoid z-fighting the grid only moves along its normal (a hair away from the
+camera, or behind the whole model in orthographic views), never within its plane. Snapping is
+computed and tested but not yet connected to mouse transforms.
+
+### Sketches and image-derived geometry
+
+`sketch` is a CAD-IR node type for planar 2D geometry; it produces faces, not a solid
+(`Feature.Kind = KindSketch`, `Body.Sketch`), so it never counts as model geometry
+(`Model.Leaves`) and a boolean/pattern on a sketch fails as a normal feature failure. Parameters:
+`plane` (XY/XZ/YZ) + `offset`, or `references.face` (any planar face; origin at its centroid, u along
+its longest straight edge); `entities` (line, arc, circle, rectangle, polygon, slot, in mm);
+`regions` (outer loop + holes). Numbers inside entities may be `"@name"` / `"@name/2"` — the sketch's
+own numeric parameter — so dimensions stay editable (`modify_parameter`) after commit.
+`extrude` takes `sketch` (+ optional `region`) instead of an inline `profile`; a cut from a sketch on
+a face goes into the material.
+
+**Image-to-CAD (Phase 2, Vision capability).** An uploaded PNG/JPEG/WebP is attached to the user
+message. The model records a *proposal* with `analyze_image` (structured JSON in pixel space:
+entities, profiles, relationships, dimensions with confidence, operations). `internal/vision` is pure
+Go: it validates the proposal (closure, containment, operation order, ambiguity), resolves the scale
+**only** from a human-supplied dimension or an explicit scale (never from pixel size), and converts to
+sketch parameters. Corrections (`update_sketch_proposal`, `confirm_detected_dimension`,
+`set_sketch_scale`) change the proposal, never the model. `create_from_image` expands a ready
+proposal into ordinary features — `sketch → extrude (add/cut) → union/subtract/intersect` — as one
+ChangeSet that is **always left proposed** (`Plan.RequireApproval`) for preview and commit. Nodes
+carry `created_by: agent`, `capability: vision`, `source_image_id`, `interpretation_id`, tool call and
+ChangeSet ids. Geometry rebuilds from the CAD-IR alone; `geometry`/`cadir` never import `vision` or
+`agent` (tested). Source images are saved under `assets/images/` only when explicitly retained.
+
+### 6c. Transformations: moving and rotating objects
+
+One pipeline serves the viewport and the agent:
+
+```
+ G / R / Right-click → Transform ─▶ InteractiveTransformController ─┐   (frontend/transform.js)
+ agent / palette / CLI ──────────────────────────────────────────────┼─▶ move_object / rotate_object
+                                                                     │     (tools/transform.go: TransformService)
+                                                                     ▼
+                         transform.Rigid (internal/transform) ─▶ `transform` feature, or a
+                         component instance's placement ─▶ ChangeSet ─▶ rebuild (kernel)
+```
+
+- **TransformService** (`internal/tools/transform.go`): `ObjectTransform` (getObjectTransform:
+  origin, box center, orientation, whether the object can be moved and how), `TranslateObject`
+  and `RotateObject` (translateObject / rotateObject). They return an ordinary Plan, so a move is
+  one ChangeSet, one undo step, replayable and validated like any edit. A committed move/rotate
+  publishes one `ObjectTransformed` event. The older `transform` tool keeps working and writes the
+  same feature type.
+- **Rigid motions** (`internal/transform`): `p ↦ R·p + T`, composed as matrices, so no Euler angles
+  accumulate. `PlacementOf` writes a motion as the CAD-IR writes one (rotation by `angle_deg` about
+  an axis through a pivot, then `dx/dy/dz`), choosing the user's pivot so the parameters stay
+  readable; values are rounded to 1 nm / 1e-9° so snapped values are stored exactly. Internally
+  angles are radians; `angle_deg` is the only conversion.
+- **Where a motion is written.** A body gets a new `transform` feature targeting it: the features
+  it was built from are never edited and geometry is never rescaled. A **component instance** is
+  moved through its own placement (its local transform in the parent project): the motion is
+  composed with the placement (`Compose`, the instance's own scale stays first, so nonuniform
+  scaling composes correctly) and written back with `SetParameter`s — no feature is added and the
+  component's source project is untouched. Instances whose placement is driven by an expression,
+  objects in a locked visual region and anything that is not a visible body are refused up front.
+- **Coordinates.** Moves and rotations are in world coordinates (lengths mm, angles radians);
+  the tools take a `unit` / `angle_unit` and convert at the edge. A rotation is stored as its
+  equivalent angle in (−180°, 180°]. Local-frame moves, custom pivots in the UI, numeric input
+  during a drag, gizmos and multi-object transforms are later phases: the session model takes an
+  object list and a constraint object, so they extend it rather than replace it.
+- **Snapping.** `workspace.SnapMove` snaps the move of the object's origin: free axes in the grid
+  plane land on grid lines (grid origin + k·spacing), the other free axes move by the translation
+  increment, constrained axes keep their coordinate exactly; `SnapAngle` snaps the total angle.
+  Both are computed from the state at Begin, never from accumulated per-frame steps. The
+  viewport previews with `frontend/snap.js`, the same rules in JavaScript; both implementations
+  run the cases in `internal/workspace/testdata/snap_cases.json`, so the preview and the stored
+  result agree.
+- **Interactive lifecycle** (`frontend/transform-model.js`): IDLE → TRANSLATING | ROTATING → IDLE,
+  each operation with Begin (snapshot: the body's identity matrix, the start ray or angle), Update
+  (only the body's matrix changes: no rebuild, no serialization, no request, no history, no agent
+  event), Confirm (one tool call; a no-op confirm is a cancel) and Cancel (identity matrix: the
+  original exactly). Planes seen nearly edge-on drag on a camera-facing plane and keep only the
+  in-plane part of the motion; an axis pointing at the camera holds still; the rotation angle
+  unwraps across ±180°.
+
 ## 7. Commands and ChangeSets
 
 Commands are small, serializable and **exactly invertible**:
 `AddFeature`, `RemoveFeature`, `SetParameter`, `SetExpression`, `Reorder`, `Suppress`, `Rename`,
-and `RestoreSnapshot` (checkpoint restore). `Apply(graph)` mutates the graph and returns its
+the presentation commands (`SetColor`, `SetOpacity`, `SetVisibility`, `SetMaterial`, `RemoveMaterial`,
+`SetMaterialScale`, `ResetAppearance`, `SetGroup`, `SetLockProportions`) and `RestoreSnapshot` (checkpoint restore). `Apply(graph)` mutates the graph and returns its
 inverse; failed commands leave the graph untouched.
 
 A `ChangeSet` records commands, their inverses (the rollback info), affected features, expected
@@ -201,7 +387,7 @@ face/edge/vertex by kernel `index`.
 
 ## 10. Agent runtime
 
-One agent runtime with pluggable **capabilities** (only *geometry* exists). A capability supplies:
+One agent runtime with pluggable **capabilities** (*geometry* and *vision*). A capability supplies:
 a system prompt, a tool subset and a deterministic context builder. This avoids premature
 multi-agent orchestration; a capability can later be promoted to an independent agent without
 changing tools, ChangeSets or the CAD-IR.
@@ -212,8 +398,9 @@ refuse anything outside the capability's tool set, otherwise `app.ApplyTool` →
 `tool_result` (success data or an actionable error) → repeat until the model answers in text, or the
 step limit (12) is hit. Validation errors are fed back so the model can correct itself.
 
-**Providers** (`SIMONCAD_PROVIDER`): `claude` (Anthropic Messages API), `openai` and `ollama` (Chat
-Completions wire format; Ollama through its `/v1` endpoint). A `Recorder` captures live responses and a
+**Providers** (`SIMONCAD_PROVIDER`): `claude` (Anthropic Messages API), `openai` (Responses API) and
+`ollama` (Chat Completions wire format through its `/v1` endpoint). Image input (`Block{type:"image"}`)
+is supported by `claude` and `openai`; Ollama refuses with a clear error before the turn starts. A `Recorder` captures live responses and a
 `Replay` provider plays them back, which is how CI runs agent evals without a network.
 
 **Eval harness:** `testdata/agent/*.json` maps a prompt (plus optional setup and selection) to
@@ -223,8 +410,8 @@ object match, `len`, `set`, `oneof`, `contains`, `approx`, `any`).
 ## 11. Persistence
 
 A project is a `.scadproj` directory of canonical JSON — see [project-format.md](project-format.md).
-Saving writes atomically (temp file + rename). Loading validates the schema version (migration hook
-in place, no migrations yet) and the graph. Saving the same state twice yields identical bytes;
+Saving writes atomically (temp file + rename). Loading validates the schema version (every bump so far only added optional
+content, so v1–v3 projects load unchanged; v4 adds `workspace.json`) and the graph. Saving the same state twice yields identical bytes;
 `save → load → rebuild → save` is byte-identical.
 
 ## 12. Native layer and threading

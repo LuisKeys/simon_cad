@@ -8,85 +8,76 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
 // OpenAI serves OpenAI (Responses API, so reasoning models can use function tools) and
-// Ollama (Chat Completions under /v1), selected by BaseURL and Flavor.
+// Ollama (its native /api/chat, the only Ollama API that honors a context window per
+// request), selected by BaseURL and Flavor.
 type OpenAI struct {
 	Flavor  string // "openai" or "ollama"
 	APIKey  string // optional for ollama
 	BaseURL string
 	Model   string
 	HTTP    *http.Client
-	// ReasoningEffort (none|low|medium|high...) is sent on the OpenAI Responses API;
+	// ReasoningEffort (none|low|medium|high|xhigh|max) is sent on the OpenAI Responses API;
 	// empty leaves the model default.
 	ReasoningEffort string
+	// NumCtx is the context window asked of Ollama (num_ctx); 0 leaves the server's default.
+	// Ollama silently drops what does not fit, so it must hold the whole prompt.
+	NumCtx int
+
+	// effortSub remembers efforts a model rejected and what was used instead, so the
+	// substitution costs one extra round trip per model, not one per request.
+	effortMu  sync.Mutex
+	effortSub map[string]string
+}
+
+// substitute returns the effort to send in place of want (want itself when none is known).
+func (o *OpenAI) substitute(want string) string {
+	o.effortMu.Lock()
+	defer o.effortMu.Unlock()
+	if alt, ok := o.effortSub[want]; ok {
+		return alt
+	}
+	return want
+}
+
+// rememberEffort records that want is not accepted and alt is sent instead.
+func (o *OpenAI) rememberEffort(want, alt string) {
+	o.effortMu.Lock()
+	defer o.effortMu.Unlock()
+	if o.effortSub == nil {
+		o.effortSub = map[string]string{}
+	}
+	o.effortSub[want] = alt
 }
 
 func (o *OpenAI) Name() string { return o.Flavor + ":" + o.Model }
 
-type oaToolCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}
+// Identity names the provider and model (see Identify).
+func (o *OpenAI) Identity() (string, string) { return o.Flavor, o.Model }
 
-type oaMessage struct {
-	Role       string       `json:"role"`
-	Content    *string      `json:"content"`
-	ToolCalls  []oaToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string       `json:"tool_call_id,omitempty"`
-}
-
-func strp(s string) *string { return &s }
-
-// toOpenAIMessages converts provider-neutral messages: tool_result blocks become role=tool
-// messages and tool_use blocks become assistant tool_calls.
-func toOpenAIMessages(system string, msgs []Message) []oaMessage {
-	var out []oaMessage
-	if system != "" {
-		out = append(out, oaMessage{Role: "system", Content: strp(system)})
+// Capabilities comes from the registry: OpenAI accepts images and PDFs; an Ollama model
+// reports what the server says it can do (see ollamaCapabilities).
+func (o *OpenAI) Capabilities() ProviderCapabilities {
+	if o.Flavor == ProviderOllama {
+		return o.ollamaCapabilities()
 	}
-	for _, m := range msgs {
-		var texts []string
-		var calls []oaToolCall
-		var results []oaMessage
-		for _, b := range m.Content {
-			switch b.Type {
-			case "text":
-				texts = append(texts, b.Text)
-			case "tool_use":
-				var c oaToolCall
-				c.ID, c.Type = b.ID, "function"
-				c.Function.Name = b.Name
-				c.Function.Arguments = string(b.Input)
-				if c.Function.Arguments == "" {
-					c.Function.Arguments = "{}"
-				}
-				calls = append(calls, c)
-			case "tool_result":
-				results = append(results, oaMessage{Role: "tool", ToolCallID: b.ToolUseID, Content: strp(b.Content)})
-			}
-		}
-		out = append(out, results...)
-		if len(texts) > 0 || len(calls) > 0 {
-			msg := oaMessage{Role: m.Role, ToolCalls: calls}
-			if len(texts) > 0 {
-				msg.Content = strp(strings.Join(texts, "\n"))
-			} else if m.Role == "user" {
-				msg.Content = strp("")
-			}
-			out = append(out, msg)
-		}
-	}
-	return out
+	return ModelCapabilities(o.Flavor, o.Model)
 }
+
+// SupportsImages reports the vision capability (kept for ImageCapable callers).
+func (o *OpenAI) SupportsImages() bool { return o.Capabilities().Vision }
 
 func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
+	if HasImages(req.Messages) && !o.SupportsImages() {
+		return nil, fmt.Errorf("provider %s does not support image input", o.Flavor)
+	}
+	if HasDocuments(req.Messages) && !o.Capabilities().Attachments {
+		return nil, fmt.Errorf("provider %s does not support document input", o.Flavor)
+	}
 	model := req.Model
 	if model == "" {
 		model = o.Model
@@ -95,59 +86,10 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	if max == 0 {
 		max = 4096
 	}
-	if o.Flavor == "openai" {
-		return o.completeResponses(ctx, model, max, req)
+	if o.Flavor == ProviderOllama {
+		return o.completeOllama(ctx, model, max, req)
 	}
-	body := map[string]any{"model": model, "messages": toOpenAIMessages(req.System, req.Messages), "max_tokens": max}
-	if len(req.Tools) > 0 {
-		var tools []map[string]any
-		for _, t := range req.Tools {
-			tools = append(tools, map[string]any{"type": "function", "function": map[string]any{
-				"name": t.Name, "description": t.Description, "parameters": t.InputSchema}})
-		}
-		body["tools"] = tools
-	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	data, err := o.post(ctx, "/v1/chat/completions", payload)
-	if err != nil {
-		return nil, err
-	}
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content   *string      `json:"content"`
-				ToolCalls []oaToolCall `json:"tool_calls"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-		Usage struct {
-			Prompt     int `json:"prompt_tokens"`
-			Completion int `json:"completion_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(data, &out); err != nil || len(out.Choices) == 0 {
-		return nil, fmt.Errorf("decode %s response: %v", o.Flavor, err)
-	}
-	ch := out.Choices[0]
-	r := &Response{StopReason: ch.FinishReason, Usage: Usage{InputTokens: out.Usage.Prompt, OutputTokens: out.Usage.Completion}}
-	if ch.Message.Content != nil && *ch.Message.Content != "" {
-		r.Content = append(r.Content, Block{Type: "text", Text: *ch.Message.Content})
-	}
-	for i, c := range ch.Message.ToolCalls {
-		id := c.ID
-		if id == "" {
-			id = fmt.Sprintf("call_%d", i+1)
-		}
-		args := strings.TrimSpace(c.Function.Arguments)
-		if args == "" {
-			args = "{}"
-		}
-		r.Content = append(r.Content, Block{Type: "tool_use", ID: id, Name: c.Function.Name, Input: json.RawMessage(args)})
-	}
-	return r, nil
+	return o.completeResponses(ctx, model, max, req)
 }
 
 // post sends payload with retry on 429/5xx and returns the 200 body.
@@ -186,15 +128,18 @@ func (o *OpenAI) post(ctx context.Context, path string, payload []byte) ([]byte,
 					Message string `json:"message"`
 				} `json:"error"`
 			}
-			_ = json.Unmarshal(data, &e)
-			if e.Error.Message == "" {
-				e.Error.Message = truncate(string(data), 300)
+			var plain struct {
+				Error string `json:"error"` // Ollama's native API
+			}
+			if json.Unmarshal(data, &e) != nil || e.Error.Message == "" {
+				_ = json.Unmarshal(data, &plain)
+				e.Error.Message = firstNonEmpty(plain.Error, truncate(string(data), 300))
 			}
 			return nil, fmt.Errorf("%s API %d: %s", o.Flavor, resp.StatusCode, e.Error.Message)
 		}
 		return data, nil
 	}
-	return nil, fmt.Errorf("%s API unavailable after retries: %w", o.Flavor, lastErr)
+	return nil, unavailable(fmt.Errorf("%s API unavailable after retries: %w", o.Flavor, lastErr))
 }
 
 // completeResponses speaks the OpenAI Responses API statelessly. Reasoning items come back
@@ -205,10 +150,21 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 	for _, m := range req.Messages {
 		var texts []string
 		var items []any
+		var parts []any // input_text / input_image parts, used when the message has images
 		for _, b := range m.Content {
 			switch b.Type {
 			case "text":
 				texts = append(texts, b.Text)
+				parts = append(parts, map[string]any{"type": "input_text", "text": b.Text})
+			case "image":
+				if b.Source != nil {
+					parts = append(parts, map[string]any{"type": "input_image", "image_url": "data:" + b.Source.MediaType + ";base64," + b.Source.Data})
+				}
+			case "document":
+				if b.Source != nil {
+					parts = append(parts, map[string]any{"type": "input_file", "filename": firstNonEmpty(b.Title, "document.pdf"),
+						"file_data": "data:" + b.Source.MediaType + ";base64," + b.Source.Data})
+				}
 			case "reasoning":
 				items = append(items, json.RawMessage(b.Input))
 			case "tool_use":
@@ -222,7 +178,9 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 			}
 		}
 		input = append(input, items...)
-		if len(texts) > 0 {
+		if len(parts) > len(texts) { // at least one image or file: send content parts
+			input = append(input, map[string]any{"role": m.Role, "content": parts})
+		} else if len(texts) > 0 {
 			input = append(input, map[string]any{"role": m.Role, "content": strings.Join(texts, "\n")})
 		}
 	}
@@ -231,8 +189,15 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 	if req.System != "" {
 		body["instructions"] = req.System
 	}
-	if o.ReasoningEffort != "" {
-		body["reasoning"] = map[string]any{"effort": o.ReasoningEffort}
+	// "none" asks for an instant answer; models that have no such level are sent the weakest
+	// one they do accept (see the retry below) rather than failing the turn.
+	want := o.ReasoningEffort
+	if req.NoThinking {
+		want = "none"
+	}
+	effort := o.substitute(want)
+	if effort != "" {
+		body["reasoning"] = map[string]any{"effort": effort}
 	}
 	if len(req.Tools) > 0 {
 		var tools []map[string]any
@@ -246,6 +211,19 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 		return nil, err
 	}
 	data, err := o.post(ctx, "/v1/responses", payload)
+	if err != nil && effort != "" {
+		// The model refused this reasoning level and named the ones it takes: adopt the
+		// closest and retry, so the choice of model does not break "Thinking mode off".
+		alt, ok := altEffort(err.Error(), effort)
+		if ok {
+			o.rememberEffort(want, alt)
+			body["reasoning"] = map[string]any{"effort": alt}
+			if payload, err = json.Marshal(body); err != nil {
+				return nil, err
+			}
+			data, err = o.post(ctx, "/v1/responses", payload)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -256,14 +234,19 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 		} `json:"incomplete_details"`
 		Output []json.RawMessage `json:"output"`
 		Usage  struct {
-			In  int `json:"input_tokens"`
-			Out int `json:"output_tokens"`
+			In       int `json:"input_tokens"`
+			Out      int `json:"output_tokens"`
+			InDetail struct {
+				// Part of input_tokens: the prefix OpenAI served from its prompt cache.
+				Cached int `json:"cached_tokens"`
+			} `json:"input_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, fmt.Errorf("decode openai response: %v", err)
 	}
-	r := &Response{StopReason: out.Status, Usage: Usage{InputTokens: out.Usage.In, OutputTokens: out.Usage.Out}}
+	r := &Response{StopReason: out.Status,
+		Usage: usageFor(o.Flavor, model, out.Usage.In, out.Usage.InDetail.Cached, out.Usage.Out)}
 	if out.IncompleteDetails.Reason != "" {
 		r.StopReason = out.IncompleteDetails.Reason
 	}
@@ -303,4 +286,13 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 		}
 	}
 	return r, nil
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }

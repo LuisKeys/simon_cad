@@ -1,0 +1,93 @@
+{
+  "name": "19_widen_selected_part",
+  "notes": "Scripted recording (hand-written to mirror a well-behaved model). Interactive dimensions: one dimension of the selected object changes, the agent verifies the result.",
+  "prompt": "Incrementá el ancho de esta pieza a 150 mm sin modificar su altura ni profundidad.",
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "set_object_dimension",
+            "input": {
+              "axis": "width",
+              "value": 150
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_2",
+            "name": "get_object_dimensions",
+            "input": {
+              "object_id": "resize"
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "Listo: la pieza ahora mide 150 × 80 × 40 mm (ancho × profundidad × altura); solo cambió el ancho."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "set_object_dimension",
+        "args": {
+          "axis": {"oneof": ["width", "x"]},
+          "value": 150
+        }
+      },
+      {
+        "name": "get_object_dimensions",
+        "args": {}
+      }
+    ],
+    "model": {
+      "features": 3,
+      "bodies": 2,
+      "failed": 0,
+      "volume_mm3": 481000
+    }
+  },
+  "setup": [
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "plate",
+        "name": "Mounting plate",
+        "dx": 120,
+        "dy": 80,
+        "dz": 40
+      }
+    },
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "spacer",
+        "name": "Spacer",
+        "dx": 10,
+        "dy": 10,
+        "dz": 10,
+        "x": 200
+      }
+    }
+  ],
+  "selection": [
+    "face(feature=plate,side=+Z)"
+  ]
+}

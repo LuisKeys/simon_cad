@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -64,9 +65,28 @@ func (c *ChangeSet) Valid() bool {
 	return true
 }
 
+// AppearanceOnly reports whether every command only edits presentation metadata. Such
+// ChangeSets stay undoable but are not engineering intent, so they never form checkpoints
+// or agent drafts.
+func (c *ChangeSet) AppearanceOnly() bool {
+	for _, r := range c.Commands {
+		if !IsAppearance(r.Type) {
+			return false
+		}
+	}
+	return len(c.Commands) > 0
+}
+
 // AutoCommitEligible is the low-risk policy: a single non-destructive command, clean validation.
 func (c *ChangeSet) AutoCommitEligible() bool {
-	if len(c.Commands) != 1 || !c.Valid() || len(c.Warnings) > 0 {
+	if !c.Valid() || len(c.Warnings) > 0 {
+		return false
+	}
+	// Presentation-only edits are always safe, including multi-object ones.
+	if c.AppearanceOnly() {
+		return true
+	}
+	if len(c.Commands) != 1 {
 		return false
 	}
 	switch c.Commands[0].Type {
@@ -225,6 +245,12 @@ func rebuildChecks(before, after Evaluation) []Validation {
 	return append(out, geo)
 }
 
+func sameAppearance(a, b *cadir.Appearance) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
+}
+
 func summarize(before, after *cadir.Graph, cmds []Command) (Effects, []string) {
 	var e Effects
 	aff := map[string]bool{}
@@ -241,7 +267,7 @@ func summarize(before, after *cadir.Graph, cmds []Command) (Effects, []string) {
 		}
 	}
 	for _, n := range after.Nodes {
-		if b := before.Get(n.ID); b != nil && b.ContentKey() != n.ContentKey() {
+		if b := before.Get(n.ID); b != nil && (b.ContentKey() != n.ContentKey() || !sameAppearance(b.Appearance, n.Appearance)) {
 			e.Modified = append(e.Modified, n.ID)
 			aff[n.ID] = true
 		}

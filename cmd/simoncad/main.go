@@ -20,6 +20,7 @@ import (
 	"github.com/accelone/simoncad/frontend"
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/app"
+	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/dotenv"
 	"github.com/accelone/simoncad/internal/ui"
 )
@@ -31,6 +32,9 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "print the URL instead of opening a browser")
 	flag.Parse()
 	dotenv.Load(".env")
+	if err := config.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning:", err)
+	}
 
 	host, _, err := net.SplitHostPort(*addr)
 	if err != nil || (host != "127.0.0.1" && host != "localhost" && host != "::1") {

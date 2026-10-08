@@ -19,6 +19,7 @@ import (
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/features"
 	"github.com/accelone/simoncad/internal/selectors"
+	"github.com/accelone/simoncad/internal/xform"
 )
 
 // builderVersion invalidates caches if builder semantics change.
@@ -45,7 +46,9 @@ type NodeResult struct {
 type Model struct {
 	Order  []string
 	Nodes  map[string]*NodeResult
-	Leaves []string // body-producing nodes nothing else consumes, in order
+	Leaves []string // solid-producing nodes nothing else consumes, in order
+	// Sketches are sketch nodes nothing consumes (drawn as outlines, never as geometry).
+	Sketches []string
 }
 
 // Stats counts cache behaviour; used to verify incremental rebuilds.
@@ -56,23 +59,32 @@ type entry struct {
 	gen  int
 }
 
+// Engine evaluates a graph. It is NOT reentrant: Rebuild holds mu for the whole pass, builders
+// included, so a builder must never call back into the engine it is running on. A
+// component_instance resolves through Components, which uses a separate engine per component.
 type Engine struct {
-	K     *api.Kernel
-	mu    sync.Mutex
-	cache map[string]*entry
-	gen   int
-	Stats Stats
+	K *api.Kernel
+	// Components resolves component_instance nodes. Nil means component instances fail with a
+	// clear error instead of being silently skipped.
+	Components features.ComponentResolver
+	mu         sync.Mutex
+	cache      map[string]*entry
+	gen        int
+	Stats      Stats
 }
 
 func New(k *api.Kernel) *Engine { return &Engine{K: k, cache: map[string]*entry{}} }
 
-// Close releases every cached shape.
+// Close releases every cached shape, and the component resolver's nested engines with it.
 func (e *Engine) Close() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	for k, en := range e.cache {
 		en.body.Shape.Release()
 		delete(e.cache, k)
+	}
+	e.mu.Unlock()
+	if c, ok := e.Components.(interface{ Close() }); ok {
+		c.Close()
 	}
 }
 
@@ -151,7 +163,7 @@ func (e *Engine) Rebuild(g *cadir.Graph) (*Model, error) {
 
 	consumed := map[string]bool{}
 	for _, n := range g.Nodes {
-		if n.Suppressed {
+		if n.Suppressed || !features.Consumes(n.Type) {
 			continue
 		}
 		for _, d := range cadir.EffectiveDeps(n) {
@@ -161,7 +173,11 @@ func (e *Engine) Rebuild(g *cadir.Graph) (*Model, error) {
 	for _, id := range m.Order {
 		r := m.Nodes[id]
 		if r.Status == cadir.StatusOK && r.Body != nil && !consumed[id] {
-			m.Leaves = append(m.Leaves, id)
+			if r.Body.Sketch {
+				m.Sketches = append(m.Sketches, id)
+			} else {
+				m.Leaves = append(m.Leaves, id)
+			}
 		}
 	}
 
@@ -211,6 +227,11 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 	}
 	res.Params = params
 	resolved[n.ID] = params
+	if feat.Kind == features.KindParams { // design parameters: values only, no geometry
+		pj, _ := json.Marshal(params)
+		res.Status, res.Key = cadir.StatusOK, hashKey("parameters", string(pj))
+		return
+	}
 
 	depKeys := make([]string, len(deps))
 	for i, d := range deps {
@@ -250,7 +271,7 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 	e.Stats.Misses++
 
 	ctx := &features.Ctx{
-		K: e.K, Node: n, P: params, Bodies: bodies,
+		K: e.K, Node: n, P: params, Bodies: bodies, Components: e.Components,
 		ParamsOf: func(id string) (features.Params, bool) { p, ok := resolved[id]; return p, ok },
 		NodeOf:   func(id string) *cadir.Node { return nodeByID[id] },
 	}
@@ -271,12 +292,18 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 		fail("%v", err)
 		return
 	}
-	if props.Solids == 0 {
+	isSketch := feat.Kind == features.KindSketch
+	if isSketch && props.Faces == 0 {
+		shape.Release()
+		fail("%s produced no faces (empty result)", n.Type)
+		return
+	}
+	if !isSketch && props.Solids == 0 {
 		shape.Release()
 		fail("%s produced no solid (empty result)", n.Type)
 		return
 	}
-	body := &Body{Shape: shape, Props: props}
+	body := &Body{Shape: shape, Props: props, Sketch: isSketch}
 	e.cache[res.Key] = &entry{body: body, gen: e.gen}
 	res.Status, res.Body = cadir.StatusOK, body
 }
@@ -318,6 +345,16 @@ func (m *Model) Bounds(id string) (selectors.Bounds, bool) {
 		return selectors.Bounds{}, false
 	}
 	return r.Body.Bounds(), true
+}
+
+// BoundsInFrame returns a node's bounding box measured along the axes of r (world = r·local).
+func (m *Model) BoundsInFrame(id string, r xform.Rot) (selectors.Bounds, bool) {
+	n := m.Nodes[id]
+	if n == nil || n.Body == nil {
+		return selectors.Bounds{}, false
+	}
+	b, err := n.Body.BoundsInFrame(r)
+	return b, err == nil
 }
 
 // Topology returns a feature's face/edge/vertex descriptors for selector resolution.

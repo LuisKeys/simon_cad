@@ -92,10 +92,65 @@ values are ignored. `.env` is git-ignored; `.env.example` documents everything.
 
 | Variable | Meaning |
 |---|---|
-| `SIMONCAD_PROVIDER` | `claude` (default), `openai` or `ollama` |
+| `SIMONCAD_PROVIDER` | Primary model provider: `claude` (default), `openai` or `ollama` |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL` | Claude provider (model defaults to `claude-sonnet-5-5`) |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | OpenAI provider |
 | `OLLAMA_MODEL`, `OLLAMA_BASE_URL` | Local Ollama (no key; default URL `http://localhost:11434`) |
+| `OLLAMA_NUM_CTX` | Context window asked of Ollama (default `32768`; `0` = the server's setting). Ollama silently drops what does not fit; a truncated prompt is reported as an error |
+| `OLLAMA_VISION` | `true`/`false` overrides whether the Ollama model accepts images (default: what the Ollama server reports, else detected from the model name) |
+| `SIMONCAD_AUTONOMOUS` | `off` disables the plan → execute → validate → correct workflow in the UI (default on) |
+| `SIMONCAD_FALLBACK_ENABLED`, `SIMONCAD_FALLBACK_PROVIDER` | Fallback model (`openai` or `claude`); unset, migrated from the provider configuration above |
+| `SIMONCAD_FALLBACK_<PROVIDER VARIABLE>` | The fallback's own configuration, e.g. `SIMONCAD_FALLBACK_OPENAI_MODEL`; unset values inherit the provider's |
+| `SIMONCAD_FALLBACK_CONSENT` | `ask` (default), `allow` or `deny`: may a local primary's request be sent to the cloud fallback |
+| `ANTHROPIC_INPUT_PRICE`, `ANTHROPIC_CACHED_INPUT_PRICE`, `ANTHROPIC_OUTPUT_PRICE` | Optional cost per million tokens; same pattern for `OPENAI_*` (local Ollama models are never priced) |
+| `SIMONCAD_CURRENCY` | Default label for the price amounts (default `USD`; `OPENAI_CURRENCY`/`ANTHROPIC_CURRENCY` per model); it performs no conversion |
+
+**Primary and fallback models.** The primary model serves every request it can. The fallback
+model, a cloud model (OpenAI or Anthropic), serves what the primary cannot: attachments it cannot
+read (an image for a text-only Ollama model, a PDF), requests whose primary model became
+unavailable after its own retries — at most one hand-over per request, never back — and, with a
+local primary, every request that carries an attached image or document, or whose prompt asks for
+it ("use the frontier/fallback model", "usa el modelo de frontera"; also with a cloud primary).
+Without a usable fallback those requests stay on the primary. With the
+fallback disabled, such requests are refused with a reason; nothing is rerouted silently. With a
+local primary, SimonCAD asks before the first request it would send to the cloud (the answer can
+be remembered; Settings › Fallback Model › Remote data changes it). Every fallback is named in the
+conversation and logged with the model requested, the model used, the reason, the tokens and the
+estimated cost; the Simon Agent header shows the model serving the request.
+
+**Token consumption and cost.** Every model call is metered: input and output tokens are counted
+per model, per turn and per session, and reported in the agent panel (session meter above the
+composer, a note under each answer) and by the CLI (`usage:` line, `usage`/`cost` in `--json`).
+Prices are optional and live next to each cloud model in Settings, separately for the primary
+and the fallback model (or in the `*_PRICE` variables above), as cost per million tokens. Each
+model is costed with the prices of the model that actually ran; local models are reported in
+tokens and never counted as spend. With prices loaded, each turn and the session also carry an
+estimated cost; with the slots empty, consumption is reported in tokens only — no cost is ever
+guessed. A turn that spans several models (vision routing, the planner) is costed per model, and
+a mix of priced and unpriced models is reported as a partial estimate.
+
+Input served from the provider's prompt cache is counted and costed separately: the repeated part
+of a turn (system prompt and tool definitions) is what gets cached, so on a long session most of
+the input is billed at the cheaper cached rate. Fill *Cached input price* to see that reflected;
+left empty, cached input is charged at the full input price rather than at a guessed discount.
+
+**What a turn costs.** Tool definitions dominate the input: they are resent on every step of the
+tool loop, and the full catalog is ~18k tokens against ~2.8k for the system prompt. The agent
+therefore loads only the capabilities a turn can use — a project with no image gets the geometry
+catalog alone (~14.5k tokens per call instead of ~21k), and the image and reference-driven tools
+appear as soon as an image is attached, uploaded or design parameters exist.
+
+**Visual refinement** (toolbar → Visual): attach reference images (side, front, top views work
+best), describe the object and run it. The model is built coarse to fine (blockout → primary →
+secondary → materials) from design parameters, rendered from fixed cameras after every change,
+scored against the references (silhouette IoU/contour/box, proportions, landmarks, a vision
+critic), corrected at most 3 changes at a time, and reverted automatically when a change makes it
+look worse. Regions that are already right can be locked.
+
+Providers are chosen by capability, not by name: the selected provider handles everything it can;
+an attachment it cannot handle (an image or PDF with a text-only Ollama model) is processed by
+OpenAI if configured, otherwise Claude, and Ollama keeps acting as the CAD agent. Image features
+(Attach image, Create from Image) are hidden when no configured provider has vision.
 
 ## CLI reference
 
@@ -119,7 +174,8 @@ Every command accepts `--json` for machine-readable output (`{"ok": …}`; error
 | `bracket [--out DIR]` | Phase 0 servo bracket proof |
 
 Agent commands (`create`, `modify`) and `tool` accept `--preview` (propose only) and `--commit`
-(commit even multi-command ChangeSets), plus `--label` for the checkpoint name. Without either flag
+(commit even multi-command ChangeSets), plus `--label` for the checkpoint name. `create` and
+`modify` also accept `--autonomous` (plan, execute step by step, validate and auto-correct). Without either flag
 the commit policy is *auto*: a single non-destructive command commits immediately; anything larger
 stays **proposed** until you `commit` it.
 
@@ -145,8 +201,12 @@ internal/
   history/             semantic checkpoints, compare
   tools/               tool registry, JSON-schema validation, all tools
   persistence/         .scadproj read/write
-  agent/runtime/       providers, tool-call loop, recordings, eval harness
-  agent/capabilities/  pluggable capabilities (geometry so far)
+  agent/runtime/       providers, capability registry, model router, tool-call loop, recordings, evals
+  agent/attachments/   attachment classification and capability-based routing (vision, PDF)
+  agent/workflow/      planner, executor, validator, correction loop, agent state machine
+  agent/refine/        visual closed-loop refinement: planner, CAD builder, vision critic, controller
+  visual/              offscreen renderer, silhouettes, proportions, stage scoring, regions/locks
+  agent/capabilities/  pluggable capabilities (geometry, vision)
   rendering/           tessellation → viewport meshes, pick IDs ↔ selectors
   ui/                  UI service, local HTTP/SSE server, event hub
   export/              STL watertightness checker

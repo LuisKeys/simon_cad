@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -11,6 +12,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/accelone/simoncad/internal/agent/runtime"
+	"github.com/accelone/simoncad/internal/config"
+	"github.com/accelone/simoncad/internal/vision"
 )
 
 // Server exposes a Service over HTTP on the loopback interface. It is the development and
@@ -67,6 +72,14 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func fail(w http.ResponseWriter, err error) {
+	// A request that needs the remote fallback the user has not authorized yet: the front
+	// end asks (Allow / Cancel) and sends it again.
+	var ce *runtime.ConsentError
+	if errors.As(err, &ce) && !ce.Declined {
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": err.Error(), "code": "fallback_consent",
+			"selected": ce.Selected, "fallback": ce.Fallback})
+		return
+	}
 	code := http.StatusBadRequest
 	if err == ErrBusy {
 		code = http.StatusConflict
@@ -133,17 +146,186 @@ func (s *Server) routes() {
 	})
 	m.HandleFunc("/api/prompt", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Text string `json:"text"`
+			Text     string   `json:"text"`
+			Thinking *bool    `json:"thinking"` // omitted = on
+			Images   []string `json:"images"`   // ids returned by /api/image
 		}
 		if err := decode(r, &in); err != nil {
 			fail(w, err)
 			return
 		}
-		if err := s.Svc.Prompt(in.Text); err != nil {
+		if err := s.Svc.PromptWith(in.Text, in.Thinking == nil || *in.Thinking, in.Images); err != nil {
 			fail(w, err)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+	})
+	m.HandleFunc("/api/image", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST the raw image bytes", http.StatusMethodNotAllowed)
+			return
+		}
+		// Raw body (not JSON): the 4 MB JSON limit does not apply, images have their own.
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, vision.MaxImageBytes+1))
+		if err != nil {
+			fail(w, fmt.Errorf("image is larger than %d MB or unreadable", vision.MaxImageBytes>>20))
+			return
+		}
+		info, err := s.Svc.UploadImage(b)
+		reply(w, info, err)
+	})
+	m.HandleFunc("/api/spec", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST the raw document (text or PDF) with ?name=", http.StatusMethodNotAllowed)
+			return
+		}
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDocumentBytes+1))
+		if err != nil {
+			fail(w, fmt.Errorf("document is larger than %d MB or unreadable", maxDocumentBytes>>20))
+			return
+		}
+		sp, err := s.Svc.AddAttachment(r.URL.Query().Get("name"), b)
+		reply(w, sp, err)
+	})
+	m.HandleFunc("/api/spec/remove", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.RemoveSpec(in.Name))
+	})
+	m.HandleFunc("/api/image/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/image/"), "/")
+		if len(parts) == 2 && parts[1] == "retain" && r.Method == http.MethodPost {
+			var in struct {
+				Keep bool `json:"keep"`
+			}
+			if err := decode(r, &in); err != nil {
+				fail(w, err)
+				return
+			}
+			reply(w, map[string]any{"ok": true}, s.Svc.RetainImage(parts[0], in.Keep))
+			return
+		}
+		if len(parts) != 1 {
+			http.NotFound(w, r)
+			return
+		}
+		data, mt, ok := s.Svc.ImageData(parts[0])
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", mt)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		_, _ = w.Write(data)
+	})
+	// ---- visual refinement ----
+	pngOut := func(w http.ResponseWriter, data []byte) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		_, _ = w.Write(data)
+	}
+	m.HandleFunc("/api/visual", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, s.Svc.Visual()) })
+	m.HandleFunc("/api/render/", func(w http.ResponseWriter, r *http.Request) {
+		data, ok := s.Svc.RenderPNG(strings.TrimPrefix(r.URL.Path, "/api/render/"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		pngOut(w, data)
+	})
+	m.HandleFunc("/api/visual/diff", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		n, _ := strconv.Atoi(q.Get("iteration"))
+		data, err := s.Svc.VisualDiff(n, q.Get("ref"), q.Get("previous") == "1")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		pngOut(w, data)
+	})
+	m.HandleFunc("/api/visual/run", func(w http.ResponseWriter, r *http.Request) {
+		var in RefineRequest
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		if err := s.Svc.RunRefinement(in); err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+	})
+	m.HandleFunc("/api/visual/stop", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"ok": true}, s.Svc.StopRefinement())
+	})
+	iterationAction := func(f func(int) error) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			var in struct {
+				Iteration int `json:"iteration"`
+			}
+			if err := decode(r, &in); err != nil {
+				fail(w, err)
+				return
+			}
+			reply(w, map[string]any{"ok": true}, f(in.Iteration))
+		}
+	}
+	m.HandleFunc("/api/visual/accept", iterationAction(s.Svc.AcceptIteration))
+	m.HandleFunc("/api/visual/revert", iterationAction(s.Svc.RevertIteration))
+	m.HandleFunc("/api/visual/lock", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Region string `json:"region"`
+			Locked bool   `json:"locked"`
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.SetRegionLock(in.Region, in.Locked))
+	})
+	m.HandleFunc("/api/draft/keep", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"ok": true}, s.Svc.KeepDraft())
+	})
+	m.HandleFunc("/api/draft/discard", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"ok": true}, s.Svc.DiscardDraft())
+	})
+	m.HandleFunc("/api/chat/clear", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"ok": true}, s.Svc.ClearChat())
+	})
+	m.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusOK, config.Current())
+			return
+		}
+		var in config.Settings
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		if err := config.Save(in); err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, config.Current())
+	})
+	m.HandleFunc("/api/fallback/consent", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Allow    bool `json:"allow"`
+			Remember bool `json:"remember"`
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.AuthorizeFallback(in.Allow, in.Remember))
 	})
 	m.HandleFunc("/api/level", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -165,6 +347,15 @@ func (s *Server) routes() {
 			return
 		}
 		o, err := s.Svc.CallTool(in.Name, in.Args)
+		reply(w, o, err)
+	})
+	m.HandleFunc("/api/delete", func(w http.ResponseWriter, r *http.Request) {
+		var in DeleteRequest
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		o, err := s.Svc.Delete(in)
 		reply(w, o, err)
 	})
 	m.HandleFunc("/api/param", func(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +413,25 @@ func (s *Server) routes() {
 		c, err := s.Svc.Compare(r.URL.Query().Get("a"), r.URL.Query().Get("b"))
 		reply(w, c, err)
 	})
+	m.HandleFunc("/api/materials", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, s.Svc.Materials())
+	})
+	m.HandleFunc("/api/materials/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/materials/"), "/")
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
+		data, ct, ok := s.Svc.MaterialFile(parts[0], parts[1])
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-cache") // project materials can change under the same id
+		_, _ = w.Write(data)
+	})
 	m.HandleFunc("/api/palette", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.Svc.Palette())
 	})
@@ -244,6 +454,9 @@ func (s *Server) routes() {
 			return
 		}
 		reply(w, map[string]any{"ok": true}, s.Svc.New(in.Name))
+	})
+	m.HandleFunc("/api/project/list", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, s.Svc.ListProjects())
 	})
 	m.HandleFunc("/api/project/open", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Path string }
@@ -270,6 +483,58 @@ func (s *Server) routes() {
 		}
 		o, err := s.Svc.Export(in.Format, in.Path)
 		reply(w, o, err)
+	})
+	m.HandleFunc("/api/components", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Query string }
+		if r.Method == http.MethodPost {
+			if err := decode(r, &in); err != nil {
+				fail(w, err)
+				return
+			}
+		} else {
+			in.Query = r.URL.Query().Get("q")
+		}
+		writeJSON(w, http.StatusOK, s.Svc.Components(in.Query))
+	})
+	m.HandleFunc("/api/components/open", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Component string }
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		p, err := s.Svc.OpenComponent(in.Component)
+		reply(w, map[string]any{"ok": true, "path": p}, err)
+	})
+	m.HandleFunc("/api/components/rename", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Component, Name, Description string
+			Tags                         []string
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.RenameComponent(in.Component, in.Name, in.Description, in.Tags))
+	})
+	m.HandleFunc("/api/components/delete", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Component string }
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.DeleteComponent(in.Component))
+	})
+	m.HandleFunc("/api/components/publish", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Reusable    bool
+			Description string
+			Tags        []string
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.PublishProject(in.Reusable, in.Description, in.Tags))
 	})
 	m.HandleFunc("/api/events", s.events)
 

@@ -1,0 +1,19 @@
+{
+  "id": "titanium",
+  "name": "Titanium",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "titanium",
+    "gray"
+  ],
+  "baseColor": "#8E8F93",
+  "metalness": 1.0,
+  "roughness": 0.4,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

@@ -61,6 +61,41 @@ int main() {
     CHECK(occ_live_handle_count() == 0);
   }
 
+  // Sketch: rectangle with a circular hole, prism volume, placement, face frame.
+  {
+    occ_seg2d segs[5] = {};
+    segs[0].kind = 0; segs[0].a[0] = 0;  segs[0].a[1] = 0;  segs[0].a[2] = 10; segs[0].a[3] = 0;
+    segs[1].kind = 0; segs[1].a[0] = 10; segs[1].a[1] = 0;  segs[1].a[2] = 10; segs[1].a[3] = 10;
+    segs[2].kind = 0; segs[2].a[0] = 10; segs[2].a[1] = 10; segs[2].a[2] = 0;  segs[2].a[3] = 10;
+    segs[3].kind = 0; segs[3].a[0] = 0;  segs[3].a[1] = 10; segs[3].a[2] = 0;  segs[3].a[3] = 0;
+    segs[4].kind = 2; segs[4].a[0] = 5;  segs[4].a[1] = 5;  segs[4].a[2] = 2;
+    const int32_t loops[2] = {4, 1};
+    occ_handle face = 0, solid = 0, placed = 0;
+    occ_props q;
+    CHECK(occ_make_face(segs, loops, 2, &face) == OCC_OK);
+    CHECK(occ_mass_props(face, &q) == OCC_OK);
+    CHECK(std::fabs(q.area - (100 - M_PI * 4)) < 1e-6);
+    CHECK(occ_prism(face, 0, 0, 3, &solid) == OCC_OK);
+    CHECK(occ_mass_props(solid, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 3 * (100 - M_PI * 4)) < 1e-5);
+    const double o[3] = {0, 0, 0}, z[3] = {0, 1, 0}, x[3] = {1, 0, 0};
+    CHECK(occ_place(solid, o, z, x, &placed) == OCC_OK);
+    CHECK(occ_mass_props(placed, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 3 * (100 - M_PI * 4)) < 1e-5);
+    double fr[9];
+    occ_handle box3 = 0;
+    CHECK(occ_box(30, 10, 5, &box3) == OCC_OK);
+    int planar = 0;
+    for (int i = 0; i < 6; i++) {
+      if (occ_face_frame(box3, i, fr) == OCC_OK) planar++;
+    }
+    CHECK(planar == 6);
+    CHECK(occ_face_frame(box3, 6, fr) == OCC_ERR_INVALID_ARG);
+    CHECK(occ_make_face(segs, loops, 0, &face) == OCC_ERR_INVALID_ARG);
+    occ_release(face); occ_release(solid); occ_release(placed); occ_release(box3);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
   // Tessellation: a box has 6 planar faces, 12 edges, 8 vertices; winding agrees with normals.
   {
     occ_handle box2 = 0;
@@ -110,6 +145,52 @@ int main() {
     CHECK(occ_fillet_edges(bx, oob, 1, 1.0, &bad) == OCC_ERR_INVALID_ARG);
     CHECK(occ_chamfer_edges(bx, nullptr, 0, 1.0, &bad) == OCC_ERR_INVALID_ARG);
     occ_release(bx); occ_release(f1);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
+  // Scale and face edits on a 10 x 20 x 30 box.
+  {
+    occ_handle bx = 0, sc = 0, nu = 0, face = 0, pr = 0, ins = 0, imp = 0, off = 0, offin = 0, bad = 0;
+    occ_props q;
+    CHECK(occ_box(10, 20, 30, &bx) == OCC_OK);
+    CHECK(occ_scale(bx, 5, 10, 15, 2, 2, 2, &sc) == OCC_OK);
+    CHECK(occ_mass_props(sc, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 6000 * 8) < 1e-6 && std::fabs(q.min_x + 5) < 1e-9 && std::fabs(q.max_z - 45) < 1e-9);
+    CHECK(occ_scale(bx, 0, 0, 0, 1, 2, 0.5, &nu) == OCC_OK);
+    CHECK(occ_mass_props(nu, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 6000) < 1e-6 && std::fabs(q.max_y - 40) < 1e-6 && std::fabs(q.max_z - 15) < 1e-6);
+    CHECK(occ_scale(bx, 0, 0, 0, 1, 0, 1, &bad) == OCC_ERR_INVALID_ARG);
+
+    // Find the +Z face.
+    int top = -1;
+    for (int i = 0; i < 6; i++) {
+      double fr[9];
+      if (occ_face_frame(bx, i, fr) == OCC_OK && fr[5] > 0.5) top = i;
+    }
+    CHECK(top >= 0);
+    CHECK(occ_face_get(bx, top, &face) == OCC_OK);
+    CHECK(occ_prism(face, 0, 0, 5, &pr) == OCC_OK);
+    CHECK(occ_mass_props(pr, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 1000) < 1e-6 && std::fabs(q.min_z - 30) < 1e-9);
+
+    CHECK(occ_face_inset(bx, top, 2, &ins) == OCC_OK);
+    CHECK(occ_mass_props(ins, &q) == OCC_OK);
+    CHECK(std::fabs(q.area - 6 * 16) < 1e-6 && std::fabs(q.min_z - 30) < 1e-9);
+    CHECK(occ_face_inset(bx, top, 6, &bad) != OCC_OK);  // 10 mm wide face: nothing left
+
+    CHECK(occ_face_imprint_inset(bx, top, 2, &imp) == OCC_OK);
+    CHECK(occ_mass_props(imp, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 6000) < 1e-6 && q.face_count == 7 && q.solid_count == 1);
+
+    CHECK(occ_offset_face(bx, top, 5, &off) == OCC_OK);
+    CHECK(occ_mass_props(off, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 7000) < 1e-6 && std::fabs(q.max_z - 35) < 1e-6);
+    CHECK(occ_offset_face(bx, top, -10, &offin) == OCC_OK);
+    CHECK(occ_mass_props(offin, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 4000) < 1e-6);
+    CHECK(occ_offset_face(bx, top, 0, &bad) == OCC_ERR_INVALID_ARG);
+    CHECK(occ_face_get(bx, 6, &bad) == OCC_ERR_INVALID_ARG);
+    for (occ_handle h : {bx, sc, nu, face, pr, ins, imp, off, offin}) occ_release(h);
     CHECK(occ_live_handle_count() == 0);
   }
 

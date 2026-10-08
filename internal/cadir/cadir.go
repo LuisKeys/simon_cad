@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/accelone/simoncad/internal/expr"
 	"github.com/accelone/simoncad/internal/selectors"
@@ -41,6 +43,9 @@ type Provenance struct {
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	ChangeSet  string `json:"changeset_id,omitempty"`
 	Model      string `json:"model,omitempty"`
+	// Vision-derived geometry records where it came from; the geometry itself never needs these to rebuild.
+	SourceImageID    string `json:"source_image_id,omitempty"`
+	InterpretationID string `json:"interpretation_id,omitempty"`
 }
 
 type Metadata struct {
@@ -48,6 +53,83 @@ type Metadata struct {
 	Created  string   `json:"created,omitempty"`
 	Modified string   `json:"modified,omitempty"`
 	Tags     []string `json:"tags,omitempty"`
+}
+
+// Appearance is presentation metadata. It is authoritative in the CAD-IR but is never an
+// input to geometry: it is excluded from Node.ContentKey and the rebuild cache key, so
+// changing it never invokes the geometry kernel. Nil fields mean "default".
+type Appearance struct {
+	Color   string   `json:"color,omitempty"`   // "#RRGGBB"
+	Opacity *float64 `json:"opacity,omitempty"` // 0..1
+	Visible *bool    `json:"visible,omitempty"`
+	// MaterialID references a visual (PBR) material in the material library; Color, when
+	// set, overrides the material's base color. TextureScale (>0) multiplies the material's own scale.
+	MaterialID   string   `json:"material_id,omitempty"`
+	TextureScale *float64 `json:"texture_scale,omitempty"`
+}
+
+// MaxGroupName bounds a group label.
+const MaxGroupName = 64
+
+// NormalizeGroup trims a group label and checks its length ("" means no group).
+func NormalizeGroup(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if len(name) > MaxGroupName {
+		return "", fmt.Errorf("group name is longer than %d characters", MaxGroupName)
+	}
+	return name, nil
+}
+
+var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+
+// NormalizeColor validates a "#RRGGBB" color and returns it upper-cased.
+func NormalizeColor(c string) (string, error) {
+	if !colorPattern.MatchString(c) {
+		return "", fmt.Errorf("invalid color %q (want #RRGGBB)", c)
+	}
+	return strings.ToUpper(c), nil
+}
+
+// ValidateOpacity checks 0 <= o <= 1.
+func ValidateOpacity(o float64) error {
+	if !(o >= 0 && o <= 1) {
+		return fmt.Errorf("opacity %v out of range [0,1]", o)
+	}
+	return nil
+}
+
+// ValidateTextureScale checks s > 0.
+func ValidateTextureScale(s float64) error {
+	if !(s > 0) || s > 1000 {
+		return fmt.Errorf("texture scale %v out of range (0,1000]", s)
+	}
+	return nil
+}
+
+// IsZero reports whether the appearance carries no overrides.
+func (a *Appearance) IsZero() bool {
+	return a == nil || (a.Color == "" && a.Opacity == nil && a.Visible == nil && a.MaterialID == "" && a.TextureScale == nil)
+}
+
+// Clone returns a deep copy (nil-safe).
+func (a *Appearance) Clone() *Appearance {
+	if a == nil {
+		return nil
+	}
+	c := Appearance{Color: a.Color, MaterialID: a.MaterialID}
+	if a.Opacity != nil {
+		v := *a.Opacity
+		c.Opacity = &v
+	}
+	if a.Visible != nil {
+		v := *a.Visible
+		c.Visible = &v
+	}
+	if a.TextureScale != nil {
+		v := *a.TextureScale
+		c.TextureScale = &v
+	}
+	return &c
 }
 
 // Node is one CAD-IR feature. The full schema exists from day one even where
@@ -67,8 +149,15 @@ type Node struct {
 	Provenance    Provenance        `json:"provenance"`
 	Metadata      Metadata          `json:"metadata"`
 	Suppressed    bool              `json:"suppressed,omitempty"`
-	Status        string            `json:"status,omitempty"`
-	Errors        []string          `json:"errors,omitempty"`
+	Appearance    *Appearance       `json:"appearance,omitempty"`
+	// Group is an organizational label shared by the nodes of one user group (design tree).
+	// Like appearance it is never an input to geometry.
+	Group string `json:"group,omitempty"`
+	// LockProportions makes a dimension edit of this body scale the other two dimensions
+	// proportionally. Like group it is an editing preference, never an input to geometry.
+	LockProportions bool     `json:"lock_proportions,omitempty"`
+	Status          string   `json:"status,omitempty"`
+	Errors          []string `json:"errors,omitempty"`
 }
 
 // Graph is the ordered feature DAG. Order is insertion order and is the tie-breaker
@@ -231,11 +320,20 @@ func (g *Graph) Canonical() ([]byte, error) {
 }
 
 // Hash is a content hash of the authoritative content (excludes derived status/errors and timestamps).
-func (g *Graph) Hash() string {
+func (g *Graph) Hash() string { return g.hash(false) }
+
+// GeometryHash is Hash ignoring presentation-only appearance, grouping and editing
+// preferences: it is unchanged by an appearance-only or grouping edit.
+func (g *Graph) GeometryHash() string { return g.hash(true) }
+
+func (g *Graph) hash(ignoreAppearance bool) string {
 	c := g.Clone()
 	for _, n := range c.Nodes {
 		n.Status, n.Errors = "", nil
 		n.Metadata.Created, n.Metadata.Modified = "", ""
+		if ignoreAppearance {
+			n.Appearance, n.Group, n.LockProportions = nil, "", false
+		}
 	}
 	b, _ := json.Marshal(c)
 	sum := sha256.Sum256(b)

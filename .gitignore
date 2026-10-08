@@ -4,3 +4,5 @@ out/
 *.o
 .vscode/
 e2e/node_modules/
+projects_output/
+.VSCodeCounter/

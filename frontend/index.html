@@ -7,90 +7,93 @@
 <title>Simon CAD</title>
 <link rel="icon" type="image/png" href="assets/icon.png">
 <link rel="stylesheet" href="style.css">
+<script>try { document.documentElement.dataset.theme = localStorage.getItem('simon.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}</script>
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/" } }
 </script>
 </head>
 <body>
 <header id="top">
+  <button id="btn-panel-left" class="ibtn" type="button" data-icon="panel-left" aria-label="Show or hide the design tree" title="Design tree" aria-pressed="true"></button>
   <div class="brand" title="Simon CAD — Design in control."><img src="assets/mark.png" alt="" class="mark"><span class="word">SIMON <b>CAD</b></span></div>
-  <div id="project" class="project" title="Project"></div>
+  <button id="project" class="project" type="button" aria-haspopup="menu" title="Project: New / Open"></button>
   <div class="spacer"></div>
-  <div class="group">
-    <button id="btn-new" title="New project">New</button>
-    <button id="btn-open" title="Open a .scadproj directory">Open</button>
-    <button id="btn-save" title="Save (Ctrl+S)">Save</button>
-    <button id="btn-export" title="Export STEP or STL">Export</button>
-  </div>
-  <div class="group">
-    <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
-    <button id="btn-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
-  </div>
-  <div class="group">
-    <label class="inline" title="Auto commits low-risk single-feature changes; Review previews everything first">
-      Level
-      <select id="level"><option value="review">Review</option><option value="auto">Auto</option></select>
-    </label>
-    <button id="btn-palette" title="Command palette (Ctrl+K)">⌘K</button>
-  </div>
+  <button id="btn-undo" class="ibtn" type="button" data-icon="undo" aria-label="Undo" title="Undo (Ctrl+Z)"></button>
+  <button id="btn-redo" class="ibtn" type="button" data-icon="redo" aria-label="Redo" title="Redo (Ctrl+Shift+Z)"></button>
+  <button id="btn-save" class="tbtn" type="button" data-icon="save" title="Save (Ctrl+S)"><span>Save</span></button>
+  <button id="btn-export" class="tbtn" type="button" data-icon="export" title="Export STEP or STL"><span>Export</span></button>
+  <button id="btn-visual" class="tbtn" type="button" data-icon="compare" title="Visual comparison: reference vs. render, scores, iterations and visual refinement"><span>Visual</span></button>
+  <a id="btn-help" class="tbtn" href="help.html" target="_blank" rel="noopener" data-icon="help" title="Help, features and example prompts (opens in a new tab)"><span>Help</span></a>
+  <button id="btn-shortcuts" class="ibtn" type="button" data-icon="keyboard" aria-haspopup="dialog" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"></button>
+  <button id="btn-components" class="tbtn" type="button" data-icon="component" aria-expanded="false" aria-controls="components" title="Components"><span>Components</span></button>
+  <button id="btn-settings" class="tbtn" type="button" data-icon="settings" title="Settings: primary and fallback models, API keys and theme"><span>Settings</span></button>
+  <button id="btn-more" class="ibtn" type="button" data-icon="more" aria-haspopup="menu" aria-label="More" title="More: command palette, agent level"></button>
+  <button id="btn-panel-right" class="ibtn" type="button" data-icon="panel-right" aria-label="Show or hide the Simon Agent panel" title="Simon Agent" aria-pressed="true"></button>
 </header>
 
-<main id="layout">
-  <aside id="left">
+<main id="layout" data-left="on" data-right="on">
+  <aside id="left" aria-label="Design tree">
     <section>
       <h2>Design tree</h2>
       <div id="tree" class="tree" role="tree"></div>
     </section>
-    <section>
+    <section id="components" hidden aria-label="Component library">
+      <h2>Components</h2>
+      <p class="muted small">A component is a reusable project. Instances reference it, so editing it once updates everywhere it is used.</p>
+      <input id="comp-search" type="search" placeholder="Search components" aria-label="Search components" spellcheck="false">
+      <button id="comp-sync" class="ghost wide" type="button" hidden></button>
+      <div id="comp-list" class="comp-list"></div>
+      <button id="comp-publish" class="ghost wide" type="button">Publish this project as a component</button>
+    </section>
+    <section id="sel-section" hidden>
       <h2>Selection</h2>
       <div id="sel-list" class="sel-list"></div>
     </section>
   </aside>
+  <div id="split-left" class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the design tree" tabindex="0" title="Drag to resize · double-click to reset"></div>
 
   <section id="center">
-    <div id="toolbar">
-      <div class="group" role="radiogroup" aria-label="Pick filter">
-        <button data-filter="auto" class="on">Auto</button>
-        <button data-filter="face">Face</button>
-        <button data-filter="edge">Edge</button>
-        <button data-filter="vertex">Vertex</button>
-        <button data-filter="body">Body</button>
-      </div>
-      <div class="group">
-        <button id="btn-measure" title="Measure between two surface points">Measure</button>
-        <label class="inline">Section
-          <select id="sec-axis"><option value="">off</option><option>X</option><option>Y</option><option>Z</option></select>
-        </label>
-        <input id="sec-off" type="range" min="0" max="1" step="0.001" value="0.5" disabled aria-label="Section offset">
-      </div>
-      <div class="group">
-        <button id="btn-fit" title="Fit view (F)">Fit</button>
-        <button id="btn-play" title="Replay the design feature by feature">▶ Play design</button>
-      </div>
-      <div class="spacer"></div>
-      <div id="hud" class="hud"></div>
+    <div id="ctxbar">
+      <div id="ctx-actions" class="ctx-actions" role="toolbar" aria-label="Actions for the current selection"></div>
+      <div id="hud" class="hud" aria-live="off"></div>
     </div>
     <div id="viewport">
       <canvas id="gl"></canvas>
-      <canvas id="cube" width="120" height="120" title="View cube"></canvas>
       <div id="measure-label" class="measure-label" hidden></div>
-      <div id="empty" class="empty"><img src="assets/logo.png" alt="Simon CAD — Design in control." class="empty-logo"><p>Nothing here yet. Press <kbd>Ctrl</kbd>+<kbd>K</kbd>, or ask the agent: “Create a 100 x 60 x 4 mm plate”.</p></div>
-      <div id="ghost-bar" class="ghost-bar" hidden></div>
+      <div id="empty" class="empty"><img src="assets/logo.png" alt="Simon CAD — Design in control." class="empty-logo"><p>Nothing here yet. Press <kbd>Ctrl</kbd>+<kbd>K</kbd>, use <b>Create</b> above, or ask Simon: “Create a 100 x 60 x 4 mm plate”.</p></div>
     </div>
-    <div id="timeline" class="timeline" aria-label="Semantic timeline"></div>
+    <div id="ghost-bar" class="ghost-bar" hidden></div>
+    <div id="history" data-open="true">
+      <div class="hist-head">
+        <button id="hist-toggle" type="button" class="histbtn" aria-expanded="true" aria-controls="timeline"><span class="chev" data-icon="down"></span><span id="hist-title">History</span></button>
+        <div class="spacer"></div>
+        <div id="hist-actions" class="hist-actions" hidden></div>
+      </div>
+      <div id="timeline" class="timeline" aria-label="Semantic timeline"></div>
+    </div>
   </section>
 
-  <aside id="right">
+  <div id="split-right" class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the Simon Agent panel" tabindex="0" title="Drag to resize · double-click to reset"></div>
+  <aside id="right" aria-label="Simon Agent">
     <section class="grow">
-      <h2>Conversation</h2>
+      <h2>Simon Agent <span id="agent-model" class="agent-model" hidden></span><button id="btn-clear" type="button" class="linkbtn" data-icon="trash" aria-label="Clear the conversation" title="Clear the conversation"></button></h2>
       <div id="chat" class="chat" aria-live="polite"></div>
     </section>
     <form id="composer" class="composer" autocomplete="off">
+      <div id="usage" class="usage" hidden></div>
       <div id="chips" class="chips"></div>
-      <div class="row">
-        <textarea id="prompt" rows="8" placeholder="Describe what you want…  (Enter to send, Shift+Enter for a new line)"></textarea>
-        <button id="send" type="submit" class="primary">Send</button>
+      <div id="specs" class="chips" aria-label="Attached documents"></div>
+      <div id="attachments" class="chips" aria-label="Attached images"></div>
+      <div class="row tools">
+        <button id="btn-attach" type="button" class="tbtn" data-icon="attach" title="Attach an image or a text document with specifications (or drop / paste one anywhere). Documents are remembered until Clear."><span>Attach</span></button>
+        <button id="btn-from-image" type="button" class="tbtn" data-icon="image" title="Create editable geometry from a sketch, scan or drawing"><span>Create from Image</span></button>
+        <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp,.txt,.md,.markdown,.json,.csv,.yaml,.yml,.xml,text/*" multiple hidden>
       </div>
+      <div class="promptbox">
+        <textarea id="prompt" rows="2" aria-label="Message to Simon" placeholder="Describe what you want…  (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button id="send" type="submit" class="primary send" data-icon="send" aria-label="Send" title="Send (Enter)"></button>
+      </div>
+      <label class="think" title="Off = instant answers, no extended thinking"><input type="checkbox" id="thinking" checked> Thinking mode</label>
     </form>
   </aside>
 </main>
@@ -111,11 +114,36 @@
   <form class="dialog small" id="dialog-form">
     <div id="dialog-title"></div>
     <input id="dialog-input" type="text" autocomplete="off">
+    <ul id="dialog-list" class="pal-list" hidden></ul>
     <select id="dialog-format" hidden><option value="step">STEP</option><option value="stl">STL</option></select>
     <div class="row"><button type="submit" class="primary" id="dialog-ok">OK</button><button type="button" id="dialog-cancel">Cancel</button></div>
   </form>
 </div>
 
+<div id="formdlg" class="overlay" hidden>
+  <form class="dialog small" id="fd-form">
+    <div id="fd-title"></div>
+    <div id="fd-fields" class="params"></div>
+    <div class="row"><button type="submit" class="primary" id="fd-ok">Apply</button><button type="button" id="fd-cancel">Cancel</button></div>
+  </form>
+</div>
+
+<div id="confirm" class="overlay" hidden>
+  <form class="dialog small" id="confirm-form" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <div id="confirm-title"></div>
+    <div id="confirm-body" class="muted"></div>
+    <label id="confirm-remember" class="think" hidden><input type="checkbox" id="confirm-remember-box" checked> Remember my choice</label>
+    <div class="row"><button type="submit" class="danger" id="confirm-ok">Delete</button><button type="button" id="confirm-cancel">Cancel</button></div>
+  </form>
+</div>
+
+<div id="settings" class="overlay" hidden></div>
+<div id="interp" class="overlay" hidden></div>
+<div id="visual" class="overlay" hidden></div>
+<div id="shortcuts" class="overlay" hidden></div>
+<div id="drop-hint" class="drop-hint" hidden><div>Drop a file to attach it<br><small>Images (PNG, JPEG, WebP) · text specs (.txt, .md, .json, .csv) · PDF</small></div></div>
+
+<ul id="ctxmenu" class="ctxmenu" role="menu" hidden></ul>
 <div id="toast" class="toast" hidden></div>
 <script type="module" src="app.js"></script>
 </body>

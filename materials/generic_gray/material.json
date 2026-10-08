@@ -1,0 +1,19 @@
+{
+  "id": "generic_gray",
+  "name": "Generic Gray",
+  "category": "Generic",
+  "tags": [
+    "generic",
+    "default",
+    "gray"
+  ],
+  "baseColor": "#9AA0A6",
+  "metalness": 0.25,
+  "roughness": 0.45,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

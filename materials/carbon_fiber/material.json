@@ -1,0 +1,29 @@
+{
+  "id": "carbon_fiber",
+  "name": "Carbon Fiber",
+  "category": "Carbon Fiber",
+  "tags": [
+    "carbon",
+    "fiber",
+    "composite",
+    "black",
+    "panel",
+    "robotics"
+  ],
+  "baseColor": "#1A1B1D",
+  "metalness": 0.2,
+  "roughness": 0.3,
+  "clearcoat": 1.0,
+  "clearcoatRoughness": 0.05,
+  "textures": {
+    "baseColor": "color.jpg",
+    "normal": "normal.jpg",
+    "roughness": "roughness.jpg"
+  },
+  "textureScale": 30,
+  "license": {
+    "source": "ambientCG Fabric004",
+    "license": "CC0-1.0",
+    "url": "https://ambientcg.com/view?id=Fabric004"
+  }
+}

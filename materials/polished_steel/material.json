@@ -1,0 +1,20 @@
+{
+  "id": "polished_steel",
+  "name": "Polished Steel",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "steel",
+    "polished",
+    "shiny"
+  ],
+  "baseColor": "#C8CBCE",
+  "metalness": 1.0,
+  "roughness": 0.1,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

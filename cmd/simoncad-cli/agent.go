@@ -11,12 +11,15 @@ import (
 	"time"
 
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
+	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
 	"github.com/accelone/simoncad/internal/agent/runtime"
+	"github.com/accelone/simoncad/internal/agent/workflow"
 	"github.com/accelone/simoncad/internal/app"
 )
 
 type agentFlags struct {
 	preview, commit bool
+	autonomous      bool
 	label           string
 	recording       string
 	record          string
@@ -55,14 +58,26 @@ func runAgentTurn(a *app.App, intent string, f *agentFlags, pol app.Policy, quie
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	rt := &runtime.Runtime{Provider: prov, Caps: []runtime.Capability{geo.New()}}
+	rt := &runtime.Runtime{Provider: prov, Caps: runtime.SelectCaps(a, nil, geo.New(), vis.New())}
 	if !quiet && !jsonOut {
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			fmt.Printf("  → %s %s\n", name, strings.TrimSpace(string(args)))
 			fmt.Print("    " + strings.ReplaceAll(strings.TrimRight(describeOutcome(o), "\n"), "\n", "\n    ") + "\n")
 		}
 	}
-	res, err := rt.Run(ctx, a, intent, pol)
+	var res *runtime.Result
+	if f.autonomous {
+		ag := &workflow.Agent{Runtime: rt}
+		if !quiet && !jsonOut {
+			ag.OnState = func(ev workflow.Event) { fmt.Printf("[%s] %s\n", ev.State, ev.Message) }
+			ag.OnPlan = func(p *workflow.Plan) { fmt.Printf("Plan:\n%s\n", p.Text()) }
+		}
+		var wr *workflow.Result
+		wr, err = ag.Run(ctx, a, intent, pol)
+		res = wr.Result
+	} else {
+		res, err = rt.Run(ctx, a, intent, pol)
+	}
 	if ferr := finish(); ferr != nil && err == nil {
 		err = ferr
 	}
@@ -74,6 +89,7 @@ func agentFlagSet(name string) (*agentFlags, func([]string) ([]string, error)) {
 	fs := newFlags(name)
 	fs.BoolVar(&f.preview, "preview", false, "propose ChangeSets without committing")
 	fs.BoolVar(&f.commit, "commit", false, "commit every valid ChangeSet, even multi-step ones")
+	fs.BoolVar(&f.autonomous, "autonomous", false, "plan, execute, validate and auto-correct complex requests")
 	fs.StringVar(&f.label, "label", "", "semantic checkpoint label (default: the intent)")
 	fs.StringVar(&f.recording, "recording", "", "replay a recorded agent run instead of calling the API")
 	fs.StringVar(&f.record, "record", "", "save the live agent run to this recording file")
@@ -117,6 +133,14 @@ func finishTurn(a *app.App, path, intent string, f *agentFlags, res *runtime.Res
 	fmt.Fprintf(&sb, "\n%s\n\n", res.Final)
 	fmt.Fprintf(&sb, "project: %s   tool calls: %d   committed: %v   pending approval: %v\n", path, res.ToolCalls, res.Committed, pending)
 	fmt.Fprintf(&sb, "model volume: %.3f mm³", vol)
+	fmt.Fprintf(&sb, "\nusage: %s", runtime.Report(res.Usage))
+	for _, m := range res.Usage.Models() {
+		fmt.Fprintf(&sb, "\n  %s/%s: %d in", m.Provider, m.Model, m.InputTokens)
+		if m.CachedInputTokens > 0 {
+			fmt.Fprintf(&sb, " (%d cached)", m.CachedInputTokens)
+		}
+		fmt.Fprintf(&sb, " / %d out over %d call(s)", m.OutputTokens, m.Calls)
+	}
 	if cpID != "" {
 		fmt.Fprintf(&sb, "   checkpoint: %s", cpID)
 	}
@@ -126,7 +150,10 @@ func finishTurn(a *app.App, path, intent string, f *agentFlags, res *runtime.Res
 	emit(map[string]any{
 		"project": path, "final": res.Final, "tool_calls": res.ToolCalls, "committed": res.Committed,
 		"pending": pending, "checkpoint": cpID, "volume_mm3": vol,
-		"usage": map[string]int{"input_tokens": res.Usage.InputTokens, "output_tokens": res.Usage.OutputTokens},
+		"usage": map[string]any{"input_tokens": res.Usage.InputTokens, "output_tokens": res.Usage.OutputTokens,
+			"cached_input_tokens": res.Usage.CachedInputTokens, "total_tokens": res.Usage.Tokens(),
+			"by_model": res.Usage.Models()},
+		"cost": runtime.Estimate(res.Usage),
 	}, sb.String())
 	return nil
 }

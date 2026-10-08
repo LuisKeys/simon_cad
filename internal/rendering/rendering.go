@@ -11,6 +11,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/features"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
@@ -79,6 +80,18 @@ type Delta struct {
 	Changed []*BodyMesh       `json:"changed"` // bodies whose key the client did not have
 	Removed []string          `json:"removed"` // ids the client has that are gone
 	Stats   Stats             `json:"stats"`
+	// Appearance overrides per body id, filled by the caller from the CAD-IR. It is
+	// independent of mesh keys: changing it never changes Keys/Changed.
+	Appearance map[string]*cadir.Appearance `json:"appearance,omitempty"`
+	// Sketches are the outlines of sketch nodes no feature consumes yet. They are tiny, so
+	// they are always sent whole rather than keyed.
+	Sketches []*SketchLines `json:"sketches"`
+}
+
+// SketchLines is one sketch drawn as line segments (xyz pairs, 6 floats per segment).
+type SketchLines struct {
+	ID    string    `json:"id"`
+	Lines []float32 `json:"lines"`
 }
 
 // Stats reports work done, for budgets and tests.
@@ -93,16 +106,68 @@ type Renderer struct {
 	mu    sync.Mutex
 	cache map[string]*BodyMesh
 	order []string // LRU, oldest first
+	// DetailFn reports the current display detail; nil means DetailFine.
+	DetailFn func() Detail
+}
+
+func (r *Renderer) detail() Detail {
+	if r.DetailFn == nil {
+		return DetailFine
+	}
+	return r.DetailFn()
 }
 
 func New() *Renderer { return &Renderer{cache: map[string]*BodyMesh{}} }
 
+// Detail is how finely bodies are meshed for display. It only changes the viewport mesh
+// (and so the triangle count); geometry, selection and exports are unaffected.
+type Detail string
+
+const (
+	DetailFine   Detail = "fine" // default: smooth curves
+	DetailNormal Detail = "normal"
+	DetailCoarse Detail = "coarse" // fewest triangles
+)
+
+// Details lists the valid levels, finest first.
+var Details = []Detail{DetailFine, DetailNormal, DetailCoarse}
+
+// ParseDetail maps a level name to a Detail; ok is false for an unknown name.
+func ParseDetail(s string) (Detail, bool) {
+	for _, d := range Details {
+		if string(d) == s {
+			return d, true
+		}
+	}
+	return DetailFine, false
+}
+
 // deflectionFor picks a linear deflection from the body size: fine enough to look smooth,
 // coarse enough to hold the triangle budget.
-func deflectionFor(b selectors.Bounds) float64 {
+func deflectionFor(b selectors.Bounds) float64 { return deflectionAt(b, DetailFine) }
+
+// angularAt is the widest angle (radians) one mesh segment of a curve may span.
+func angularAt(d Detail) float64 {
+	switch d {
+	case DetailNormal:
+		return 0.8
+	case DetailCoarse:
+		return 1.2
+	}
+	return 0.5
+}
+
+func deflectionAt(b selectors.Bounds, d Detail) float64 {
 	sz := b.Size()
 	diag := math.Sqrt(sz[0]*sz[0] + sz[1]*sz[1] + sz[2]*sz[2])
-	return math.Max(0.02, 0.0015*diag)
+	rel, floor := 0.0015, 0.02
+	switch d {
+	case DetailNormal:
+		rel, floor = 0.006, 0.08
+	case DetailCoarse:
+		rel, floor = 0.02, 0.3
+	}
+	return math.Max(floor, rel*diag)
 }
 
 func (r *Renderer) touch(k string) {
@@ -125,19 +190,24 @@ func (r *Renderer) Body(id string, res *rebuild.NodeResult) (*BodyMesh, bool, er
 		return nil, false, fmt.Errorf("feature %q has no geometry", id)
 	}
 	bounds := res.Body.Bounds()
-	defl := deflectionFor(bounds)
-	ck := fmt.Sprintf("%s|%s|%g", id, res.Key, defl)
+	det := r.detail()
+	defl := deflectionAt(bounds, det)
+	key := res.Key
+	if det != DetailFine {
+		key += "~" + string(det) // the client re-fetches a body when its mesh detail changes
+	}
+	ck := fmt.Sprintf("%s|%s|%g", id, key, defl)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if m, ok := r.cache[ck]; ok {
 		r.touch(ck)
 		return m, true, nil
 	}
-	mesh, err := res.Body.Shape.Tessellate(defl)
+	mesh, err := res.Body.Shape.TessellateAngular(defl, angularAt(det))
 	if err != nil {
 		return nil, false, err
 	}
-	m := build(id, res.Key, bounds, mesh)
+	m := build(id, key, bounds, mesh)
 	r.cache[ck] = m
 	r.touch(ck)
 	return m, false, nil
@@ -168,10 +238,43 @@ func build(id, key string, bounds selectors.Bounds, mesh *api.Mesh) *BodyMesh {
 	return m
 }
 
+// Sketch tessellates a sketch node into outline segments.
+func (r *Renderer) Sketch(id string, res *rebuild.NodeResult) (*SketchLines, error) {
+	if res == nil || res.Body == nil {
+		return nil, fmt.Errorf("sketch %q has no geometry", id)
+	}
+	mesh, err := res.Body.Shape.Tessellate(deflectionFor(res.Body.Bounds()))
+	if err != nil {
+		return nil, err
+	}
+	out := &SketchLines{ID: id, Lines: []float32{}}
+	for _, e := range mesh.Edges {
+		for i := 0; i+1 < e.PtCount; i++ {
+			a, b := (e.PtStart+i)*3, (e.PtStart+i+1)*3
+			out.Lines = append(out.Lines, mesh.EdgePoints[a:a+3]...)
+			out.Lines = append(out.Lines, mesh.EdgePoints[b:b+3]...)
+		}
+	}
+	return out, nil
+}
+
+// Sketches renders every unconsumed sketch of the model.
+func (r *Renderer) Sketches(m *rebuild.Model) ([]*SketchLines, error) {
+	out := []*SketchLines{}
+	for _, id := range m.Sketches {
+		sl, err := r.Sketch(id, m.Nodes[id])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sl)
+	}
+	return out, nil
+}
+
 // Scene meshes every visible body of the model (its leaves) and reports only what the
 // client, which holds `known` (id → key), is missing.
 func (r *Renderer) Scene(m *rebuild.Model, known map[string]string) (*Delta, error) {
-	d := &Delta{Keys: map[string]string{}, Order: []string{}, Changed: []*BodyMesh{}, Removed: []string{}}
+	d := &Delta{Keys: map[string]string{}, Order: []string{}, Changed: []*BodyMesh{}, Removed: []string{}, Sketches: []*SketchLines{}}
 	for _, id := range m.Leaves {
 		bm, hit, err := r.Body(id, m.Nodes[id])
 		if err != nil {
@@ -195,6 +298,10 @@ func (r *Renderer) Scene(m *rebuild.Model, known map[string]string) (*Delta, err
 		}
 	}
 	sort.Strings(d.Removed)
+	var err error
+	if d.Sketches, err = r.Sketches(m); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 

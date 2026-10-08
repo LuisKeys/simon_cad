@@ -1,0 +1,23 @@
+{
+  "id": "transparent_plastic",
+  "name": "Transparent Plastic",
+  "category": "Plastics",
+  "tags": [
+    "plastic",
+    "transparent",
+    "clear",
+    "cover"
+  ],
+  "baseColor": "#DDE9EE",
+  "metalness": 0.0,
+  "roughness": 0.15,
+  "transmission": 0.85,
+  "ior": 1.49,
+  "thickness": 2,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "black_pcb",
+  "name": "Black PCB",
+  "category": "Electronics",
+  "tags": [
+    "electronics",
+    "pcb",
+    "black",
+    "board",
+    "circuit"
+  ],
+  "baseColor": "#151617",
+  "metalness": 0.0,
+  "roughness": 0.4,
+  "clearcoat": 0.6,
+  "clearcoatRoughness": 0.2,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

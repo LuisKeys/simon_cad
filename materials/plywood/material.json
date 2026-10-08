@@ -1,0 +1,25 @@
+{
+  "id": "plywood",
+  "name": "Plywood",
+  "category": "Wood",
+  "tags": [
+    "wood",
+    "plywood",
+    "light",
+    "laser"
+  ],
+  "baseColor": "#C9A675",
+  "metalness": 0.0,
+  "roughness": 0.7,
+  "textures": {
+    "baseColor": "color.jpg",
+    "normal": "normal.jpg",
+    "roughness": "roughness.jpg"
+  },
+  "textureScale": 250,
+  "license": {
+    "source": "ambientCG Wood087",
+    "license": "CC0-1.0",
+    "url": "https://ambientcg.com/view?id=Wood087"
+  }
+}

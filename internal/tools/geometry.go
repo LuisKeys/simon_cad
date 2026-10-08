@@ -14,7 +14,43 @@ func Default() *Registry {
 	for _, t := range geometryTools() {
 		r.Register(t)
 	}
+	for _, t := range sketchTools() {
+		r.Register(t)
+	}
+	for _, t := range visionTools() {
+		r.Register(t)
+	}
+	for _, t := range componentTools() {
+		r.Register(t)
+	}
+	for _, t := range modifyTools() {
+		r.Register(t)
+	}
+	for _, t := range dimensionTools() {
+		r.Register(t)
+	}
+	for _, t := range transformTools() {
+		r.Register(t)
+	}
 	for _, t := range editTools() {
+		r.Register(t)
+	}
+	for _, t := range deleteTools() {
+		r.Register(t)
+	}
+	for _, t := range appearanceTools() {
+		r.Register(t)
+	}
+	for _, t := range materialTools() {
+		r.Register(t)
+	}
+	for _, t := range visualTools() {
+		r.Register(t)
+	}
+	for _, t := range meshDetailTools() {
+		r.Register(t)
+	}
+	for _, t := range workspaceTools() {
 		r.Register(t)
 	}
 	for _, t := range queryTools() {
@@ -64,6 +100,74 @@ func geometryTools() []*Tool {
 				return addPlan(intentOr(a, "Create cylinder"),
 					fmt.Sprintf("Adds cylinder %q (r=%s, h=%s mm).", id, fmtMM(a.Num("radius")), fmtMM(a.Num("height"))),
 					newNode(env, a, id, "cylinder", p)), nil
+			},
+		},
+		{
+			Name:        "create_cone",
+			Description: "Create a cone or frustum (taper, funnel, chamfer cutter). The base circle (`radius`) is centered at (x,y,z) and the cone extends `height` along `axis` (default z), narrowing to `top_radius` (default 0 = a point).",
+			Capability:  capGeometry,
+			Schema: object(withMeta(props{
+				"radius": positive("Base radius (mm)"), "top_radius": number("Top radius (mm), default 0 (pointed)"), "height": positive("Length along the axis (mm)"),
+				"axis": enum("Axis direction", "x", "y", "z"),
+				"x":    number("Base center X (mm)"), "y": number("Base center Y (mm)"), "z": number("Base center Z (mm)"),
+			}), "radius", "height"),
+			Plan: func(env Env, a Args) (*Plan, error) {
+				if a.Has("top_radius") && a.Num("top_radius") < 0 {
+					return nil, fmt.Errorf("top_radius must be >= 0")
+				}
+				id, err := uniqueID(env.Graph(), a, "cone")
+				if err != nil {
+					return nil, err
+				}
+				p := map[string]any{"radius": a.Num("radius"), "height": a.Num("height")}
+				copyOpt(p, a, "top_radius", "axis", "x", "y", "z")
+				return addPlan(intentOr(a, "Create cone"),
+					fmt.Sprintf("Adds cone %q (r=%s, h=%s mm).", id, fmtMM(a.Num("radius")), fmtMM(a.Num("height"))),
+					newNode(env, a, id, "cone", p)), nil
+			},
+		},
+		{
+			Name:        "create_sphere",
+			Description: "Create a sphere (ball, dome when cut, rounded end). Centered at (x,y,z), default the origin.",
+			Capability:  capGeometry,
+			Schema: object(withMeta(props{
+				"radius": positive("Radius (mm)"),
+				"x":      number("Center X (mm)"), "y": number("Center Y (mm)"), "z": number("Center Z (mm)"),
+			}), "radius"),
+			Plan: func(env Env, a Args) (*Plan, error) {
+				id, err := uniqueID(env.Graph(), a, "sphere")
+				if err != nil {
+					return nil, err
+				}
+				p := map[string]any{"radius": a.Num("radius")}
+				copyOpt(p, a, "x", "y", "z")
+				return addPlan(intentOr(a, "Create sphere"),
+					fmt.Sprintf("Adds sphere %q (r=%s mm).", id, fmtMM(a.Num("radius"))),
+					newNode(env, a, id, "sphere", p)), nil
+			},
+		},
+		{
+			Name:        "create_torus",
+			Description: "Create a torus (ring, O-ring seat, donut). Centered at (x,y,z); `major_radius` is the distance from the center to the middle of the tube, `minor_radius` the tube radius (must be smaller). The ring lies perpendicular to `axis` (default z).",
+			Capability:  capGeometry,
+			Schema: object(withMeta(props{
+				"major_radius": positive("Ring radius, center to tube center (mm)"), "minor_radius": positive("Tube radius (mm), < major_radius"),
+				"axis": enum("Axis the ring is perpendicular to", "x", "y", "z"),
+				"x":    number("Center X (mm)"), "y": number("Center Y (mm)"), "z": number("Center Z (mm)"),
+			}), "major_radius", "minor_radius"),
+			Plan: func(env Env, a Args) (*Plan, error) {
+				if a.Num("minor_radius") >= a.Num("major_radius") {
+					return nil, fmt.Errorf("minor_radius must be smaller than major_radius")
+				}
+				id, err := uniqueID(env.Graph(), a, "torus")
+				if err != nil {
+					return nil, err
+				}
+				p := map[string]any{"major_radius": a.Num("major_radius"), "minor_radius": a.Num("minor_radius")}
+				copyOpt(p, a, "axis", "x", "y", "z")
+				return addPlan(intentOr(a, "Create torus"),
+					fmt.Sprintf("Adds torus %q (R=%s, r=%s mm).", id, fmtMM(a.Num("major_radius")), fmtMM(a.Num("minor_radius"))),
+					newNode(env, a, id, "torus", p)), nil
 			},
 		},
 		{
@@ -163,10 +267,10 @@ func geometryTools() []*Tool {
 		},
 		{
 			Name:        "boolean",
-			Description: "Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`. Both inputs are consumed (they stop appearing as separate bodies).",
+			Description: "Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`; op=intersect keeps only the volume shared by both. Both inputs are consumed (they stop appearing as separate bodies).",
 			Capability:  capGeometry,
 			Schema: object(withMeta(props{
-				"op": enum("Boolean operation", "union", "subtract"), "target": text("Feature to keep"), "tool": text("Feature to merge or remove"),
+				"op": enum("Boolean operation", "union", "subtract", "intersect"), "target": text("Feature to keep"), "tool": text("Feature to merge or remove"),
 			}), "op", "target", "tool"),
 			Plan: func(env Env, a Args) (*Plan, error) {
 				if a.Str("target") == a.Str("tool") {
@@ -183,7 +287,7 @@ func geometryTools() []*Tool {
 				}
 				p := map[string]any{"target": a.Str("target"), "tool": a.Str("tool")}
 				return addPlan(intentOr(a, a.Str("op")+" "+a.Str("tool")+" with "+a.Str("target")),
-					fmt.Sprintf("%s %q %s %q.", strings.ToUpper(a.Str("op")[:1])+a.Str("op")[1:], a.Str("tool"), map[bool]string{true: "from", false: "into"}[a.Str("op") == "subtract"], a.Str("target")),
+					fmt.Sprintf("%s %q %s %q.", strings.ToUpper(a.Str("op")[:1])+a.Str("op")[1:], a.Str("tool"), map[string]string{"union": "into", "subtract": "from", "intersect": "with"}[a.Str("op")], a.Str("target")),
 					newNode(env, a, id, a.Str("op"), p, a.Str("target"), a.Str("tool"))), nil
 			},
 		},

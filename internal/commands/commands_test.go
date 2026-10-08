@@ -31,6 +31,9 @@ func TestEachCommandInverts(t *testing.T) {
 		&Reorder{ID: "a", Index: 2},
 		&Suppress{ID: "a", Suppressed: true},
 		&Rename{ID: "a", Name: "Base"},
+		&SetColor{ID: "a", Color: "#ff0000"},
+		&SetOpacity{ID: "a", Opacity: ptr(0.5)},
+		&SetVisibility{ID: "a", Visible: ptr(false)},
 	}
 	for _, c := range cmds {
 		before := g.Hash()
@@ -258,4 +261,33 @@ func randomCommands(r *rand.Rand, g *cadir.Graph, nextID *int) []Command {
 		}
 	}
 	return out
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestResetAppearanceInverseRestoresAll(t *testing.T) {
+	g := cadir.NewGraph()
+	g.Nodes = []*cadir.Node{box("a")}
+	for _, c := range []Command{&SetColor{ID: "a", Color: "#00ff00"}, &SetOpacity{ID: "a", Opacity: ptr(0.3)}, &SetVisibility{ID: "a", Visible: ptr(false)}} {
+		if _, err := c.Apply(g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, _ := g.Canonical()
+	inv, err := (&ResetAppearance{ID: "a"}).Apply(g)
+	if err != nil || g.Get("a").Appearance != nil {
+		t.Fatalf("reset failed: %v %+v", err, g.Get("a").Appearance)
+	}
+	if _, err := inv.Apply(g); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := g.Canonical(); string(got) != string(want) {
+		t.Fatalf("undo of reset not exact:\n%s\nvs\n%s", want, got)
+	}
+	if _, err := (&SetColor{ID: "a", Color: "red"}).Apply(g); err == nil {
+		t.Fatal("expected invalid color error")
+	}
+	if _, err := (&SetOpacity{ID: "a", Opacity: ptr(1.5)}).Apply(g); err == nil {
+		t.Fatal("expected invalid opacity error")
+	}
 }

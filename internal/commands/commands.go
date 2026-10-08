@@ -54,6 +54,24 @@ func Decode(r Record) (Command, error) {
 		c = &Suppress{}
 	case "Rename":
 		c = &Rename{}
+	case "SetColor":
+		c = &SetColor{}
+	case "SetOpacity":
+		c = &SetOpacity{}
+	case "SetVisibility":
+		c = &SetVisibility{}
+	case "SetMaterial":
+		c = &SetMaterial{}
+	case "RemoveMaterial":
+		c = &RemoveMaterial{}
+	case "SetMaterialScale":
+		c = &SetMaterialScale{}
+	case "ResetAppearance":
+		c = &ResetAppearance{}
+	case "SetGroup":
+		c = &SetGroup{}
+	case "SetLockProportions":
+		c = &SetLockProportions{}
 	case "RestoreSnapshot":
 		c = &RestoreSnapshot{}
 	default:
@@ -314,6 +332,212 @@ func (c *Rename) Apply(g *cadir.Graph) (Command, error) {
 	return &Rename{ID: c.ID, Name: old}, nil
 }
 
+// ---- Appearance (presentation only; never affects geometry) ------------------------
+
+// IsAppearance reports whether a command type only edits presentation metadata (appearance
+// and design-tree grouping).
+func IsAppearance(t string) bool {
+	switch t {
+	case "SetColor", "SetOpacity", "SetVisibility", "ResetAppearance", "SetMaterial", "RemoveMaterial", "SetMaterialScale", "SetGroup",
+		"SetLockProportions":
+		return true
+	}
+	return false
+}
+
+// edit applies f to the node's appearance and normalizes an empty result back to nil.
+func editAppearance(g *cadir.Graph, id string, f func(a *cadir.Appearance)) (old *cadir.Appearance, err error) {
+	n, err := mustNode(g, id)
+	if err != nil {
+		return nil, err
+	}
+	old = n.Appearance.Clone()
+	a := n.Appearance.Clone()
+	if a == nil {
+		a = &cadir.Appearance{}
+	}
+	f(a)
+	if a.IsZero() {
+		a = nil
+	}
+	n.Appearance = a
+	return old, nil
+}
+
+// SetColor sets the color ("#RRGGBB"); an empty Color clears the override.
+type SetColor struct {
+	ID    string `json:"id"`
+	Color string `json:"color"`
+}
+
+func (*SetColor) Type() string { return "SetColor" }
+
+func (c *SetColor) Apply(g *cadir.Graph) (Command, error) {
+	col := ""
+	if c.Color != "" {
+		var err error
+		if col, err = cadir.NormalizeColor(c.Color); err != nil {
+			return nil, err
+		}
+	}
+	var prev string
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) { prev = a.Color; a.Color = col }); err != nil {
+		return nil, err
+	}
+	return &SetColor{ID: c.ID, Color: prev}, nil
+}
+
+// SetOpacity sets opacity in [0,1]; nil clears the override.
+type SetOpacity struct {
+	ID      string   `json:"id"`
+	Opacity *float64 `json:"opacity"`
+}
+
+func (*SetOpacity) Type() string { return "SetOpacity" }
+
+func (c *SetOpacity) Apply(g *cadir.Graph) (Command, error) {
+	if c.Opacity != nil {
+		if err := cadir.ValidateOpacity(*c.Opacity); err != nil {
+			return nil, err
+		}
+	}
+	var prev *float64
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) {
+		prev = a.Opacity
+		a.Opacity = c.Opacity
+	}); err != nil {
+		return nil, err
+	}
+	return &SetOpacity{ID: c.ID, Opacity: prev}, nil
+}
+
+// SetVisibility shows or hides the object; nil clears the override.
+type SetVisibility struct {
+	ID      string `json:"id"`
+	Visible *bool  `json:"visible"`
+}
+
+func (*SetVisibility) Type() string { return "SetVisibility" }
+
+func (c *SetVisibility) Apply(g *cadir.Graph) (Command, error) {
+	var prev *bool
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) {
+		prev = a.Visible
+		a.Visible = c.Visible
+	}); err != nil {
+		return nil, err
+	}
+	return &SetVisibility{ID: c.ID, Visible: prev}, nil
+}
+
+// SetMaterial assigns a visual material by id (empty clears it). A material change never
+// touches the kernel; the library is resolved at render time, so unknown ids are allowed.
+// ClearColor also drops the color override so the material's own color shows (the usual
+// intent of "make it aluminum"); the inverse restores the whole previous appearance.
+type SetMaterial struct {
+	ID         string `json:"id"`
+	MaterialID string `json:"material_id"`
+	ClearColor bool   `json:"clear_color,omitempty"`
+}
+
+func (*SetMaterial) Type() string { return "SetMaterial" }
+
+func (c *SetMaterial) Apply(g *cadir.Graph) (Command, error) {
+	old, err := editAppearance(g, c.ID, func(a *cadir.Appearance) {
+		a.MaterialID = c.MaterialID
+		if c.ClearColor {
+			a.Color = ""
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &ResetAppearance{ID: c.ID, Restore: old}, nil
+}
+
+// RemoveMaterial clears the visual material. Its inverse is a SetMaterial restoring it.
+type RemoveMaterial struct {
+	ID string `json:"id"`
+}
+
+func (*RemoveMaterial) Type() string { return "RemoveMaterial" }
+
+func (c *RemoveMaterial) Apply(g *cadir.Graph) (Command, error) {
+	var prev string
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) { prev = a.MaterialID; a.MaterialID = "" }); err != nil {
+		return nil, err
+	}
+	return &SetMaterial{ID: c.ID, MaterialID: prev}, nil
+}
+
+// SetMaterialScale sets the texture scale multiplier (>0); nil clears the override.
+type SetMaterialScale struct {
+	ID    string   `json:"id"`
+	Scale *float64 `json:"scale"`
+}
+
+func (*SetMaterialScale) Type() string { return "SetMaterialScale" }
+
+func (c *SetMaterialScale) Apply(g *cadir.Graph) (Command, error) {
+	if c.Scale != nil {
+		if err := cadir.ValidateTextureScale(*c.Scale); err != nil {
+			return nil, err
+		}
+	}
+	var prev *float64
+	if _, err := editAppearance(g, c.ID, func(a *cadir.Appearance) { prev = a.TextureScale; a.TextureScale = c.Scale }); err != nil {
+		return nil, err
+	}
+	return &SetMaterialScale{ID: c.ID, Scale: prev}, nil
+}
+
+// ResetAppearance replaces the whole appearance with Restore (nil = defaults). Its
+// inverse carries the previous appearance, so undo restores it exactly.
+type ResetAppearance struct {
+	ID      string            `json:"id"`
+	Restore *cadir.Appearance `json:"restore,omitempty"`
+}
+
+func (*ResetAppearance) Type() string { return "ResetAppearance" }
+
+func (c *ResetAppearance) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	old := n.Appearance.Clone()
+	if c.Restore.IsZero() {
+		n.Appearance = nil
+	} else {
+		n.Appearance = c.Restore.Clone()
+	}
+	return &ResetAppearance{ID: c.ID, Restore: old}, nil
+}
+
+// ---- SetGroup (design-tree organization; never affects geometry) -------------------
+
+// SetGroup puts a node in a named group; an empty Group removes it from its group.
+type SetGroup struct {
+	ID    string `json:"id"`
+	Group string `json:"group"`
+}
+
+func (*SetGroup) Type() string { return "SetGroup" }
+
+func (c *SetGroup) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	name, err := cadir.NormalizeGroup(c.Group)
+	if err != nil {
+		return nil, err
+	}
+	old := n.Group
+	n.Group = name
+	return &SetGroup{ID: c.ID, Group: old}, nil
+}
+
 // ---- RestoreSnapshot (checkpoint restore) ------------------------------------------
 
 type RestoreSnapshot struct {
@@ -334,4 +558,24 @@ func (c *RestoreSnapshot) Apply(g *cadir.Graph) (Command, error) {
 	}
 	g.Units, g.Nodes = next.Units, next.Nodes
 	return &RestoreSnapshot{Graph: old, From: c.From}, nil
+}
+
+// ---- SetLockProportions (dimension-editing preference; never affects geometry) ------
+
+// SetLockProportions turns proportional dimension editing of a body on or off.
+type SetLockProportions struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+
+func (*SetLockProportions) Type() string { return "SetLockProportions" }
+
+func (c *SetLockProportions) Apply(g *cadir.Graph) (Command, error) {
+	n, err := mustNode(g, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	old := n.LockProportions
+	n.LockProportions = c.Enabled
+	return &SetLockProportions{ID: c.ID, Enabled: old}, nil
 }

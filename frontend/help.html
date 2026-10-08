@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simon CAD Help</title>
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="stylesheet" href="help.css">
+</head>
+<body>
+<header class="top">
+  <button id="menu-btn" type="button" aria-label="Contents">☰</button>
+  <a class="brand" href="help.html"><img src="assets/mark.png" alt="">SIMON <b>CAD</b></a>
+  <span class="sub">Help &amp; prompt cookbook</span>
+  <span class="spacer"></span>
+  <input id="q" type="search" placeholder="Search help…  ( / )" aria-label="Search help">
+  <a class="btn" href="./" title="Back to the app">Open the app</a>
+</header>
+
+<div class="wrap">
+<nav id="toc" aria-label="Contents"></nav>
+<main>
+
+<section>
+<h1>Simon CAD Help</h1>
+<p class="lead">Simon CAD is an <b>agent-first</b> CAD environment for robotics, mechatronics and 3D-printable parts. You describe what you want in plain language (and by clicking things in the 3D view); the agent turns it into validated, undoable, replayable CAD operations. This page documents everything the app can do today, with prompts you can copy and paste.</p>
+
+<div class="callout tip"><strong>How to use this page.</strong> Every <span style="color:var(--accent)">PROMPT</span> block has a <em>Copy</em> button. Paste it into the <b>Conversation</b> box on the right of the app and press <kbd>Enter</kbd>. Blocks marked <span style="color:var(--ghost)">TOOL ARGUMENTS</span> are exact JSON for the command palette (<kbd>Ctrl</kbd>+<kbd>K</kbd>). Press <kbd>/</kbd> to search this page.</div>
+
+<div class="grid">
+  <div class="card"><h4>1 · Describe</h4><p>“Create a 100 × 60 × 4 mm plate.” Natural language, any phrasing.</p></div>
+  <div class="card"><h4>2 · Review</h4><p>The agent proposes a <b>ChangeSet</b>. Preview it as a ghost in the viewport.</p></div>
+  <div class="card"><h4>3 · Commit</h4><p>Commit it, or reject it. Everything is undoable and checkpointed.</p></div>
+  <div class="card"><h4>4 · Refine</h4><p>Select a face, edit a parameter, ask for changes. Export STEP / STL when done.</p></div>
+</div>
+</section>
+
+<section>
+<h2 id="quickstart" data-group="Getting started">Quick start</h2>
+<p>Start the app, which opens in your browser:</p>
+<div class="prompt cmd">make ui
+# or
+./out/simoncad --project my_part.scadproj</div>
+<p>The agent needs an LLM provider configured in <code>.env</code> (see <a href="#config">Configuration</a>). Without a key, everything except free-form prompts still works: palette tools, parameter edits, undo/redo, timeline, materials, export.</p>
+
+<h3>Your first five minutes</h3>
+<ol>
+  <li>Type in the Conversation box:
+    <div class="prompt">Create a 100 x 60 x 4 mm plate called base_plate.</div></li>
+  <li>The agent replies with a ChangeSet card. Click <b>Preview</b> to see the ghost, then <b>Commit</b> (at <i>Review</i> level).</li>
+  <li>Click the top face of the plate in the viewport. A chip appears above the prompt. Then:
+    <div class="prompt">Add four M3 clearance holes, 8 mm in from each corner.</div></li>
+  <li>Make it look right:
+    <div class="prompt">Make the plate brushed aluminum.</div></li>
+  <li>Round it and export:
+    <div class="prompt">Fillet the four vertical corner edges with a 5 mm radius, then export it as STL to out/base_plate.stl.</div></li>
+  <li>Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to save the project.</li>
+</ol>
+</section>
+
+<section>
+<h2 id="tour" data-group="Getting started">Interface tour</h2>
+<div class="ui-map" aria-hidden="true">
+  <div class="hd"><b>Header</b> · project menu (New / Open) · Undo / Redo · Save · Export · Components · Help · ⋯ (palette, Level)</div>
+  <div><b>Design tree</b><br>features, status, intent, parameters, appearance<br><br><b>Components</b><br>reusable projects<br><br><b>Selection</b><br>what you picked</div>
+  <div><b>Action bar</b> · only what fits the selection<br><br><b>3D viewport</b><br>view cube, ghost preview</div>
+  <div><b>Simon Agent</b><br>agent chat, ChangeSet cards<br><br><b>Composer</b><br>chips, attach, prompt box</div>
+  <div class="tl"><b>History</b> · collapsible checkpoints; select one for Restore / Compare</div>
+</div>
+
+<table>
+<tr><th>Area</th><th>What it does</th></tr>
+<tr><td><b>Header</b></td><td>The <b>project name</b> opens a menu with <b>New</b> and <b>Open</b> (Open lists projects in <code>projects_output</code>, or type a path); <b>Undo/Redo</b>; <b>Save</b>; <b>Export</b> STEP or STL; <b>Help</b> (this page); <b>⋯</b> for the <b>⌘K</b> command palette and the interaction <b>Level</b> (Review/Auto). The outer buttons show or hide the side panels, which you can also resize by dragging their edge.</tr>
+<tr><td><b>Design tree</b></td><td>Every feature with a status dot, its intent, and user/agent provenance. Click a row to select it and see its details, parameters (each edit is a <code>modify_parameter</code> ChangeSet) and Appearance; Shift/Ctrl-click selects several. The eye toggles visibility; double-click or F2 renames; right-click or press-and-hold for more (Duplicate, Group, Suppress, Delete…, and <b>Create component…</b>). A row marked <b>Component</b> is an <i>instance</i> of a reusable project rather than geometry of its own; its menu offers Open, Update, Replace and Detach, and the badge turns amber when its component has changed since. <b>Groups</b> appear as folders: click one to select all its bodies, use its arrow to fold it, its eye to hide it, and ⋯ to rename, duplicate or ungroup it.</td></tr>
+<tr><td><b>Components panel</b></td><td>The component library: every reusable project it can find. Search it, and per entry <b>Insert</b> an instance, <b>Open</b> it for editing, <b>Rename</b> its library details or <b>Delete</b> it. When instances in the open project have fallen behind their component, a button at the top offers to update them, and the <b>Components</b> header button turns amber. The button at the bottom publishes the project you are in as a component. See <a href="#components">Components</a>.</td></tr>
+<tr><td><b>Selection panel</b></td><td>The faces / edges / vertices / bodies currently picked, plus shared appearance controls when several bodies are selected. With one object selected, its <b>Dimensions</b>: width, height, depth, Lock proportions and the resize anchor.</td></tr>
+<tr><td><b>Action bar</b></td><td>The strip above the viewport shows only what makes sense for the current selection. With nothing selected: <b>Select</b> mode, <b>Create</b>, <b>Measure</b> (<kbd>M</kbd>), <b>Section</b> plane (X/Y/Z + offset), <b>View</b> (mesh view, standard views, play design) and <b>Fit</b> (<kbd>F</kbd>). With a body: Move, Rotate, Scale, Duplicate, Align, Mirror, Pattern, Fillet, Chamfer, Group (Ungroup when it is in one), Material, Color, Hide, Delete. With a face: Hole, Extrude, Inset, Offset. With edges: Fillet, Chamfer. With two bodies: Union, Subtract, Intersect, plus Align and Group for any number of bodies. Actions that do not fit move into <b>More</b>.</td></tr>
+<tr><td><b>Viewport</b></td><td>Orbit, pan, zoom; view cube (click a face/edge/corner to snap the view); hover highlight; ghost preview of proposed changes.</td></tr>
+<tr><td><b>History</b></td><td>A semantic checkpoint after every committed ChangeSet, in a collapsible strip. Select a step to get <b>Restore</b>, which proposes going back (never auto-committed). <b>Compare</b> shows features/parameters changed and the volume delta.</td></tr>
+<tr><td><b>Conversation</b></td><td>Your messages, the agent’s answers and ChangeSet cards (commands, affected features, warnings, validation, volume delta, Preview / Commit / Reject). <b>Clear</b> resets the chat and the attached documents.</td></tr>
+<tr><td><b>Composer</b></td><td>Selection chips, attached documents (📄) and images, <b>📎 Attach</b>, <b>Create from Image</b>, <b>Thinking mode</b> checkbox, prompt box (<kbd>Enter</kbd> sends, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line).</td></tr>
+</table>
+</section>
+
+<section>
+<h2 id="concepts" data-group="Getting started">Core concepts</h2>
+<h3>ChangeSets: nothing happens behind your back</h3>
+<p>Every change, from you, from the palette or from the agent, is a <b>ChangeSet</b>: a small list of validated commands that is previewed, then committed as a unit. There is no hidden path that edits the model. That is why every edit can be undone, replayed and compared.</p>
+<h3>Interaction level</h3>
+<table>
+<tr><th>Level</th><th>Behaviour</th></tr>
+<tr><td><b>Review</b> (default)</td><td>Every ChangeSet is shown as a proposal; you Preview, then Commit or Reject. Agent edits that were committed during a turn appear as a <i>draft</i> you can keep or discard.</td></tr>
+<tr><td><b>Auto</b></td><td>Low-risk single-feature ChangeSets commit immediately. Multi-feature changes and checkpoint restores are always previewed.</td></tr>
+</table>
+<h3>Parametric, with expressions</h3>
+<p>Features store parameters (<code>dx</code>, <code>radius</code>, <code>depth</code>…). Change one and everything downstream rebuilds. A parameter can also be <em>driven</em> by an expression referencing other features, e.g. <code>plate.dz * 3</code>. Allowed: numbers, <code>+ - * / ^</code>, parentheses, <code>pi</code>, <code>sin cos tan sqrt abs min max round</code>.</p>
+<h3>Selectors</h3>
+<p>Clicks become topology-backed selectors the agent understands:</p>
+<table>
+<tr><th>Selector</th><th>Meaning</th></tr>
+<tr><td><code>face(feature=F, side=+Z)</code></td><td>Planar face facing +Z at the extreme of the part</td></tr>
+<tr><td><code>face(feature=F, side=+Z, at=6)</code></td><td>Planar face facing +Z in the plane z=6 (e.g. a pocket floor)</td></tr>
+<tr><td><code>face(feature=F, index=N)</code></td><td>Any face (cylinder walls…) by kernel index</td></tr>
+<tr><td><code>edge(feature=F, index=N)</code>, <code>vertex(feature=F, index=N)</code></td><td>Edge / vertex by index</td></tr>
+<tr><td><code>body(feature=F)</code></td><td>The whole body</td></tr>
+</table>
+<p class="muted"><code>index=</code> selectors are only valid for the model they were picked on, so the selection is cleared whenever the model changes.</p>
+<h3>Coordinates and units</h3>
+<p>Millimetres and degrees. X right, Y into the screen, Z up. Planes: <b>XY</b> (normal +Z; u=X, v=Y), <b>YZ</b> (normal +X; u=Y, v=Z), <b>XZ</b> (normal +Y; u=Z, v=X).</p>
+</section>
+
+<section>
+<h2 id="prompting" data-group="Talking to the agent">How to write good prompts</h2>
+<ul>
+  <li><b>State dimensions in mm</b> and say what the part is for. “A 20 mm standoff for an M3 screw” beats “a post”.</li>
+  <li><b>Name things.</b> “called base_plate” gives you a stable id to refer to later (“fillet base_plate”).</li>
+  <li><b>Select instead of describing.</b> Click the face, then say “add a hole here”. The agent sees the face’s type, normal, centroid, bbox and area.</li>
+  <li><b>One idea per prompt</b> when you want precise review. Chain several in one prompt when you trust the result.</li>
+  <li><b>Ask before changing.</b> “What are the features and volume of the model?” is a query: it changes nothing.</li>
+  <li><b>Correct freely.</b> “Make the holes 3.4 instead”, “undo that”, “go back to before the fillet”.</li>
+  <li><b>Thinking mode</b> (checkbox) enables extended reasoning for hard requests; turn it off for instant answers to simple ones.</li>
+</ul>
+<div class="callout"><strong>Intent verbs.</strong> The palette offers openers for engineering intent: <i>Mount, Attach, Connect, Reinforce, Fit, Clear, Hollow, Support, Align, Center, Protect, Lighten, Adapt, Enclose</i>. They drop a sentence starter in the prompt box for you to complete, e.g. <code>Reinforce …</code>.</div>
+<h3>Intent-style prompts</h3>
+<div class="prompt">Mount a NEMA 17 stepper (42.3 mm square, 31 mm hole spacing, 22 mm center boss) on the front of this plate.</div>
+<div class="prompt">Hollow the box leaving 2 mm walls and an open top.</div>
+<div class="prompt">Lighten this bracket: add three 8 mm round pockets through the web, evenly spaced.</div>
+<div class="prompt">Reinforce the inside corner with a 6 mm fillet.</div>
+<div class="prompt">Center the boss on the top face of the plate.</div>
+</section>
+
+<section>
+<h2 id="primitives" data-group="Prompt cookbook">Primitives</h2>
+<p>Box, cylinder, sphere, cone / frustum, torus. Position with <code>x,y,z</code> (box: minimum corner; others: center or base center). Cylinders, cones and tori take an <code>axis</code> (x, y or z).</p>
+<div class="prompt">Create a 100 x 60 x 4 mm plate.</div>
+<div class="prompt">Add a 12 mm diameter, 20 mm tall cylinder standing on the plate at x=50, y=30.</div>
+<div class="prompt">Create a sphere of radius 15 mm at the origin.</div>
+<div class="prompt">Make a cone with a 20 mm base radius, 8 mm top radius and 30 mm height.</div>
+<div class="prompt">Create a torus with a 25 mm major radius and a 3 mm tube radius, lying flat.</div>
+<div class="prompt">Add a horizontal cylinder along the X axis, radius 5, length 80, centered at y=30 z=20.</div>
+<div class="prompt">Create a 40 x 40 x 40 mm cube named block.</div>
+</section>
+
+<section>
+<h2 id="sketches" data-group="Prompt cookbook">Sketches, extrude and cut</h2>
+<p>For anything that is not a primitive, sketch a 2D profile and extrude it. Profiles: rectangle, circle, slot, polygon (and lines/arcs in full sketches). <b>Add</b> material or <b>cut</b> (requires a target; <i>through</i> cuts everything).</p>
+<h3>Quick profile + extrude</h3>
+<div class="prompt">Extrude a 40 x 20 mm rectangle 8 mm tall on the XY plane.</div>
+<div class="prompt">Make an L-shaped bracket: polygon with points (0,0) (60,0) (60,5) (5,5) (5,40) (0,40), extruded 25 mm.</div>
+<div class="prompt">Cut a 30 mm long, 6 mm wide slot through the plate, from (20,30) to (50,30).</div>
+<div class="prompt">Cut a 20 mm diameter circular pocket 3 mm deep into the top of base_plate, centered on the plate.</div>
+<div class="prompt">Extrude a circle of radius 10 symmetrically, 20 mm total.</div>
+<h3>Full sketches (reusable, editable)</h3>
+<div class="prompt">Create a sketch on the XY plane with a 60 x 30 rectangle at the origin and a 6 mm diameter circle centered at (30,15), then extrude both regions 5 mm.</div>
+<div class="prompt">Sketch on the selected face: a 10 mm circle at the center, then cut it 4 mm into the material.</div>
+<div class="prompt">Create a sketch on the XZ plane offset 10 mm with a slot from (0,0) to (30,0) width 8, and extrude it 15 mm.</div>
+<div class="result">Sketches drawn on a face start at the face centroid, with u along its longest straight edge. A cut from a sketch on a face goes into the material.</div>
+</section>
+
+<section>
+<h2 id="holes" data-group="Prompt cookbook">Holes</h2>
+<p>Simple, counterbore and countersink holes on axis-aligned planar faces. The face defaults to the top (+Z) of the target. Omit depth for a through hole. Typical sizes: M3 clearance 3.2–3.4 mm, M4 4.3–4.5, M5 5.3–5.5.</p>
+<div class="prompt">Drill an 8 mm hole through the center of the plate.</div>
+<div class="prompt">Add four M3 holes (3.4 mm) at (10,10), (90,10), (10,50) and (90,50).</div>
+<div class="prompt">Add a 5 mm hole, 6 mm deep, into the selected face.</div>
+<div class="prompt">Add an M4 counterbore hole: 4.5 mm through, 8 mm counterbore diameter, 4 mm counterbore depth, at the center.</div>
+<div class="prompt">Add a countersunk M3 hole: 3.4 mm through, 6.5 mm countersink diameter, 90 degrees, at (20,20).</div>
+<div class="prompt">Drill a 6 mm hole in the -X side face of the block.</div>
+<div class="prompt">Add 4 M3 holes here, 8 mm in from each corner of this face.  <span class="muted">(with a face selected)</span></div>
+<div class="callout warn"><strong>Limit.</strong> Holes currently start only from axis-aligned planar faces.</div>
+</section>
+
+<section>
+<h2 id="finishing" data-group="Prompt cookbook">Fillets and chamfers</h2>
+<p>By default they treat <b>every edge</b> of the body. Select specific edges first (set the pick filter to <i>Edge</i>, shift-click several) and they only touch those.</p>
+<div class="prompt">Fillet all edges of base_plate with a 2 mm radius.</div>
+<div class="prompt">Chamfer the selected edges 1 mm.</div>
+<div class="prompt">Round only the four vertical corner edges of the plate with a 6 mm radius.</div>
+<div class="prompt">Add a 0.5 mm chamfer to the outer edges after cutting the pocket.</div>
+<div class="result">Tip: fillet/chamfer last. Changing earlier features later rebuilds them, but a radius that no longer fits will fail with an actionable message.</div>
+</section>
+
+<section>
+<h2 id="booleans" data-group="Prompt cookbook">Booleans, patterns, mirror, transform</h2>
+<h3>Boolean (union · subtract · intersect)</h3>
+<p>Both inputs are consumed. Create the tool body first, position it, then combine.</p>
+<div class="prompt">Union the boss cylinder into base_plate.</div>
+<div class="prompt">Create a 30 x 30 x 10 box at (35,15,0) and subtract it from the plate to make a pocket.</div>
+<div class="prompt">Intersect the sphere with the cube to get a rounded cube.</div>
+<h3>Linear and circular patterns</h3>
+<p>Patterns repeat a <b>hole</b> or <b>extrude-cut</b> feature. <code>count</code> is the total number of instances (2–500).</p>
+<div class="prompt">Repeat the hole 5 times along X with 15 mm spacing.</div>
+<div class="prompt">Make a 4 x 3 grid of the hole: first 4 along X every 20 mm, then 3 along Y every 20 mm.</div>
+<div class="prompt">Pattern the hole 6 times around the Z axis through the center of the plate (50,30).</div>
+<div class="prompt">Make a half-circle arc of 5 holes: circular pattern, 180 degrees total, around z through (0,0).</div>
+<h3>Mirror</h3>
+<div class="prompt">Mirror the arm across the YZ plane and merge with the original.</div>
+<div class="prompt">Mirror the bracket across the XZ plane shifted 20 mm along +Y.</div>
+<h3>Move and rotate</h3>
+<p><b>In the viewport</b> (Blender style): select one object and press <kbd>G</kbd> to move it or <kbd>R</kbd> to rotate it (or right-click it → <b>Transform → Move / Rotate</b>, or the Move/Rotate buttons of the action bar). The object follows the mouse; nothing changes in the model until you confirm. While moving, <kbd>X</kbd> / <kbd>Y</kbd> / <kbd>Z</kbd> constrain the move to that axis and <kbd>Shift</kbd>+<kbd>X</kbd> / <kbd>Y</kbd> / <kbd>Z</kbd> to the plane normal to it (<kbd>Shift</kbd>+<kbd>Z</kbd> = XY); by default it moves in the workspace grid plane. While rotating, <kbd>X</kbd> / <kbd>Y</kbd> / <kbd>Z</kbd> pick the axis (default: the grid plane's normal) and <kbd>P</kbd> switches the pivot between the object's origin and its center. Press the same key again to go back to the default. With snapping on (Settings → Workspace), the object's origin lands on the grid and angles on the rotation increment; hold <kbd>Ctrl</kbd> to suspend snapping. The bar at the bottom of the viewport shows the move, the position or the angle in the project's units. <b>Left-click</b> or <kbd>Enter</kbd> confirms (one undoable change, <kbd>Ctrl</kbd>+<kbd>Z</kbd>); <kbd>Esc</kbd> or a <b>right-click</b> cancels and puts the object back exactly. A component instance is moved through its own placement; the component itself never changes.</p>
+<div class="prompt">Move the cylinder 25 mm along +X and 10 mm up.</div>
+<div class="prompt">Move the selected object to X=100, Y=50.</div>
+<div class="prompt">Rotate this component 45 degrees around Z.</div>
+<div class="prompt">Rotate the selected object 90 degrees around its center.</div>
+<div class="prompt">Rotate the arm 90 degrees about the Z axis through the origin, then move it 50 mm in X.</div>
+<div class="prompt">Tilt the plate 30 degrees about the X axis.</div>
+</section>
+
+<section>
+<h2 id="body-edit" data-group="Prompt cookbook">Scale, dimensions, duplicate, align and groups</h2>
+<h3>Scale</h3>
+<p>Uniform with a factor, or per axis. The fixed point is the body’s centre by default; <i>base</i> keeps the bottom on the print bed.</p>
+<div class="prompt">Make the bracket 50% bigger, keeping it on the bed.</div>
+<div class="prompt">Scale the lid to 80% along X only.</div>
+<div class="prompt">Scale this part by 2 about the origin.</div>
+<h3>Dimensions</h3>
+<p>Select an object to see its <b>width, depth and height</b> in the viewport (along the object’s own axes, so a rotated part keeps its width), in every view of the Quad layout. <b>Click a number</b> to type a new size: <kbd>Enter</kbd> applies it, <kbd>Esc</kbd> cancels, <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it. The same values are editable in the Selection panel’s <b>Dimensions</b> section. Only the dimension you change changes, unless <b>Lock proportions</b> is on; the <b>anchor</b> (center or object origin) is the point that stays put. It is a scale of the body, not a parametric edit: a cylinder made wider becomes elliptical and holes scale with the part.</p>
+<div class="prompt">Increase the width of this part to 150 mm without changing its height or depth.</div>
+<div class="prompt">Incrementá el ancho de esta pieza a 150 mm sin modificar su altura ni profundidad.</div>
+<div class="prompt">Make the lid 60 mm tall keeping its proportions.</div>
+<div class="prompt">Resize the bracket to 80 × 40 × 12 mm about its origin.</div>
+<div class="prompt">What are the dimensions of the selected part?</div>
+<h3>Duplicate</h3>
+<p>A copy is <b>linked</b>: it follows later parameter edits of its source (change the source’s size and the copy changes too). It keeps the source’s colour, material and group. <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates the selection.</p>
+<div class="prompt">Duplicate the standoff 20 mm along +X.</div>
+<div class="prompt">Make a copy of these two parts 50 mm up.</div>
+<h3>Align</h3>
+<p>Moves bodies so their bounding boxes line up (each moved body gets a <code>transform</code> feature, all in one undoable change). With several bodies the first selected stays put; with one body, alignment is to the world origin.</p>
+<div class="prompt">Align the selected parts on their centres along X and Y.</div>
+<div class="prompt">Put the boss on the floor (minimum Z = 0).</div>
+<div class="prompt">Line up the tops of these three blocks with the base plate.</div>
+<h3>Groups</h3>
+<p>Groups organize the design tree; they never merge geometry (use a boolean union for that). Grouping is presentation-only: it commits immediately, never rebuilds geometry, and is undoable. A feature built on a grouped body joins its group. <kbd>Ctrl</kbd>+<kbd>G</kbd> groups the selection, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> ungroups it.</p>
+<div class="prompt">Group the base plate and the bosses as “Chassis”.</div>
+<div class="prompt">Rename the Chassis group to “Frame”.</div>
+<div class="prompt">Ungroup Frame.</div>
+</section>
+
+<section>
+<h2 id="components" data-group="Prompt cookbook">Components: reusable projects</h2>
+<p>A <b>component is a reusable project</b>. There is no second kind of thing to learn: you save a project as reusable, and other projects can place <b>instances</b> of it. An instance is a <i>reference</i>, not a copy — four wheels on a car are four references to one wheel project. Edit the wheel once and every car that uses it can pick the change up.</p>
+<p>Open the <b>Components</b> panel from the header to browse, search, insert, open, rename and delete them.</p>
+
+<h3>Create one from what you already modelled</h3>
+<p>Select the objects and use <b>Component</b> in the action bar, <b>Create component…</b> in the right-click menu, or just ask. The geometry <i>moves</i> into a new reusable project and is replaced in place by a single instance.</p>
+<div class="prompt">Turn the selected brake assembly into a reusable component called “Brake”.</div>
+<div class="prompt">Make this wheel a component named Wheel, tagged chassis.</div>
+<p>The selection has to be <b>self-contained</b>: nothing outside it may depend on it, and it may not depend on anything outside. If it is not, the refusal names the features that cross the line so you can add them to the selection or detach them first.</p>
+
+<h3>Place instances</h3>
+<p><b>Insert</b> from the Components panel, or ask for them. Each instance has its own placement — position, rotation and scale — which stays editable in the design tree like any other parameter.</p>
+<div class="prompt">Use the Wheel component from my library and place four instances on the car.</div>
+<div class="prompt">Insert the Engine component at x=0, y=120, z=40.</div>
+<div class="prompt">Move Wheel FL 10 mm along X.</div>
+
+<h3>Edit a component</h3>
+<p><b>Open component</b> opens its project normally — the same tree, the same tools, the same agent. There is no separate component editor. Save it, reopen the project that uses it, and the instances are flagged <b>out of date</b>: the design tree badge turns amber and the Components panel offers to update them.</p>
+<div class="prompt">Update all component instances to the latest version.</div>
+<p>Updating is an ordinary ChangeSet, so you can review it, see it in the history, and undo it. Undoing restores the <i>old reference</i>, which simply puts the instances back to “out of date” — it does not bring back the old geometry, because only the latest saved version of a component is kept.</p>
+
+<h3>Components inside components</h3>
+<p>A component may contain other components, to any depth — a wheel assembly made of a tire, a rim (itself containing a hub) and a brake assembly. There is no nesting limit. What is refused is a <b>circular reference</b>: if A uses B and B uses C, then C cannot use A. The refusal spells out the chain it would have closed.</p>
+
+<h3>Detach</h3>
+<p><b>Detach component</b> replaces an instance with its own local copy of the geometry, as ordinary features in your tree. After detaching, changes to the component no longer reach it. Detaching is refused while other features are built on the instance — remove or re-point them first.</p>
+<div class="prompt">Detach Wheel FL so I can modify just that one.</div>
+
+<h3>Publish the project you are in</h3>
+<p>The button at the bottom of the Components panel marks the <i>current</i> project as reusable, so other projects can instantiate it. Save afterwards to publish it. Use it when a project <i>is</i> the part, rather than containing it.</p>
+
+<table>
+<tr><th>Instead of…</th><th>Use…</th></tr>
+<tr><td>The same shape repeated, each copy free to differ</td><td><b>Duplicate</b> — a linked copy inside one project, following its source’s parameters</td></tr>
+<tr><td>Tidying the design tree without changing geometry</td><td><b>Groups</b> — presentation only</td></tr>
+<tr><td>A part you want to reuse across <i>different</i> projects, and maintain in one place</td><td><b>Components</b></td></tr>
+</table>
+</section>
+
+<section>
+<h2 id="face-edit" data-group="Prompt cookbook">Face extrude, inset and offset</h2>
+<p>Select a face (pick filter <i>Face</i> or <i>Auto</i>), then use <b>Extrude</b>, <b>Inset</b> or <b>Offset</b> in the action bar, or ask the agent. Each is a parametric feature: its distance stays editable in the design tree.</p>
+<table>
+<tr><th>Operation</th><th>What it does</th></tr>
+<tr><td><b>Extrude</b> (push/pull)</td><td>Sweeps the exact outline of a planar face along its normal. Positive adds material outward; negative cuts into the body.</td></tr>
+<tr><td><b>Inset</b></td><td>Shrinks a planar face’s outline by a distance from its edges. With a depth the inset region becomes a pad (+) or a pocket with a rim (−). Without depth it only splits the face, so the inner face can be selected and extruded on its own.</td></tr>
+<tr><td><b>Offset</b></td><td>Moves any face along its normal; the faces around it stretch or shrink to follow. On a cylinder the radius changes. “Outward” means out of the material, so on a hole wall a positive offset makes the hole <i>smaller</i>.</td></tr>
+</table>
+<div class="prompt">Pull the selected face out 5 mm.</div>
+<div class="prompt">Push this face in 2 mm.</div>
+<div class="prompt">Inset the top face 3 mm and sink it 4 mm to make a tray.</div>
+<div class="prompt">Inset this face 2 mm and raise it 1 mm as a pad.</div>
+<div class="prompt">Make the selected hole 0.2 mm bigger for clearance.  <span class="muted">(face_offset −0.1 on the hole wall)</span></div>
+<div class="result">Faces picked by index belong to the model they were picked on: select again after other changes. Several faces of one body are edited one at a time.</div>
+</section>
+
+<section>
+<h2 id="params" data-group="Prompt cookbook">Parameters, expressions and feature management</h2>
+<h3>Change a value</h3>
+<div class="prompt">Make the plate 5 mm thick instead of 4.</div>
+<div class="prompt">Change the boss radius to 8.</div>
+<p>You can also expand a node in the Design tree and type the new number: each edit is a <code>modify_parameter</code> ChangeSet.</p>
+<h3>Link parameters with expressions</h3>
+<div class="prompt">Make the boss height always three times the plate thickness.</div>
+<div class="prompt">Drive the standoff height with the expression plate.dz * 3 + 2.</div>
+<div class="prompt">Clear the expression on the boss height and keep its current value.</div>
+<h3>Rename, suppress, remove</h3>
+<div class="prompt">Rename box_1 to “Base plate”.</div>
+<div class="prompt">Suppress the fillet so I can see the part without it, then unsuppress it.</div>
+<div class="prompt">Remove the second hole feature.</div>
+<div class="result">Suppressing is non-destructive. Removing fails if other features depend on the feature; the message lists them.</div>
+</section>
+
+<section>
+<h2 id="inspect" data-group="Prompt cookbook">Inspect and measure</h2>
+<p>Queries never change the model.</p>
+<div class="prompt">Summarize the model: features, bounding boxes and volumes.</div>
+<div class="prompt">What is the distance between the top face of the plate and the top of the boss?</div>
+<div class="prompt">How far apart are the two selected faces?</div>
+<div class="prompt">What checkpoints do I have?</div>
+<div class="prompt">Which feature owns the selected face, and what depends on it?</div>
+<p>In the viewport, the <b>Measure</b> action gives a two-point measurement overlay: click two surface points.</p>
+</section>
+
+<section>
+<h2 id="delete" data-group="Prompt cookbook">Delete</h2>
+<p><kbd>Delete</kbd> / <kbd>Backspace</kbd> (outside text fields) or <b>Delete</b> in the right-click menu deletes the selection as one ChangeSet; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it. The app only asks two questions, both before anything changes: <em>“a face/edge/vertex can’t be deleted — delete its owning feature instead?”</em> and <em>“these features depend on it — delete them too?”</em></p>
+<div class="prompt">Delete this.  <span class="muted">(with an object selected)</span></div>
+<div class="prompt">Remove the selected part.</div>
+<div class="prompt">Delete the boss and everything that depends on it.</div>
+<div class="prompt">Delete these objects.  <span class="muted">(with several selected)</span></div>
+</section>
+
+<section>
+<h2 id="appearance" data-group="Prompt cookbook">Colour, opacity and visibility</h2>
+<p>Presentation only: geometry, volume and exports are not changed. Without a feature name they apply to the <b>current selection</b>. In the UI: expand a feature in the tree → <b>Appearance</b> (colour picker, hex or <code>rgb(r,g,b)</code> field, opacity slider, visibility checkbox, Reset). The eye icon on a tree row toggles visibility.</p>
+<div class="prompt">Make the bracket red.</div>
+<div class="prompt">Color the plate #1f6feb.</div>
+<div class="prompt">Make the cover semi-transparent.</div>
+<div class="prompt">Set opacity to 30% on the selected bodies.</div>
+<div class="prompt">Hide the reference servo.</div>
+<div class="prompt">Show everything again and reset the colors.</div>
+<div class="prompt">What colors and opacities have I overridden?</div>
+<div class="result">Hidden bodies are not pickable and are excluded from Fit, but they still exist and are exported.</div>
+</section>
+
+<section>
+<h2 id="materials-sec" data-group="Prompt cookbook">Materials</h2>
+<p class="muted">A material or colour stays with the part as you keep working on it: a hole, fillet, scale, move, face edit or boolean carries the look of the body it modifies.</p>
+<p>A visual PBR library (30 materials, below). Choose via prompt, via <b>Choose…</b> in the Appearance group (search, category chips, sphere thumbnails), by <b>dragging a thumbnail</b> onto an object or tree row (dropping on a selected object applies to the whole selection), or right-click → <b>Material…</b> / recent materials / <b>Remove material</b>. Color and opacity are overrides on top of the material. Everything is a ChangeSet with undo, and never rebuilds geometry.</p>
+<div class="prompt">Make the bracket brushed aluminum.</div>
+<div class="prompt">Use black ABS for the enclosure and clear glass for the window.</div>
+<div class="prompt">Make the base look like carbon fiber, but keep my blue color.</div>
+<div class="prompt">I want something metallic for this part. What are my options?</div>
+<div class="result">Ambiguous wording (“metallic”, “black plastic”) makes the agent search the library and show you the candidates instead of guessing.</div>
+<div class="prompt">Show me all the wood materials.</div>
+<div class="prompt">Make the wood texture twice as large on the selected panel.</div>
+<div class="prompt">Remove the material from the plate.</div>
+<div class="prompt">What are the properties of titanium?</div>
+<h3>Library</h3>
+<p class="muted">Categories: Metals, Plastics, Rubber, Carbon Fiber, Glass, Electronics, Wood, Generic. Use the id in tool calls.</p>
+<div id="materials" class="swatches"></div>
+</section>
+
+<section>
+<h2 id="history" data-group="Prompt cookbook">Undo, checkpoints and design replay</h2>
+<ul>
+  <li><b>Undo / Redo</b>: header buttons, <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>.</li>
+  <li><b>Timeline</b>: each committed ChangeSet creates a checkpoint labelled with its intent. <b>Restore</b> proposes returning to it (previewed, never auto-committed); <b>Compare</b> shows what differs.</li>
+  <li><b>▶ Play design</b> replays the committed ChangeSets one at a time so the geometry appears feature by feature.</li>
+</ul>
+<div class="prompt">Undo the last change.</div>
+<div class="prompt">Go back to the checkpoint before we added the fillets.</div>
+<div class="prompt">Restore the previous checkpoint.</div>
+<div class="prompt">Restore cp_003.</div>
+</section>
+
+<section>
+<h2 id="viewport" data-group="Using the viewport">Viewport and selection</h2>
+<table>
+<tr><th>Action</th><th>How</th></tr>
+<tr><td>Orbit / pan / zoom</td><td>Left-drag / middle- or right-drag (or shift-drag) / wheel. Orbit only in perspective views; in the orthographic views (Top, Front…) left-drag pans too and the orientation stays fixed.</td></tr>
+<tr><td>Select</td><td>Click. <kbd>Shift</kbd>-click adds to the selection; click empty space clears it.</td></tr>
+<tr><td>Pick filter (<b>Select: Auto ▾</b>)</td><td><b>Auto</b> picks the most specific thing under the cursor; <b>Face</b>, <b>Edge</b>, <b>Vertex</b>, <b>Body</b> force a kind. Edges and vertices are picked in screen space and only when not occluded.</td></tr>
+<tr><td>View cube</td><td>Click a face, edge or corner to snap the camera.</td></tr>
+<tr><td>Fit</td><td><b>Fit</b> button or <kbd>F</kbd> (fits the active view)</td></tr>
+<tr><td>Single / Quad View</td><td><b>View ▾ → Viewport layout</b> or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>4</kbd>. Quad shows Top, Perspective, Front and Right of the same scene, each with its own camera; a click makes a view active (orange border), and Fit, the View menu and measurement work in it. Drag the dividers to resize the views (double-click one to reset).</td></tr>
+<tr><td>View orientation</td><td>Click the label in a view's top-left corner to choose Perspective, Top, Bottom, Front, Back, Left or Right for that view only. Double-click the label to maximize the view; double-click again to restore the quad. Layout, sizes and cameras are remembered per project.</td></tr>
+<tr><td>Section plane</td><td>Choose X / Y / Z in <b>Section</b> and drag the offset slider to cut the view open.</td></tr>
+<tr><td>Measure</td><td>Toggle <b>Measure</b>, click two surface points.</td></tr>
+<tr><td>Mesh view</td><td><b>Mesh</b> shows the triangle mesh (hides grid, edges and sketches).</td></tr>
+<tr><td>Context menu</td><td>Right-click an object: materials, Duplicate, Group, Delete…</td></tr>
+</table>
+<h3>Selection → conversation</h3>
+<p>Your selection appears as chips above the prompt box and is sent with every request. These prompts rely on it:</p>
+<div class="prompt">Add four M3 holes here.</div>
+<div class="prompt">Fillet these edges with 3 mm.</div>
+<div class="prompt">Make this part titanium.</div>
+<div class="prompt">How thick is this wall?</div>
+<h3>Mesh detail</h3>
+<p>The displayed mesh can be coarser or finer without changing the geometry, selection or exports.</p>
+<div class="prompt">The mesh looks too heavy. Simplify it.</div>
+<div class="prompt">Use a coarse mesh for display.</div>
+<div class="prompt">Restore smooth curves (fine mesh).</div>
+<h3>Units, grid and snapping</h3>
+<p><b>Settings › Workspace / Units &amp; Grid</b> sets the open project's display units (mm, cm, m, in, ft; degrees or
+radians) and decimals, the reference grid (shown or hidden, plane, spacing, major line interval, extent, origin) and
+snapping. Geometry is always stored in millimetres: switching to inches changes how values are shown and typed, never
+a size or a position. Grid changes show in the viewport at once. New projects start from your defaults (tick
+<i>Use as default for new projects</i>); existing projects keep their own settings. The agent uses the same settings:</p>
+<div class="prompt">Switch the project to inches.</div>
+<div class="prompt">Set the grid spacing to 5 millimeters.</div>
+<div class="prompt">Enable snapping every 10 millimeters.</div>
+<div class="prompt">Set rotation snapping to 45 degrees.</div>
+<div class="prompt">Hide the grid.</div>
+<p>Snapping is configured and computed in this release, but moving or rotating objects with the mouse comes later.</p>
+</section>
+
+<section>
+<h2 id="image" data-group="Using the viewport">Image to CAD</h2>
+<p>Turn a sketch, scan, technical drawing or photo of paper / whiteboard into editable parametric geometry (sketch + extrude/cut features, no image object remains).</p>
+<ol>
+  <li><b>Attach</b> the image: <b>📎 Attach</b>, <b>Create from Image</b>, drop it on the window, or paste from the clipboard (PNG, JPEG, WebP; large images are downscaled to ≤ 2048 px).</li>
+  <li>The agent’s interpretation opens in the <b>Image interpretation</b> panel: your image with an SVG overlay (solid = outline, dashed = hole, boxes = dimensions it read), confidence bands (≥ 85 % / ≥ 60 % / uncertain) and the open questions, usually just overall width and thickness.</li>
+  <li>Edit detected values, tick <i>confirm</i> on low-confidence ones, choose boolean intent for overlapping shapes, and a placement: plane XY/XZ/YZ or the <b>selected planar face</b>. Optionally keep the source image in the project.</li>
+  <li><b>Create &amp; preview</b> shows the ordinary ghost preview with Commit / Reject. <b>Correct with the agent…</b> sends the image back to the composer.</li>
+</ol>
+<div class="prompt">Create editable geometry from this drawing. The overall width is 80 mm and it is 6 mm thick.</div>
+<div class="prompt">Make this sketch into a bracket plate. The scale: the 400 px wide edge is 80 mm.</div>
+<div class="prompt">That small circle in the corner is a hole, not a boss.</div>
+<div class="prompt">The left edge is vertical; the dimension reads 12, not 17.</div>
+<div class="prompt">Put this profile on the selected face and extrude it 4 mm.</div>
+<div class="prompt">Only create the 2D sketch from the image, I’ll extrude it later.</div>
+<div class="callout warn"><strong>Honest by design.</strong> The agent never infers real size from pixels. Missing dimensions are listed and must come from you.</div>
+</section>
+
+<section>
+<h2 id="specs" data-group="Using the viewport">Specification documents</h2>
+<p><b>Attach</b> (or drop) also accepts text documents (<code>.txt .md .json .csv .yaml .xml</code>…; ≤ 200 KB each, 400 KB total), e.g. the spec of a part or a datasheet. They show as 📄 chips and are sent with <b>every</b> request as short-term memory until you press <b>Clear</b> or open/create a project. They are never saved with the project.</p>
+<div class="prompt">Read the attached specification and create the part it describes.</div>
+<div class="prompt">According to the attached datasheet, add the mounting holes for the servo.</div>
+<div class="prompt">Does the current model meet every dimension in the attached spec? List the differences.</div>
+</section>
+
+<section>
+<h2 id="palette" data-group="Using the viewport">Command palette</h2>
+<p>Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>. Type to filter:</p>
+<ul>
+  <li><b>Intent verbs</b>: sentence starters for the agent.</li>
+  <li><b>Every registered tool</b>: pick one and an argument skeleton opens (with the current selection prefilled). Edit the JSON and <b>Run tool</b>. This is the direct path that bypasses the LLM, handy for exact edits.</li>
+  <li><b>Commands</b>: undo / redo, save, export, playback, new.</li>
+  <li><b>Ask the agent</b>: whatever you typed, sent as a prompt.</li>
+</ul>
+<div class="prompt json" data-copy>{ "dx": 100, "dy": 60, "dz": 4 }</div>
+<div class="result">Paste into the <code>create_box</code> form. See the <a href="#tools">tool reference</a> for every tool.</div>
+</section>
+
+<section>
+<h2 id="projects" data-group="Using the viewport">Projects and export</h2>
+<table>
+<tr><th>Action</th><th>Details</th></tr>
+<tr><td><b>New</b></td><td>Asks for a name; starts an empty model and clears chat / attached documents.</td></tr>
+<tr><td><b>Save</b> (<kbd>Ctrl</kbd>+<kbd>S</kbd>)</td><td>First time asks for a name. Relative names are saved under <code>projects_output/</code> with the <code>.scadproj</code> extension.</td></tr>
+<tr><td><b>Open</b></td><td>Lists saved projects (name + modified date); click one or type a path.</td></tr>
+<tr><td><b>Export</b></td><td>STEP (CAD interchange) or STL (3D printing). Extension is added for you.</td></tr>
+<tr><td><b>Reusable projects</b></td><td>A project marked reusable is a <b>component</b>: it shows up in the Components panel and other projects can place instances of it. Nothing else distinguishes it. See <a href="#components">Components</a>.</td></tr>
+<tr><td><b>Save as</b></td><td>Saving to a different path makes a <i>separate</i> project with its own identity, so component references can never point at two directories at once.</td></tr>
+</table>
+<div class="prompt">Export the model as STEP to out/bracket.step.</div>
+<div class="prompt">Export an STL for printing at out/bracket.stl with a fine deflection of 0.05 mm.</div>
+<p>Project format details are in <code>docs/project-format.md</code> in the repository.</p>
+</section>
+
+<section>
+<h2 id="workflows" data-group="Worked examples">End-to-end examples</h2>
+<h3>Robot servo bracket</h3>
+<div class="prompt">Create a 60 x 40 x 3 mm base plate called base. Add a 25 x 12 x 30 mm box called servo_ref at (17.5, 14, 3) to represent the servo, then hide it.</div>
+<div class="prompt">Add four M3 holes at the corners of the base, 5 mm in from each edge. Fillet the vertical edges of the base with 4 mm.</div>
+<div class="prompt">Extrude a vertical wall: a 60 x 3 rectangle on the XZ plane, 30 mm tall, along the back edge of the base, and union it into the base.</div>
+<div class="prompt">Make it black PETG and show me the volume.</div>
+<div class="prompt">Export as STL to out/servo_bracket.stl.</div>
+
+<h3>Parametric standoff set</h3>
+<div class="prompt">Create a cylinder called standoff: radius 3 mm, height 10 mm. Drill a 2.5 mm blind hole 8 mm deep in its top face.</div>
+<div class="prompt">Make the standoff height equal to plate.dz * 2.5.</div>
+<div class="prompt">Make the plate 6 mm thick.</div>
+<div class="result">The standoff height follows automatically.</div>
+
+<h3>Flange with bolt circle</h3>
+<div class="prompt">Create a cylinder radius 40, height 8, called flange. Add a 30 mm diameter through hole at the center.</div>
+<div class="prompt">Add one M5 hole (5.5 mm) at (30, 0) and pattern it 6 times around the Z axis through the origin.</div>
+<div class="prompt">Chamfer the outer edge 1.5 mm and make it stainless steel.</div>
+
+<h3>Enclosure</h3>
+<div class="prompt">Create a 80 x 50 x 30 mm box called shell. Cut a 76 x 46 mm pocket from the top, 28 mm deep, leaving 2 mm walls and floor.</div>
+<div class="prompt">Add four 3 mm holes through the floor, 6 mm from the corners. Fillet the outer vertical edges 4 mm.</div>
+<div class="prompt">Make it white ABS, then make it 40% transparent so I can check the inside.</div>
+</section>
+
+<section>
+<h2 id="tools" data-group="Reference">Tool reference</h2>
+<p>All tools the agent, the palette and the CLI can call. Edit tools produce a ChangeSet; query tools return data and never change the model. Unknown arguments are rejected, and errors are written to be actionable. Click a tool for its arguments and an example. The full schemas are in <code>docs/tools.md</code>.</p>
+<p class="muted">Common optional arguments on feature-creating tools: <code>id</code> (lowercase letters, digits, underscores), <code>name</code> (human-readable) and <code>intent</code> (why, in natural language, stored on the node).</p>
+<div id="tool-list"></div>
+</section>
+
+<section>
+<h2 id="shortcuts" data-group="Reference">Keyboard shortcuts</h2>
+<table>
+<tr><th>Keys</th><th>Action</th></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd></td><td>Command palette</td></tr>
+<tr><td><kbd>?</kbd></td><td>Show / hide the shortcuts panel (also the keyboard button in the header)</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd></td><td>Save</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd></td><td>Undo</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td>Redo</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>D</kbd></td><td>Duplicate the selected bodies</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>G</kbd></td><td>Group the selection</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>Ungroup the selection</td></tr>
+<tr><td><kbd>B</kbd></td><td>Box select: drag a rectangle in the viewport. Left → right selects bodies fully inside, right → left selects bodies it touches; <kbd>Shift</kbd>/<kbd>Ctrl</kbd> adds. <kbd>B</kbd> or <kbd>Esc</kbd> leaves the mode</td></tr>
+<tr><td><kbd>G</kbd> / <kbd>R</kbd></td><td>Move / rotate the selected object with the mouse (viewport focused, not while typing)</td></tr>
+<tr><td><kbd>X</kbd> <kbd>Y</kbd> <kbd>Z</kbd> · <kbd>Shift</kbd>+<kbd>X</kbd> <kbd>Y</kbd> <kbd>Z</kbd></td><td>While moving: constrain to an axis · to a plane. While rotating: the rotation axis</td></tr>
+<tr><td><kbd>P</kbd></td><td>While rotating: pivot at the object's origin / center</td></tr>
+<tr><td>Click / <kbd>Enter</kbd> · <kbd>Esc</kbd> / right-click</td><td>Confirm · cancel a move or rotation (<kbd>Ctrl</kbd> held: no snapping)</td></tr>
+<tr><td><kbd>F</kbd></td><td>Fit the active view</td></tr>
+<tr><td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>4</kbd></td><td>Toggle Single / Quad View</td></tr>
+<tr><td><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>Delete selection (not while typing)</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Close palette / dialog / menu</td></tr>
+<tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Send prompt / new line</td></tr>
+<tr><td><kbd>Shift</kbd> + click</td><td>Add to selection</td></tr>
+</table>
+</section>
+
+<section>
+<h2 id="config" data-group="Reference">Configuration</h2>
+<p>Create <code>.env</code> from <code>.env.example</code>. Real environment variables take precedence.</p>
+<table>
+<tr><th>Variable</th><th>Meaning</th></tr>
+<tr><td><code>SIMONCAD_PROVIDER</code></td><td>Primary model: <code>claude</code> (default), <code>openai</code> or <code>ollama</code></td></tr>
+<tr><td><code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_MODEL</code>, <code>ANTHROPIC_BASE_URL</code></td><td>Claude provider</td></tr>
+<tr><td><code>OPENAI_API_KEY</code>, <code>OPENAI_MODEL</code>, <code>OPENAI_REASONING_EFFORT</code>, <code>OPENAI_BASE_URL</code></td><td>OpenAI provider (model is required)</td></tr>
+<tr><td><code>OLLAMA_MODEL</code>, <code>OLLAMA_BASE_URL</code></td><td>Local models, no key, never priced</td></tr>
+<tr><td><code>OLLAMA_NUM_CTX</code></td><td>Context window asked of Ollama, in tokens (default 32768; 0 = the server’s setting). A request has to fit in it whole: Ollama drops the rest silently, so Simon reports a request the model only partly read instead of answering it. Also editable in <b>Settings → Primary Model → Context window</b>.</td></tr>
+<tr><td><code>SIMONCAD_FALLBACK_ENABLED</code>, <code>SIMONCAD_FALLBACK_PROVIDER</code>, <code>SIMONCAD_FALLBACK_CONSENT</code></td><td>The fallback model (OpenAI or Anthropic) and whether a local model’s request may be sent to it (<code>ask</code>, <code>allow</code>, <code>deny</code>). Its own model, key and prices use the provider variables with the <code>SIMONCAD_FALLBACK_</code> prefix. Also editable in <b>Settings → Fallback Model</b>.</td></tr>
+<tr><td><code>SIMONCAD_COMPONENT_LIBRARY</code></td><td>A folder of shared components, searched on top of the ones next to the open project. Must be an absolute path. Also editable in <b>Settings → Component library</b>.</td></tr>
+<tr><td><code>ANTHROPIC_INPUT_PRICE</code>, <code>ANTHROPIC_CACHED_INPUT_PRICE</code>, <code>ANTHROPIC_OUTPUT_PRICE</code> (and the <code>OPENAI_*</code> set)</td><td>Optional cost per million tokens. Also editable per model in <b>Settings → Primary Model / Fallback Model → Token Prices</b>.</td></tr>
+<tr><td><code>SIMONCAD_CURRENCY</code></td><td>Label for the amounts (default <code>USD</code>). It is a label only — no conversion is performed.</td></tr>
+</table>
+
+<h3>Token consumption and cost</h3>
+<p>Every request to the model is metered. Under each answer you get the tokens that turn consumed
+(input and output), and above the message box a running total for the session — hover it for the
+split per model and for the last turn. Clearing the conversation does not reset the meter.</p>
+<p>Cost estimation is opt-in: fill <b>Token Prices</b> under <b>Settings → Primary Model</b> (and
+<b>Fallback Model</b>) with what each model costs per
+million input and output tokens (the figures from your provider's pricing page) and pick a currency.
+From then on each turn and the session also show an estimated cost. Leave the fields empty and only
+tokens are reported — Simon never guesses a price. If a turn used a model you have not priced (for
+example a vision model that read your image), its tokens are still counted and the estimate is
+marked partial rather than silently understated. Local (Ollama) models have no prices: their tokens
+are shown as local and never counted as spend.</p>
+<h3>Primary and fallback models</h3>
+<p>The <b>Primary Model</b> answers every request it can. The <b>Fallback Model</b>, OpenAI or
+Anthropic, takes over only what the primary cannot do: an image or PDF a local model cannot read,
+or a request whose primary model stopped responding. The header of the Simon Agent panel shows the
+model at work (for example <i>Ollama · qwen3</i>, or <i>OpenAI · gpt-x (Fallback)</i> — hover it for
+the reason), and every fallback is noted in the conversation. Turn the fallback off and such
+requests are refused with an explanation instead. When the primary model is local, Simon asks before
+it first sends anything to the cloud; tick <i>Remember my choice</i> to keep the answer, and change
+it later in <b>Settings → Fallback Model → Remote data</b>.</p>
+<p>Part of what you send is usually served from the provider’s cache and billed cheaper: the
+system prompt and the tool list repeat on every step, which is exactly what caches well. The
+tooltip shows how much was cached, and <b>Cached input price</b> makes the estimate reflect it.
+Leave that field empty and cached tokens are charged at the full input price — the estimate
+errs high rather than flattering itself.</p>
+<p>Simon also keeps the request small: the image and reference-modeling tools are only sent when
+there is an image in the project, which cuts about a third of the tokens off a plain modeling
+turn. Attach an image and they come back automatically.</p>
+<p>Components are found next to the open project (its folder, its parent, their <code>projects_output/</code>) and in the configured library — never relative to the directory you started the program from, so the same project always rebuilds to the same geometry.</p>
+<p>Launch options: <code>--project file.scadproj</code> opens or creates a project; <code>--no-browser</code> does not open a tab; <code>--recording file.json</code> runs a scripted agent without an API key.</p>
+</section>
+
+<section>
+<h2 id="limits" data-group="Reference">Limits and troubleshooting</h2>
+<h3>Known limits</h3>
+<ul>
+  <li>Holes start only from axis-aligned planar faces.</li>
+  <li><code>index=</code> selectors are valid only for the model they were picked on.</li>
+  <li>Patterns repeat holes and cut features only.</li>
+  <li>Scale, align and face edits apply to visible bodies (not to features a later feature consumes). Face extrude and inset need planar faces; non-uniform scaling turns cylinders into free-form surfaces.</li>
+  <li>A component instance is one body with one appearance: per-feature colours and materials inside a component are not kept when it is instantiated.</li>
+  <li>Only the latest saved version of a component is kept. Instances record which version they are on and report when they are behind, but cannot be pinned back to an older one yet.</li>
+  <li>Creating a component writes its project to disk outside the undoable change. Undoing leaves that project in the library; delete it from the Components panel if you do not want it.</li>
+  <li>A component can only be made from a self-contained selection, and an instance can only be detached while nothing is built on it.</li>
+  <li>No robotics catalog or macros yet; intent verbs are natural-language openers.</li>
+  <li>Edits are refused while the agent is working on a turn (the UI keeps updating).</li>
+</ul>
+<h3>Troubleshooting</h3>
+<table>
+<tr><th>Symptom</th><th>What to do</th></tr>
+<tr><td>The prompt returns a provider error</td><td>Check <code>.env</code> (provider and key). Palette tools and manual edits still work.</td></tr>
+<tr><td>A request was “refused” with a list of features</td><td>Other features depend on the target. Delete or re-point them first, or say “delete them too”.</td></tr>
+<tr><td>“is not a visible body: … builds on it”</td><td>That feature was already modified by a later one. Apply the edit to the feature named in the message (the visible body).</td></tr>
+<tr><td>Face offset failed</td><td>The neighbouring faces cannot be stretched that far (for example offsetting past another face). Use a smaller distance, or Extrude for planar faces.</td></tr>
+<tr><td>Fillet / chamfer failed</td><td>The distance is larger than the available geometry. Use a smaller value or select only the edges you want.</td></tr>
+<tr><td>My selection disappeared</td><td>It is cleared whenever the model changes (index-based selectors would be stale). Select again.</td></tr>
+<tr><td>Edit is refused with “busy” (409)</td><td>The agent is still working. Wait for the answer.</td></tr>
+<tr><td>“the selection depends on features outside it”</td><td>A component has to be self-contained. Add the named features to the selection, or build the component from a part of the model that stands on its own.</td></tr>
+<tr><td>“circular component reference”</td><td>The component you are inserting already uses this project, directly or through another component. The message shows the chain.</td></tr>
+<tr><td>“component project … not found”</td><td>Its folder moved or was deleted. Put it back next to this project, or set <b>Settings → Component library</b> to where it now lives.</td></tr>
+<tr><td>Instances show a <b>Component</b> badge in amber</td><td>Their component changed since they were placed. Use <b>Update</b> in the Components panel or the row’s menu.</td></tr>
+<tr><td>“save the project first” when creating a component</td><td>A component is written next to the project it came from, so the project needs a location. Save it, or set a component library folder in Settings.</td></tr>
+<tr><td>The mesh looks faceted or heavy</td><td>Ask for <i>fine</i> or <i>coarse</i> mesh detail. It is display-only.</td></tr>
+<tr><td>Image dimensions look wrong</td><td>Confirm or correct them in the interpretation panel; give a known length for scale.</td></tr>
+</table>
+<footer>Simon CAD · Design in control. · Documentation lives in <code>docs/</code> in the repository; this page ships inside the app.</footer>
+</section>
+
+</main>
+</div>
+<script type="module" src="help.js"></script>
+</body>
+</html>

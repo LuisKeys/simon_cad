@@ -1,0 +1,20 @@
+{
+  "id": "anodized_blue_aluminum",
+  "name": "Blue Anodized Aluminum",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "aluminum",
+    "anodized",
+    "blue"
+  ],
+  "baseColor": "#2F5D9E",
+  "metalness": 0.9,
+  "roughness": 0.4,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

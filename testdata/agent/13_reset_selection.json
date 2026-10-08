@@ -1,0 +1,86 @@
+{
+  "name": "13_reset_selection",
+  "notes": "Scripted recording (hand-written to mirror a well-behaved model).",
+  "prompt": "Reset this part to its default appearance.",
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "reset_appearance",
+            "input": {}
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "Done."
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "reset_appearance",
+        "args": {}
+      }
+    ],
+    "model": {
+      "features": 3,
+      "failed": 0
+    }
+  },
+  "setup": [
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "servo_bracket",
+        "name": "Servo bracket",
+        "dx": 20,
+        "dy": 20,
+        "dz": 5
+      }
+    },
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "reference_servo",
+        "name": "Reference servo",
+        "dx": 20,
+        "dy": 20,
+        "dz": 5
+      }
+    },
+    {
+      "tool": "create_box",
+      "args": {
+        "id": "enclosure",
+        "name": "Electronics enclosure",
+        "dx": 20,
+        "dy": 20,
+        "dz": 5
+      }
+    },
+    {
+      "tool": "set_color",
+      "args": {
+        "features": [
+          "servo_bracket"
+        ],
+        "color": "#FF0000"
+      }
+    }
+  ],
+  "selection": [
+    "body(feature=servo_bracket)"
+  ]
+}

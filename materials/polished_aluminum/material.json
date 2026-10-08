@@ -1,0 +1,21 @@
+{
+  "id": "polished_aluminum",
+  "name": "Polished Aluminum",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "aluminum",
+    "polished",
+    "shiny",
+    "silver"
+  ],
+  "baseColor": "#D0D3D6",
+  "metalness": 1.0,
+  "roughness": 0.12,
+  "textureScale": 20,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

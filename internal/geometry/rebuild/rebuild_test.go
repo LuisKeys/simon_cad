@@ -240,3 +240,25 @@ func TestDeterministicOrderTieBreak(t *testing.T) {
 		t.Fatalf("order %v %v %v", o[0].ID, o[1].ID, o[2].ID)
 	}
 }
+
+func TestRoundPrimitiveFeatures(t *testing.T) {
+	_, e := setup(t)
+	g := cadir.NewGraph()
+	g.Nodes = []*cadir.Node{
+		{ID: "s", Type: "sphere", Parameters: map[string]any{"radius": 5.0, "x": 10.0}},
+		{ID: "c", Type: "cone", Parameters: map[string]any{"radius": 4.0, "height": 9.0, "axis": "x"}},
+		{ID: "t", Type: "torus", Parameters: map[string]any{"major_radius": 10.0, "minor_radius": 2.0, "axis": "y"}},
+		{ID: "bad", Type: "torus", Parameters: map[string]any{"major_radius": 2.0, "minor_radius": 3.0}},
+	}
+	m, err := e.Rebuild(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := m.Failed(); len(f) != 1 || f[0] != "bad" {
+		t.Fatalf("failed: %v", f)
+	}
+	want := 4.0/3*math.Pi*125 + math.Pi*16*9/3 + 2*math.Pi*math.Pi*10*4
+	if got := m.Volume(); !near(got, want) {
+		t.Fatalf("volume %v want %v", got, want)
+	}
+}

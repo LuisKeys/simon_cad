@@ -9,6 +9,7 @@
 #include <BRepGProp.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
@@ -159,11 +160,19 @@ static void add_edge(occ_mesh& m, const TopoDS_Edge& e, double deflection) {
 extern "C" {
 
 occ_status occ_tessellate(occ_handle h, double deflection, occ_mesh** out) {
+  return occ_tessellate_ex(h, deflection, 0.5, out);
+}
+
+occ_status occ_tessellate_ex(occ_handle h, double deflection, double angular, occ_mesh** out) {
   return guarded([&] {
     require_out(out);
     if (!(deflection > 0)) throw BridgeError{OCC_ERR_INVALID_ARG, "deflection must be positive"};
+    if (!(angular > 0)) throw BridgeError{OCC_ERR_INVALID_ARG, "angular deflection must be positive"};
     TopoDS_Shape s = require_shape(h);
-    BRepMesh_IncrementalMesh mesher(s, deflection, false, 0.5, false);
+    // OCCT keeps a triangulation on the shape and reuses any that is already as fine as
+    // requested, so a coarser request would silently return the finer mesh. Start clean.
+    BRepTools::Clean(s);
+    BRepMesh_IncrementalMesh mesher(s, deflection, false, angular, false);
     auto* m = new occ_mesh();
     try {
       TopTools_IndexedMapOfShape faces, edges, verts;

@@ -1,0 +1,107 @@
+{
+  "name": "18_image_overlap_asks_boolean_intent",
+  "notes": "Ambiguous boolean intent: ask instead of guessing. Scripted recording; re-capture with: simoncad-cli eval --live --record testdata/agent",
+  "images": [
+    "images/plate_sketch.png"
+  ],
+  "prompt": "Make these two shapes.",
+  "recorded": {
+    "source": "scripted",
+    "responses": [
+      {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "analyze_image",
+            "input": {
+              "image_id": "img_a00efae71dc66dab",
+              "image_size": [
+                400,
+                300
+              ],
+              "confidence": 0.86,
+              "description": "Rectangular plate with two circular holes",
+              "entities": [
+                {
+                  "id": "a",
+                  "kind": "rectangle",
+                  "x": 50,
+                  "y": 50,
+                  "w": 200,
+                  "h": 100,
+                  "confidence": 0.9
+                },
+                {
+                  "id": "b",
+                  "kind": "rectangle",
+                  "x": 150,
+                  "y": 80,
+                  "w": 200,
+                  "h": 100,
+                  "confidence": 0.9
+                }
+              ],
+              "profiles": [
+                {
+                  "id": "pa",
+                  "outer": [
+                    "a"
+                  ]
+                },
+                {
+                  "id": "pb",
+                  "outer": [
+                    "b"
+                  ]
+                }
+              ],
+              "relationships": [],
+              "dimensions": [
+                {
+                  "id": "w",
+                  "kind": "length",
+                  "binds": "a.w",
+                  "value": 100,
+                  "source": "printed",
+                  "confidence": 0.95
+                },
+                {
+                  "id": "t",
+                  "kind": "depth",
+                  "value": 4,
+                  "source": "user",
+                  "confidence": 1
+                }
+              ]
+            }
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "text": "I detected two overlapping closed shapes. Should I join them, subtract one from the other, or keep them separate?"
+          }
+        ],
+        "stop_reason": "end_turn"
+      }
+    ]
+  },
+  "expect": {
+    "tool_calls": [
+      {
+        "name": "analyze_image",
+        "args": {
+          "image_id": "img_a00efae71dc66dab"
+        }
+      }
+    ],
+    "pending": 0,
+    "model": {
+      "features": 0
+    }
+  }
+}

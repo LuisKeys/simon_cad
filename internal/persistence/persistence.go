@@ -3,6 +3,9 @@
 package persistence
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,17 +15,51 @@ import (
 	"github.com/accelone/simoncad/internal/commands"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
+	"github.com/accelone/simoncad/internal/workspace"
 )
 
-// SchemaVersion is the current on-disk format version.
-const SchemaVersion = 1
+// SchemaVersion is the current on-disk format version. v2 adds assets/images/ (source
+// images, only when explicitly retained) and interpretations in agent-history.json; v3 adds
+// the stable project id and the reusable-component metadata; v4 adds workspace.json (units,
+// grid and snapping). Every addition is optional, so v1–v3 projects load unchanged.
+const SchemaVersion = 4
 
+// Meta is project.json. ID is the stable identity a ComponentInstance references: it survives
+// renaming the directory, and the directory name never does. A project with Reusable set is a
+// component — there is no separate "component" concept.
 type Meta struct {
 	SchemaVersion int    `json:"schema_version"`
+	ID            string `json:"id,omitempty"` // prj_<12 hex>
 	Name          string `json:"name"`
 	Units         string `json:"units"`
 	OCCTVersion   string `json:"occt_version"`
 	Created       string `json:"created,omitempty"`
+	// Reusable marks this project as a component: it appears in the component library and may
+	// be instantiated by other projects.
+	Reusable    bool     `json:"reusable,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	// Version counts saves of a reusable project. It is informational in v1 (instances pin a
+	// content hash, not a version) and is the hook for explicit version locking later.
+	Version int `json:"component_version,omitempty"`
+	// DerivedFrom records the project id this one was copied from by "save as".
+	DerivedFrom string `json:"derived_from,omitempty"`
+}
+
+// NewID mints a fresh stable project id.
+func NewID() string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err) // crypto/rand failure is unrecoverable
+	}
+	return "prj_" + hex.EncodeToString(b[:])
+}
+
+// DeriveID is the stable id of a project that predates schema v3: the same legacy project
+// always migrates to the same id, so re-migrating never churns its bytes.
+func DeriveID(name, created string) string {
+	sum := sha256.Sum256([]byte(name + "\x00" + created))
+	return "prj_" + hex.EncodeToString(sum[:6])
 }
 
 type Prompt struct {
@@ -33,6 +70,7 @@ type Prompt struct {
 	Capability string   `json:"capability,omitempty"`
 	Model      string   `json:"model,omitempty"`
 	Summary    string   `json:"agent_summary,omitempty"` // the agent's final explanation
+	Images     []string `json:"images,omitempty"`        // ids of images attached to the prompt
 }
 
 type ToolCall struct {
@@ -54,6 +92,19 @@ type AgentHistory struct {
 	ToolCalls   []ToolCall            `json:"tool_calls"`
 	ChangeSets  []*commands.ChangeSet `json:"changesets"`
 	Checkpoints []*history.Checkpoint `json:"checkpoints"`
+	// Interpretations are the image proposals (vision capability). They explain image-derived
+	// features but are never needed to rebuild geometry.
+	Interpretations json.RawMessage `json:"interpretations,omitempty"`
+	// Visual is the visual-refinement state: references and their analysis, regions and
+	// locks, the iteration history (scores, changes, parameters). Renders are not saved.
+	Visual json.RawMessage `json:"visual,omitempty"`
+}
+
+// Image is a retained source image stored under assets/images/.
+type Image struct {
+	ID   string // img_<hash>
+	Ext  string // .png | .jpg | .webp
+	Data []byte
 }
 
 type Project struct {
@@ -64,7 +115,17 @@ type Project struct {
 	Components  json.RawMessage
 	Constraints json.RawMessage
 	Materials   json.RawMessage
+	Images      []Image
+	// Workspace is the project's units, grid and snapping (workspace.json). Load leaves it
+	// nil for a project saved before it existed; Save writes the factory defaults for nil.
+	Workspace *workspace.Settings
+	// WorkspaceWarnings say which parts of workspace.json could not be read and were
+	// replaced by defaults (unknown fields are ignored silently).
+	WorkspaceWarnings []string
 }
+
+// WorkspaceFile holds a project's workspace settings.
+const WorkspaceFile = "workspace.json"
 
 var (
 	emptyComponents  = json.RawMessage(`{"components": []}`)
@@ -103,6 +164,10 @@ func Save(dir string, p *Project) error {
 		}
 		return r
 	}
+	ws := workspace.Defaults()
+	if p.Workspace != nil {
+		ws = p.Workspace.Normalized()
+	}
 	files := []struct {
 		name string
 		val  any
@@ -113,6 +178,7 @@ func Save(dir string, p *Project) error {
 		{"constraints.json", raw(p.Constraints, emptyConstraints)},
 		{"materials.json", raw(p.Materials, emptyMaterials)},
 		{"agent-history.json", p.History},
+		{WorkspaceFile, ws},
 	}
 	for _, f := range files {
 		b, err := canonical(f.val)
@@ -131,11 +197,68 @@ func Save(dir string, p *Project) error {
 	if err := writeAtomic(filepath.Join(dir, "events.jsonl"), evs); err != nil {
 		return err
 	}
+	if err := saveImages(dir, p.Images); err != nil {
+		return err
+	}
 	keep := filepath.Join(dir, "thumbnails", ".gitkeep")
 	if _, err := os.Stat(keep); err != nil {
 		return os.WriteFile(keep, nil, 0o644)
 	}
 	return nil
+}
+
+const imagesDir = "assets/images"
+
+// saveImages writes the retained images and removes ones that are no longer retained. The
+// directory only exists when there is something to keep.
+func saveImages(dir string, imgs []Image) error {
+	full := filepath.Join(dir, filepath.FromSlash(imagesDir))
+	want := map[string]bool{}
+	for _, im := range imgs {
+		want[im.ID+im.Ext] = true
+	}
+	if entries, err := os.ReadDir(full); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && !want[e.Name()] {
+				if err := os.Remove(filepath.Join(full, e.Name())); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if len(imgs) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(full, 0o755); err != nil {
+		return err
+	}
+	for _, im := range imgs {
+		if err := writeAtomic(filepath.Join(full, im.ID+im.Ext), im.Data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadImages(dir string) ([]Image, error) {
+	full := filepath.Join(dir, filepath.FromSlash(imagesDir))
+	entries, err := os.ReadDir(full)
+	if err != nil {
+		return nil, nil // no retained images
+	}
+	var out []Image
+	for _, e := range entries {
+		ext := filepath.Ext(e.Name())
+		if e.IsDir() || (ext != ".png" && ext != ".jpg" && ext != ".webp") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(full, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Image{ID: e.Name()[:len(e.Name())-len(ext)], Ext: ext, Data: b})
+	}
+	return out, nil
 }
 
 func readJSON(dir, name string, v any) error {
@@ -186,14 +309,57 @@ func Load(dir string) (*Project, error) {
 			return nil, err
 		}
 	}
+	if b, err := os.ReadFile(filepath.Join(dir, WorkspaceFile)); err == nil {
+		ws, warns, err := workspace.Decode(b, workspace.Defaults())
+		if err != nil {
+			warns = []string{err.Error() + "; defaults used"}
+		}
+		p.Workspace, p.WorkspaceWarnings = &ws, warns
+	}
+	var err error
+	if p.Images, err = loadImages(dir); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
-// migrate upgrades files from older schema versions. v1 is the first version, so there
-// is nothing to do yet; the hook exists so future formats migrate rather than break.
+// LoadGraph reads only project.json and model.json. Resolving a component instance runs
+// several times per tool call (Propose evaluates twice, the commit refresh once more), so it
+// must never touch agent-history.json, which can be megabytes of trace.
+func LoadGraph(dir string) (Meta, *cadir.Graph, error) {
+	var m Meta
+	if err := readJSON(dir, "project.json", &m); err != nil {
+		return m, nil, fmt.Errorf("not a Simon CAD project (%s): %w", dir, err)
+	}
+	if m.SchemaVersion > SchemaVersion {
+		return m, nil, fmt.Errorf("project schema v%d is newer than this build supports (v%d)", m.SchemaVersion, SchemaVersion)
+	}
+	if m.ID == "" {
+		m.ID = DeriveID(m.Name, m.Created)
+	}
+	g := cadir.NewGraph()
+	if err := readJSON(dir, "model.json", g); err != nil {
+		return m, nil, err
+	}
+	if g.Nodes == nil {
+		g.Nodes = []*cadir.Node{}
+	}
+	if err := g.Validate(); err != nil {
+		return m, nil, fmt.Errorf("model.json: %w", err)
+	}
+	return m, g, nil
+}
+
+// migrate upgrades files from older schema versions. Every version bump so far only added
+// optional content (v2: assets/images/, interpretations; v3: the project id and component
+// metadata; v4: workspace.json), so an older project is valid as it is; the next save writes
+// the current version.
 func migrate(dir string, p *Project) error {
 	switch p.Meta.SchemaVersion {
-	case SchemaVersion:
+	case SchemaVersion, 3, 2, 1:
+		if p.Meta.ID == "" {
+			p.Meta.ID = DeriveID(p.Meta.Name, p.Meta.Created)
+		}
 		return nil
 	case 0:
 		return fmt.Errorf("project.json has no schema_version")
