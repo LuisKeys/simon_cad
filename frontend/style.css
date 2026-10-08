@@ -516,3 +516,6 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .xform-hud .main { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .xform-hud .hint { color: #c8c8c8; font-size: 11.5px; margin-top: 2px; }
 @media (max-width: 720px) { .xform-hud .main { white-space: normal; } .xform-hud .hint { display: none; } }
+
+.box-select { position: absolute; pointer-events: none; z-index: 5; border: 1px solid #ff9f1c; background: rgba(255,159,28,.12); }
+.box-select.crossing { border-style: dashed; background: rgba(60,160,255,.12); border-color: #3ca0ff; }

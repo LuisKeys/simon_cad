@@ -9,6 +9,7 @@ import { MaterialManager } from './materials/pbr.js';
 import { WorldAxes } from './axes.js';
 import { ViewportLayoutManager } from './viewlayout.js';
 import { WorkspaceGrid } from './grid.js';
+import { rectFrom, boundsOf, rectHit } from './boxselect-model.js';
 import { PLANE_AXES, gridShown } from './grid-model.js';
 
 const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
@@ -496,7 +497,68 @@ export class Viewport {
     return { body, kind: 'face', index: faceOfTriangle(faces, hit.faceIndex), triangle: hit.faceIndex, point: hit.point };
   }
 
+  // ---- box selection ---------------------------------------------------------------------
+
+  setBoxMode(on) {
+    this.boxMode = on;
+    for (const p of this.layout.panes) { p.controls.enabled = !on; p.surface.style.cursor = on ? 'crosshair' : ''; }
+    if (!on) this._boxEl?.remove(), this._boxEl = null;
+  }
+
+  /** Ids of the visible bodies whose projected bounding box satisfies the rectangle (pane pixels). */
+  _bodiesInRect(rect, pane) {
+    const r = pane.surface.getBoundingClientRect();
+    const n = { w: r.width, h: r.height };
+    const ids = [];
+    for (const b of this.bodies.values()) {
+      if (!b.group.visible) continue;
+      const geo = b.mesh.geometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      b.mesh.updateWorldMatrix(true, false);
+      const { min, max } = geo.boundingBox;
+      const pts = [];
+      for (let i = 0; i < 8; i++) {
+        const w = new THREE.Vector3(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z).applyMatrix4(b.mesh.matrixWorld);
+        const s = this._toScreen(w, n, pane.camera);
+        if (s.z > 1) continue; // behind the camera
+        pts.push(s);
+      }
+      if (rectHit(boundsOf(pts), rect)) ids.push(b.data.id);
+    }
+    return ids;
+  }
+
+  _bindBox(c) {
+    let start = null;
+    c.addEventListener('pointerdown', (e) => {
+      if (!this.boxMode || e.button !== 0 || !e.isPrimary) return;
+      const pane = this.layout.paneAt(e.clientX, e.clientY);
+      const r = pane.surface.getBoundingClientRect();
+      start = { pane, r, x: e.clientX - r.left, y: e.clientY - r.top };
+    });
+    c.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      const cur = { x: e.clientX - start.r.left, y: e.clientY - start.r.top };
+      if (Math.hypot(cur.x - start.x, cur.y - start.y) <= 4 && !this._boxEl) return;
+      const q = rectFrom(start, cur);
+      if (!this._boxEl) { this._boxEl = document.createElement('div'); start.pane.surface.append(this._boxEl); }
+      this._boxEl.className = `box-select${q.crossing ? ' crossing' : ''}`;
+      Object.assign(this._boxEl.style, { left: `${q.x0}px`, top: `${q.y0}px`, width: `${q.x1 - q.x0}px`, height: `${q.y1 - q.y0}px` });
+    });
+    c.addEventListener('pointerup', (e) => {
+      if (!start) return;
+      const s = start; start = null;
+      this._boxEl?.remove(); this._boxEl = null;
+      const cur = { x: e.clientX - s.r.left, y: e.clientY - s.r.top };
+      if (e.button !== 0 || Math.hypot(cur.x - s.x, cur.y - s.y) <= 4) return;
+      const ids = this._bodiesInRect(rectFrom(s, cur), s.pane);
+      this.hooks.onBoxSelect?.(ids, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
+    });
+    c.addEventListener('pointercancel', () => { start = null; this._boxEl?.remove(); this._boxEl = null; });
+  }
+
   _bindPointer(c) {
+    this._bindBox(c);
     let down = null;
     let rdown = null;
     let lp = null;                       // long-press timer (touch / pen): the touch equivalent of right-click

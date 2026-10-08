@@ -16,6 +16,7 @@ export const SECTIONS = [
     { keys: [['Click']], label: 'Select an object' },
     { keys: [['Shift', 'Click']], label: 'Add to the selection' },
     { keys: [['Ctrl', 'Click']], label: 'Toggle in the selection (design tree)' },
+    { keys: [['B']], label: 'Box select: drag a rectangle (left → right inside, right → left touching)' },
     { keys: [['G']], label: 'Move the selected object with the mouse' },
     { keys: [['R']], label: 'Rotate the selected object with the mouse' },
     { keys: [['Ctrl', 'D']], label: 'Duplicate' },

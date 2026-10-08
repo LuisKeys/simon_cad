@@ -48,6 +48,14 @@ const vp = new Viewport($('gl'), {
       applySelection(sel);
     } catch (e) { toast(e.message, 'bad'); }
   },
+  onBoxSelect: async (ids, mods) => {
+    try {
+      const picked = ids.map((id) => `body(feature=${id})`);
+      const cur = S.selection?.selectors ?? [];
+      const selectors = mods.shift || mods.ctrl ? [...new Set([...cur, ...picked])] : picked;
+      applySelection(await api('select', { selectors }));
+    } catch (e) { toast(e.message, 'bad'); }
+  },
   onContext: async (p, at) => {
     try {
       // Right-clicking an object that is not part of the selection selects it first.
@@ -1106,7 +1114,15 @@ const FILTERS = [['auto', 'Auto'], ['body', 'Body'], ['face', 'Face'], ['edge', 
 const VIEWS = [['Front', [0, -1, 0]], ['Back', [0, 1, 0]], ['Left', [-1, 0, 0]], ['Right', [1, 0, 0]], ['Top', [0, 0, 1]], ['Bottom', [0, 0, -1]]];
 
 function setFilter(f) { S.filter = f; vp.filter = f; renderCtxBar(); }
+function toggleBoxSelect() {
+  const on = !vp.boxMode;
+  if (on && vp.measure.on) toggleMeasure();
+  vp.setBoxMode(on);
+  $('hud').textContent = on ? 'Box select: drag a rectangle' : hudStats();
+  renderCtxBar();
+}
 function toggleMeasure() {
+  if (!vp.measure.on && vp.boxMode) toggleBoxSelect();
   const on = !vp.measure.on;
   vp.setMeasure(on);
   $('measure-label').hidden = true;
@@ -1606,6 +1622,7 @@ document.addEventListener('keydown', (e) => {
     else if (!$('formdlg').hidden) $('fd-cancel').click();
     else if (!$('palette').hidden) closePalette();
     else if (!$('dialog').hidden) $('dialog-cancel').click();
+    else if (vp.boxMode) toggleBoxSelect();
     else if (vp.measure.on) toggleMeasure();
     else if (S.selection?.selectors?.length) api('select', { selectors: [] }).then(applySelection).catch(() => {});
   } else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
@@ -1618,6 +1635,7 @@ document.addEventListener('keydown', (e) => {
     xform.begin(e.key === 'g' ? 'translate' : 'rotate');
   } else if (!typing && !mod && !overlay && e.key === 'f') vp.fit();
   else if (!typing && !mod && !overlay && e.key === 'm') toggleMeasure();
+  else if (!typing && !mod && !overlay && !e.altKey && e.key === 'b') toggleBoxSelect();
 });
 
 // ---- toast ---------------------------------------------------------------------------
