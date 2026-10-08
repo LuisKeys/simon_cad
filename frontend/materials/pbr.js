@@ -5,7 +5,8 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { RefCache, materialKey } from './cache.js';
-import { computeUVs } from './uv.js';
+import { computeUVs, triplanarFlags } from './uv.js';
+import { makeTriplanar } from './triplanar.js';
 import { isPhysical, physicalProps, usesTransmission } from './physical.js';
 
 export const DEFAULT_DEF = { id: '', name: 'Default', baseColor: '#9FB2C8', metalness: 0.25, roughness: 0.45, textures: {}, textureScale: 1 };
@@ -60,6 +61,7 @@ export class MaterialManager {
       // With a base-color texture, an override color tints it; otherwise the material color is used as is.
       if (kind === 'baseColor' && !ap?.color) m.color.set(0xffffff);
     }
+    if (held.length) makeTriplanar(m, this.tileMM(def, ap), THREE.ShaderChunk); // curved faces sample the maps along the 3 axes
     this.owned.set(m, held);
     return m;
   }
@@ -89,6 +91,7 @@ export class MaterialManager {
     const uv = computeUVs(data.positions ?? [], data.normals ?? [], data.indices ?? [], data.faces ?? [], tile);
     mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     mesh.geometry.setAttribute('uv1', new THREE.BufferAttribute(uv, 2)); // aoMap channel
+    mesh.geometry.setAttribute('tpFlag', new THREE.BufferAttribute(triplanarFlags(uv.length / 2, data.indices ?? [], data.faces ?? []), 1));
   }
 
   dispose() { this.materials.clear(); this.textures.clear(); }

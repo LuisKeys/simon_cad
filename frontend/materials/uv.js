@@ -6,7 +6,8 @@
 //   plane            -> planar, projected along the dominant normal axis
 //   cylinder / cone  -> cylindrical about the face's fitted axis
 //   anything else    -> box mapping, chosen per vertex from its dominant normal axis
-// Triplanar blending for arbitrary solids is a later refinement.
+// Faces that are neither (sphere, torus, free-form) have no distortion-free UV: they are
+// flagged by triplanarFlags and drawn with triplanar sampling instead (see triplanar.js).
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -119,4 +120,18 @@ export function computeUVs(positions, normals, indices, faces, scale) {
     if (!done[i]) { const [u, v] = boxUV(P(i), N(i)); put(i, u, v); }
   }
   return uv;
+}
+
+const UV_SURFACES = new Set(['plane', 'cylinder', 'cone']);
+
+/** 1 for every vertex of a curved face the UVs cannot map well (sphere, torus, free-form), else 0. */
+export function triplanarFlags(vertexCount, indices, faces) {
+  const flags = new Float32Array(vertexCount);
+  for (const f of faces ?? []) {
+    if (!f.surface || UV_SURFACES.has(f.surface)) continue;
+    for (let t = f.tri_start; t < f.tri_start + f.tri_count; t++) {
+      for (let k = 0; k < 3; k++) flags[indices[t * 3 + k]] = 1;
+    }
+  }
+  return flags;
 }

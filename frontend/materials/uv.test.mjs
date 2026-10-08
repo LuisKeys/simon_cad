@@ -47,3 +47,12 @@ test('cylindrical mapping: u is arc length, v is along the axis', () => {
   assert.ok(Math.abs(Math.max(...us) - Math.min(...us) - Math.PI * R) < 0.5, 'u spans ~ half circumference');
   assert.ok(Math.abs(Math.abs(Math.max(...vs) - Math.min(...vs)) - 30) < 1e-6, 'v spans the height');
 });
+
+test('triplanarFlags marks only curved faces the UVs cannot map', async () => {
+  const { triplanarFlags } = await import('./uv.js');
+  // two triangles per face: vertices 0-3 plane, 4-7 sphere, 8-10 unknown surface
+  const indices = [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10];
+  const faces = [{ tri_start: 0, tri_count: 2, surface: 'plane' }, { tri_start: 2, tri_count: 2, surface: 'sphere' }, { tri_start: 4, tri_count: 1 }];
+  assert.deepEqual([...triplanarFlags(11, indices, faces)], [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0]);
+  assert.deepEqual([...triplanarFlags(3, [], undefined)], [0, 0, 0]);
+});
