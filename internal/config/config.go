@@ -112,6 +112,8 @@ type Settings struct {
 	// Viewport holds the display preferences of the 3D view. On save, nil leaves the saved
 	// preferences as they are (a client that does not know them cannot reset them to "off").
 	Viewport *ViewportSettings `json:"viewport,omitempty"`
+	// Render holds the lighting and shadow preferences of the 3D view; nil on save leaves them.
+	Render *RenderSettings `json:"render,omitempty"`
 	// Workspace is the global units, grid and snapping defaults new projects inherit. On
 	// save, nil leaves them as they are; existing projects never change with them.
 	Workspace *workspace.Settings `json:"workspace,omitempty"`
@@ -236,6 +238,8 @@ func Current() Settings {
 	s.Currency = Currency()
 	vs := Viewport()
 	s.Viewport = &vs
+	rs := Render()
+	s.Render = &rs
 	ws := WorkspaceDefaults()
 	s.Workspace = &ws
 	for _, p := range Providers {
@@ -296,6 +300,15 @@ func Save(s Settings) error {
 			return err
 		}
 		for k, v := range vv {
+			next[k] = v
+		}
+	}
+	if s.Render != nil {
+		rv, err := renderValues(*s.Render)
+		if err != nil {
+			return err
+		}
+		for k, v := range rv {
 			next[k] = v
 		}
 	}

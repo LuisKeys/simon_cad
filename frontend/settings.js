@@ -3,6 +3,7 @@
 // (internal/config) and, for the project's workspace, the workspace tools; this module holds no other state.
 import { api, h } from './api.js';
 import { workspaceSection } from './workspace-settings.js';
+import { ENVIRONMENTS, TONE_MAPPINGS, SHADOW_QUALITIES, normalizeRender } from './render-model.js';
 
 const PROVIDERS = [['openai', 'OpenAI'], ['claude', 'Anthropic'], ['ollama', 'Ollama']];
 // The fallback model is always a cloud model: it serves what the local or primary model cannot.
@@ -27,11 +28,12 @@ export function applyTheme(theme, onTheme) {
  * Reads the saved theme and viewport preferences from the backend (the early-paint copy of
  * the theme in localStorage is only a cache).
  */
-export async function loadTheme(onTheme, onViewport) {
+export async function loadTheme(onTheme, onViewport, onRender) {
   try {
     const s = await api('settings');
     applyTheme(s.theme, onTheme);
     if (s.viewport) onViewport?.(s.viewport);
+    if (s.render) onRender?.(s.render);
     try { localStorage.setItem(THEME_KEY, s.theme); } catch { /* ignore */ }
   } catch { /* keep the early-paint theme */ }
 }
@@ -120,10 +122,10 @@ function modelFields(slot, providers, models, current, defaultCurrency, onProvid
  * Opens the Settings dialog. `workspace` is the open project's state.workspace, `onWorkspace` previews workspace
  * settings in the viewport and `onSaved` runs after a successful save.
  */
-export async function openSettings({ toast, onTheme, onViewport, workspace, onWorkspace, onSaved }) {
+export async function openSettings({ toast, onTheme, onViewport, onRender, workspace, onWorkspace, onSaved }) {
   let cfg;
   try { cfg = await api('settings'); } catch (e) { toast(e.message, 'bad'); return; }
-  const saved = cfg.theme, savedView = { ...cfg.viewport };
+  const saved = cfg.theme, savedView = { ...cfg.viewport }, savedRender = normalizeRender(cfg.render);
   const el = document.getElementById('settings');
   const fb = cfg.fallback ?? { enabled: false, provider: 'openai', providers: {}, consent: 'ask' };
   const primary = modelFields('primary', PROVIDERS, cfg.providers, cfg.provider, cfg.currency, () => hints());
@@ -169,6 +171,18 @@ export async function openSettings({ toast, onTheme, onViewport, workspace, onWo
   opacity.value = String(view.axisOpacity);
   const gizmoSize = sel('set-gizmo-size', GIZMO_SIZES, view.gizmoSize, () => { view.gizmoSize = gizmoSize.value; preview(); });
   const gizmoPos = sel('set-gizmo-pos', GIZMO_POSITIONS, view.gizmoPosition, () => { view.gizmoPosition = gizmoPos.value; preview(); });
+  // Rendering preferences preview live too (and are reverted on Cancel).
+  const render = normalizeRender(cfg.render);
+  const previewRender = () => onRender?.({ ...render });
+  const slider = (id, key, min, max, step) => {
+    const out = h('output', { for: id, class: 'muted' }, `${render[key]}%`);
+    const r = h('input', { id, type: 'range', min: String(min), max: String(max), step: String(step), oninput: () => {
+      render[key] = Number(r.value); out.textContent = `${r.value}%`; previewRender();
+    } });
+    r.value = String(render[key]);
+    return h('div', { class: 'row' }, r, out);
+  };
+  const choice = (id, opts, key) => { const s = sel(id, opts, render[key], () => { render[key] = s.value; previewRender(); }); return s; };
   const status = h('span', { class: 'muted', role: 'status' });
   const ws = workspace ? workspaceSection({ view: workspace, defaults: cfg.workspace, preview: onWorkspace }) : null;
 
@@ -194,6 +208,14 @@ export async function openSettings({ toast, onTheme, onViewport, workspace, onWo
       srow('set-gizmo', 'Show Axis Gizmo', check('set-gizmo', 'showGizmo')),
       srow('set-gizmo-size', 'Axis Gizmo Size', gizmoSize),
       srow('set-gizmo-pos', 'Axis Gizmo Position', gizmoPos)]],
+    ['rendering', 'Rendering', [
+      h('h2', null, 'Rendering'),
+      h('div', { class: 'shint muted' }, 'Lighting and shadows of the 3D view. Presentation only: the model and its exports are not affected.'),
+      srow('set-render-env', 'Environment', choice('set-render-env', ENVIRONMENTS, 'environment')),
+      srow('set-render-env-intensity', 'Reflection Intensity', slider('set-render-env-intensity', 'envIntensity', 0, 300, 10)),
+      srow('set-render-exposure', 'Exposure', slider('set-render-exposure', 'exposure', 25, 300, 5)),
+      srow('set-render-tone', 'Tone Mapping', choice('set-render-tone', TONE_MAPPINGS, 'toneMapping')),
+      srow('set-render-shadows', 'Shadows', choice('set-render-shadows', SHADOW_QUALITIES, 'shadows'))]],
     ...(ws ? [['workspace', 'Workspace', ws.nodes]] : []),
   ].map(([id, label, nodes]) => {
     const tab = h('button', { type: 'button', class: 'stab', role: 'tab', id: `stab-${id}`, 'aria-controls': `spanel-${id}`,
@@ -216,7 +238,7 @@ export async function openSettings({ toast, onTheme, onViewport, workspace, onWo
   const reveal = (field) => { const p = panels.find((x) => x.el.contains(field)); if (p) show(p.id); field.focus(); };
 
   const close = (revert) => {
-    if (revert) { applyTheme(saved, onTheme); onViewport?.(savedView); ws?.revert(); }
+    if (revert) { applyTheme(saved, onTheme); onViewport?.(savedView); onRender?.(savedRender); ws?.revert(); }
     el.hidden = true; el.replaceChildren();
   };
   const form = h('form', { class: 'dialog settings', 'aria-label': 'Settings', onsubmit: async (e) => {
@@ -233,7 +255,7 @@ export async function openSettings({ toast, onTheme, onViewport, workspace, onWo
       }) : null;
       // The global currency is only the default label now (each model names its own); it is sent back unchanged.
       const out = await api('settings', { provider: primary.provider.value, providers: cfg.providers, theme: theme.value,
-        componentLibrary: complib.value.trim(), currency: cfg.currency ?? '', viewport: view, workspace: wsDefaults ?? undefined,
+        componentLibrary: complib.value.trim(), currency: cfg.currency ?? '', viewport: view, render, workspace: wsDefaults ?? undefined,
         fallback: { enabled: fbEnabled.checked, provider: fallback.provider.value, providers: fb.providers, consent: consent.value } });
       try { localStorage.setItem(THEME_KEY, out.theme); } catch { /* ignore */ }
       el.hidden = true; el.replaceChildren();

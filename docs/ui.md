@@ -153,8 +153,17 @@ backlog item "round only the outer edges after pocketing".
   All of it is presentation only: not pickable, not in the model bounds, never exported or recorded
   in the history. Settings → *Viewport* turns each part on or off and sets the axis opacity and the
   gizmo's size and corner; the choice is saved with the other settings.
+- **Rendering and materials look:** the viewport lights the model with a procedural studio environment
+  (`lighting.js`: softboxes on a gradient dome, reflected by metals and glossy plastics), a key light that casts soft
+  shadows onto an invisible ground plane, and a fill. The shadow map is redrawn only when the model, its visibility or
+  the section cut changes, not when the camera moves. Library materials may add clearcoat, transmission (glass),
+  ior, sheen and emissive (rendered as a physical material only when used) and CC0 PBR textures
+  (`materials/<id>/*.jpg`, see `docs/project-format.md`). Settings → *Rendering* sets the environment (studio or plain
+  room), reflection intensity, exposure, tone mapping (neutral, ACES, AgX, none) and shadow quality (off, standard,
+  high); changes preview live, Cancel reverts them and they are saved with the other settings (`internal/config/render.go`,
+  `frontend/render-model.js`). Presentation only: never in the project, the history or an export.
 - **Settings navigation:** the dialog has a left-hand section list (Primary Model, Fallback Model, UI Configuration,
-  Viewport and, with a project open, Workspace); only the active section is shown, all share one Save/Cancel, and
+  Viewport, Rendering and, with a project open, Workspace); only the active section is shown, all share one Save/Cancel, and
   the last section used is reopened. A validation error switches to the section holding the field.
 - **Workspace / Units & Grid:** Settings › *Workspace / Units & Grid* edits the open project's
   display units (linear mm/cm/m/in/ft, angular degrees/radians, decimals), grid (show, plane,

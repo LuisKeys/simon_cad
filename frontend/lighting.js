@@ -48,10 +48,22 @@ export class StudioLighting {
     this.floor.renderOrder = -1;
     this.floor.visible = false;
     this.framed = false;
+    this.shadowsOn = true;
     scene.add(this.key, this.key.target, this.fill, this.fill.target, this.hemi, this.floor);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.shadowMap.autoUpdate = false; // lights are fixed in the world: redraw only when the model changes
+  }
+
+  /** Shadow quality as a map resolution; 0 turns shadows (and the ground catcher) off. */
+  setShadowSize(size) {
+    this.shadowsOn = size > 0;
+    this.key.castShadow = this.shadowsOn;
+    if (this.shadowsOn && this.key.shadow.mapSize.x !== size) {
+      this.key.shadow.mapSize.set(size, size);
+      this.key.shadow.map?.dispose();
+      this.key.shadow.map = null; // three allocates a new one at the new size
+    }
   }
 
   /** Frames the key light's shadow camera and the ground catcher on the model's bounds. */

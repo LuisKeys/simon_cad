@@ -11,6 +11,7 @@ import { WorldAxes } from './axes.js';
 import { ViewportLayoutManager } from './viewlayout.js';
 import { WorkspaceGrid } from './grid.js';
 import { rectFrom, boundsOf, rectHit } from './boxselect-model.js';
+import { renderParams } from './render-model.js';
 import { PLANE_AXES, gridShown } from './grid-model.js';
 
 const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
@@ -31,17 +32,11 @@ export class Viewport {
     // Image-based lighting gives metals something to reflect (a procedural studio, RoomEnvironment
     // if that fails); the key light adds soft shadows and the rest is fill.
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.NeutralToneMapping;
-    this.renderer.toneMappingExposure = 1;
-    try {
-      const pmrem = new THREE.PMREMGenerator(this.renderer);
-      try { this.envMap = pmrem.fromScene(studioEnvironment(), 0.03).texture; }
-      catch (e) { console.warn('studio environment failed, using the room', e); this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; }
-      this.scene.environment = this.envMap;
-      pmrem.dispose();
-    } catch (e) { console.warn('environment map unavailable', e); }
+    this.envMaps = {};          // name -> PMREM texture, built the first time it is chosen
+    this.renderPrefs = renderParams();
+    this._setEnvironment(this.renderPrefs.environment);
     this.lighting = new StudioLighting(this.scene, this.renderer);
-    if (!this.envMap) { this.lighting.hemi.intensity = 1.1; this.lighting.key.intensity = 2.6; }
+    this.setRenderPrefs(this.renderPrefs);
     this._shadowStale = true;   // the shadow map is redrawn only when the model or the cut changes
     // The workspace grid (Settings → Workspace, or the agent's configure_grid): world-aligned,
     // with the project's spacing, extent, origin and plane.
@@ -95,6 +90,32 @@ export class Viewport {
   }
 
   dirty() { this._dirty = true; }
+
+  _setEnvironment(name) {
+    try {
+      if (!this.envMaps[name]) {
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        try { this.envMaps[name] = (name === 'room' ? pmrem.fromScene(new RoomEnvironment(), 0.04) : pmrem.fromScene(studioEnvironment(), 0.03)).texture; }
+        finally { pmrem.dispose(); }
+      }
+      this.envMap = this.scene.environment = this.envMaps[name];
+    } catch (e) { console.warn('environment map unavailable', e); this.envMap = this.scene.environment = null; }
+  }
+
+  /** Settings → Rendering (see render-model.js): environment, exposure, tone mapping and shadows. */
+  setRenderPrefs(r) {
+    const p = this.renderPrefs = renderParams(r);
+    this._setEnvironment(p.environment);
+    this.scene.environmentIntensity = p.envFactor;
+    const tone = { neutral: THREE.NeutralToneMapping, aces: THREE.ACESFilmicToneMapping, agx: THREE.AgXToneMapping, none: THREE.NoToneMapping }[p.toneMapping];
+    this.renderer.toneMapping = tone;
+    this.renderer.toneMappingExposure = p.exposureFactor;
+    // Without an environment the direct lights have to carry the whole scene.
+    this.lighting.hemi.intensity = this.envMap ? 0.2 : 1.1;
+    this.lighting.key.intensity = this.envMap ? 1.4 : 2.6;
+    this.lighting.setShadowSize(p.shadowMapSize);
+    this._shadowsChanged();
+  }
 
   /** The model's silhouette changed (bodies, visibility, cut, mesh view): redraw the shadow map. */
   _shadowsChanged() { this._shadowStale = true; this._dirty = true; }
@@ -801,7 +822,7 @@ export class Viewport {
       this.lighting.fitTo(this.bounds());
       r.shadowMap.needsUpdate = true;
     }
-    this.lighting.floor.visible = this.lighting.framed && !mo; // the mesh view is a bare wireframe
+    this.lighting.floor.visible = this.lighting.framed && this.lighting.shadowsOn && !mo; // the mesh view is a bare wireframe
     const H = this.canvas.clientHeight || 1, W = this.canvas.clientWidth || 1;
     r.setScissorTest(true);
     r.setViewport(0, 0, W, H); r.setScissor(0, 0, W, H);
