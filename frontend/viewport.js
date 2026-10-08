@@ -5,6 +5,7 @@
 // each visible pane is drawn into its own rectangle of the canvas with its own camera.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
+import { StudioLighting, studioEnvironment } from './lighting.js';
 import { MaterialManager } from './materials/pbr.js';
 import { WorldAxes } from './axes.js';
 import { ViewportLayoutManager } from './viewlayout.js';
@@ -27,18 +28,21 @@ export class Viewport {
     this.renderer.localClippingEnabled = false;
     this.scene = new THREE.Scene();
     this.scene.up.set(0, 0, 1);
-    // Image-based lighting gives metals something to reflect; the direct lights stay as fill.
+    // Image-based lighting gives metals something to reflect (a procedural studio, RoomEnvironment
+    // if that fails); the key light adds soft shadows and the rest is fill.
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1;
     try {
       const pmrem = new THREE.PMREMGenerator(this.renderer);
-      this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      try { this.envMap = pmrem.fromScene(studioEnvironment(), 0.03).texture; }
+      catch (e) { console.warn('studio environment failed, using the room', e); this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; }
       this.scene.environment = this.envMap;
       pmrem.dispose();
     } catch (e) { console.warn('environment map unavailable', e); }
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, this.envMap ? 0.35 : 1.1));
-    const key = new THREE.DirectionalLight(0xffffff, this.envMap ? 1.0 : 1.6);
-    key.position.set(1, -1.5, 2.5);
-    this.scene.add(key);
+    this.lighting = new StudioLighting(this.scene, this.renderer);
+    if (!this.envMap) { this.lighting.hemi.intensity = 1.1; this.lighting.key.intensity = 2.6; }
+    this._shadowStale = true;   // the shadow map is redrawn only when the model or the cut changes
     // The workspace grid (Settings → Workspace, or the agent's configure_grid): world-aligned,
     // with the project's spacing, extent, origin and plane.
     this.grid = new WorkspaceGrid();
@@ -91,6 +95,9 @@ export class Viewport {
 
   dirty() { this._dirty = true; }
 
+  /** The model's silhouette changed (bodies, visibility, cut, mesh view): redraw the shadow map. */
+  _shadowsChanged() { this._shadowStale = true; this._dirty = true; }
+
   /** The active view's camera and controls (tools, fit and the View menu act on the active view). */
   get camera() { return this.layout.active.camera; }
   get controls() { return this.layout.active.controls; }
@@ -134,6 +141,7 @@ export class Viewport {
     this.appearance = delta.appearance ?? {};
     for (const b of this.bodies.values()) this._applyAppearance(b);
     this.stats = { bodies: this.bodies.size, triangles: delta.stats?.triangles ?? 0 };
+    this._shadowsChanged();
     this._updateSectionRange();
     if (!hadBodies && (this.bodies.size > 0 || (delta.sketches ?? []).length > 0)) this.fitAll({ auto: true });
     this.dirty();
@@ -148,6 +156,7 @@ export class Viewport {
     const material = new THREE.MeshStandardMaterial({ color: COLORS.body, metalness: 0.25, roughness: 0.45, side: THREE.FrontSide });
     const mesh = new THREE.Mesh(geo, material); // placeholder until _applyAppearance assigns the shared material
     mesh.userData.body = d.id;
+    mesh.castShadow = mesh.receiveShadow = true;
 
     const segs = [];
     const ep = d.edge_points ?? [];
@@ -194,7 +203,7 @@ export class Viewport {
   /** Re-resolves every body's material (after the library changed, e.g. project open or reload). */
   reapplyMaterials() {
     for (const b of this.bodies.values()) this._applyAppearance(b);
-    this.dirty();
+    this._shadowsChanged();
   }
 
   _dropBody(id) {
@@ -210,6 +219,7 @@ export class Viewport {
   clear() {
     for (const id of [...this.bodies.keys()]) this._dropBody(id);
     this.known = {};
+    this._shadowsChanged();
     this.setGhost(null);
     this.dirty();
   }
@@ -393,6 +403,7 @@ export class Viewport {
         this.sectionValue = lo + (hi - lo) * t;
       }
     }
+    this._shadowsChanged();
     for (const b of this.bodies.values()) { b.material.side = on ? THREE.DoubleSide : THREE.FrontSide; b.material.needsUpdate = true; }
     this.dirty();
   }
@@ -765,6 +776,7 @@ export class Viewport {
   /** Mesh view: shows each body's triangle mesh and hides the grid, B-rep edges and sketch outlines. */
   setMeshOnly(on) {
     this.meshOnly = !!on;
+    this._shadowsChanged();
     this.dirty();
   }
 
@@ -783,6 +795,12 @@ export class Viewport {
       if (b.wire) b.wire.visible = mo;
     }
     const r = this.renderer;
+    if (this._shadowStale) {
+      this._shadowStale = false;
+      this.lighting.fitTo(this.bounds());
+      r.shadowMap.needsUpdate = true;
+    }
+    this.lighting.floor.visible = this.lighting.framed && !mo; // the mesh view is a bare wireframe
     const H = this.canvas.clientHeight || 1, W = this.canvas.clientWidth || 1;
     r.setScissorTest(true);
     r.setViewport(0, 0, W, H); r.setScissor(0, 0, W, H);
