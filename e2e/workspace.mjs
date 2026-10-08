@@ -50,7 +50,7 @@ try {
   });
   const frame = () => page.evaluate(() => new Promise((r) => { const n = window.simonViewport.frames; const t = () => (window.simonViewport.frames > n ? r() : requestAnimationFrame(t)); window.simonViewport.dirty(); t(); }));
   const label = (axis) => page.locator(`.vp-pane[data-pane="1"] .dim-label[data-axis="${axis}"]`);
-  const openSettings = async () => { await page.click('#btn-settings'); await page.waitForSelector('#set-ws-spacing'); };
+  const openSettings = async () => { await page.click('#btn-settings'); await page.click('#stab-workspace'); await page.waitForSelector('#set-ws-spacing'); };
 
   await api('level', { level: 'auto' });
   await api('tool', { name: 'create_box', args: { id: 'plate', name: 'plate', dx: 120, dy: 80, dz: 40 } });

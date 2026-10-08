@@ -491,9 +491,17 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .sc-keys .plus, .sc-keys .or { color: var(--faint); font-size: 11px; }
 .sc-keys .or { margin: 0 2px; }
 .sc-label { color: var(--muted); }
-.dialog.settings { width: min(480px, calc(100vw - 24px)); overflow: auto; }
-.dialog.settings .dtitle { font-size: 16px; font-weight: 600; }
-.dialog.settings h2 { margin: 8px 0 0; }
+.dialog.settings { width: min(760px, calc(100vw - 24px)); height: min(640px, 80vh); max-height: 80vh; overflow: hidden; padding: 0; gap: 0; }
+.dialog.settings .dtitle { font-size: 16px; font-weight: 600; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.sbody { flex: 1; min-height: 0; display: grid; grid-template-columns: 170px 1fr; }
+.snav { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--line); overflow: auto; }
+.snav .stab { text-align: left; padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+.snav .stab:hover { color: var(--text); }
+.snav .stab.on { background: var(--accent-soft); color: var(--sel); }
+.spanel { overflow: auto; padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.spanel[hidden] { display: none; }
+.dialog.settings .sfoot { padding: 10px 16px; border-top: 1px solid var(--line); align-items: center; }
+.dialog.settings h2 { margin: 0; }
 .dialog.settings h3 { margin: 4px 0 0; font-size: 11px; font-weight: 600; color: var(--muted); }
 .sgroup { display: flex; flex-direction: column; gap: 10px; }
 .srow { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: center; }
@@ -504,8 +512,11 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .dialog.settings select, .dialog.settings input { width: 100%; }
 .dialog.settings input[type=checkbox] { width: auto; justify-self: start; }
 .dialog.settings output { min-width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
-.dialog.settings .row:last-child { align-items: center; margin-top: 6px; }
 .dialog.settings .bad { color: var(--bad); font-size: 12px; }
+@media (max-width: 600px) {
+  .sbody { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .snav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); }
+}
 @media (max-width: 480px) { .srow { grid-template-columns: 1fr; gap: 4px; } }
 
 /* ---- interactive Move / Rotate (transform.js) -------------------------------------------- */

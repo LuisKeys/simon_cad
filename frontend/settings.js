@@ -13,6 +13,7 @@ const CONSENTS = [['ask', 'Ask before the first remote fallback'], ['allow', 'Al
 const EFFORTS = [['', 'Model default'], ['none', 'None'], ['minimal', 'Minimal'], ['low', 'Low'],
   ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']];
 const THEME_KEY = 'simon.theme';
+let lastTab = null; // the section open last time, so reopening Settings returns to it
 const GIZMO_SIZES = [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']];
 const GIZMO_POSITIONS = [['bottom-left', 'Bottom Left'], ['bottom-right', 'Bottom Right'], ['top-left', 'Top Left']];
 
@@ -171,6 +172,49 @@ export async function openSettings({ toast, onTheme, onViewport, workspace, onWo
   const status = h('span', { class: 'muted', role: 'status' });
   const ws = workspace ? workspaceSection({ view: workspace, defaults: cfg.workspace, preview: onWorkspace }) : null;
 
+  // Sections: one panel each, all kept in the DOM (hidden when inactive) so a single form still saves everything.
+  const panels = [
+    ['model', 'Primary Model', [
+      h('h2', null, 'Primary Model'),
+      h('div', { class: 'shint muted' }, 'Serves every request it can, locally or in the cloud.'),
+      ...primary.nodes]],
+    ['fallback', 'Fallback Model', [
+      h('h2', null, 'Fallback Model'),
+      srow('set-fallback-enabled', 'Enable Fallback', fbEnabled),
+      fbHint, ...fallback.nodes, consentRow]],
+    ['ui', 'UI Configuration', [
+      h('h2', null, 'UI Configuration'),
+      h('div', { class: 'srow' }, h('label', { for: 'set-theme' }, 'Theme'), theme),
+      h('div', { class: 'srow' }, h('label', { for: 'set-complib' }, 'Component library'), complib)]],
+    ['viewport', 'Viewport', [
+      h('h2', null, 'Viewport'),
+      srow('set-axes', 'Show Coordinate Axes', check('set-axes', 'showAxes')),
+      srow('set-axis-labels', 'Show Axis Labels', check('set-axis-labels', 'showAxisLabels')),
+      srow('set-axis-opacity', 'Axis Opacity', h('div', { class: 'row' }, opacity, opacityOut)),
+      srow('set-gizmo', 'Show Axis Gizmo', check('set-gizmo', 'showGizmo')),
+      srow('set-gizmo-size', 'Axis Gizmo Size', gizmoSize),
+      srow('set-gizmo-pos', 'Axis Gizmo Position', gizmoPos)]],
+    ...(ws ? [['workspace', 'Workspace', ws.nodes]] : []),
+  ].map(([id, label, nodes]) => {
+    const tab = h('button', { type: 'button', class: 'stab', role: 'tab', id: `stab-${id}`, 'aria-controls': `spanel-${id}`,
+      onclick: () => show(id) }, label);
+    const el = h('div', { class: 'spanel', role: 'tabpanel', id: `spanel-${id}`, 'aria-labelledby': `stab-${id}`, hidden: true }, ...nodes);
+    return { id, tab, el };
+  });
+  const nav = h('nav', { class: 'snav', role: 'tablist', 'aria-orientation': 'vertical', 'aria-label': 'Settings sections' },
+    panels.map((p) => p.tab));
+  let activeTab = null;
+  function show(id) {
+    activeTab = lastTab = id;
+    for (const p of panels) {
+      const on = p.id === id;
+      p.el.hidden = !on; p.tab.classList.toggle('on', on);
+      p.tab.setAttribute('aria-selected', String(on)); p.tab.tabIndex = on ? 0 : -1;
+    }
+  }
+  // Brings the section holding a field into view (used when validation points at it).
+  const reveal = (field) => { const p = panels.find((x) => x.el.contains(field)); if (p) show(p.id); field.focus(); };
+
   const close = (revert) => {
     if (revert) { applyTheme(saved, onTheme); onViewport?.(savedView); ws?.revert(); }
     el.hidden = true; el.replaceChildren();
@@ -179,7 +223,7 @@ export async function openSettings({ toast, onTheme, onViewport, workspace, onWo
     e.preventDefault();
     primary.stash(); fallback.stash();
     // An invalid workspace value is already reported next to the section; nothing is saved.
-    if (ws?.invalid()) { form.querySelector('[aria-invalid=true]')?.focus(); return; }
+    if (ws?.invalid()) { const f = form.querySelector('[aria-invalid=true]'); if (f) reveal(f); return; }
     status.textContent = ''; status.className = 'muted';
     try {
       // The project's workspace goes through the same tools as the agent's requests.
@@ -198,31 +242,21 @@ export async function openSettings({ toast, onTheme, onViewport, workspace, onWo
     } catch (err) { status.textContent = err.message; status.className = 'bad'; }
   } },
     h('div', { class: 'dtitle' }, 'Settings'),
-    h('h2', null, 'Primary Model'),
-    h('div', { class: 'shint muted' }, 'Serves every request it can, locally or in the cloud.'),
-    ...primary.nodes,
-    h('h2', null, 'Fallback Model'),
-    srow('set-fallback-enabled', 'Enable Fallback', fbEnabled),
-    fbHint,
-    ...fallback.nodes,
-    consentRow,
-    h('h2', null, 'UI Configuration'),
-    h('div', { class: 'srow' }, h('label', { for: 'set-theme' }, 'Theme'), theme),
-    h('div', { class: 'srow' }, h('label', { for: 'set-complib' }, 'Component library'), complib),
-    h('h2', null, 'Viewport'),
-    srow('set-axes', 'Show Coordinate Axes', check('set-axes', 'showAxes')),
-    srow('set-axis-labels', 'Show Axis Labels', check('set-axis-labels', 'showAxisLabels')),
-    srow('set-axis-opacity', 'Axis Opacity', h('div', { class: 'row' }, opacity, opacityOut)),
-    srow('set-gizmo', 'Show Axis Gizmo', check('set-gizmo', 'showGizmo')),
-    srow('set-gizmo-size', 'Axis Gizmo Size', gizmoSize),
-    srow('set-gizmo-pos', 'Axis Gizmo Position', gizmoPos),
-    ...(ws?.nodes ?? []),
-    h('div', { class: 'row' }, h('button', { type: 'submit', class: 'primary' }, 'Save Settings'),
+    h('div', { class: 'sbody' }, nav, ...panels.map((p) => p.el)),
+    h('div', { class: 'row sfoot' }, h('button', { type: 'submit', class: 'primary' }, 'Save Settings'),
       h('button', { type: 'button', onclick: () => close(true) }, 'Cancel'), status));
   form.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(true); });
+  nav.addEventListener('keydown', (e) => {
+    const d = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const i = (panels.findIndex((p) => p.id === activeTab) + d + panels.length) % panels.length;
+    show(panels[i].id); panels[i].tab.focus();
+  });
   el.replaceChildren(form);
   el.addEventListener('mousedown', (e) => { if (e.target === el) close(true); }, { once: true });
   el.hidden = false;
   primary.fill(); fallback.fill(); hints();
-  primary.provider.focus();
+  show(panels.some((p) => p.id === lastTab) ? lastTab : panels[0].id);
+  (panels.find((p) => p.id === activeTab).tab).focus();
 }

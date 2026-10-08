@@ -153,6 +153,9 @@ backlog item "round only the outer edges after pocketing".
   All of it is presentation only: not pickable, not in the model bounds, never exported or recorded
   in the history. Settings → *Viewport* turns each part on or off and sets the axis opacity and the
   gizmo's size and corner; the choice is saved with the other settings.
+- **Settings navigation:** the dialog has a left-hand section list (Primary Model, Fallback Model, UI Configuration,
+  Viewport and, with a project open, Workspace); only the active section is shown, all share one Save/Cancel, and
+  the last section used is reopened. A validation error switches to the section holding the field.
 - **Workspace / Units & Grid:** Settings › *Workspace / Units & Grid* edits the open project's
   display units (linear mm/cm/m/in/ft, angular degrees/radians, decimals), grid (show, plane,
   spacing, major line interval, extent, origin) and snapping (master switch, grid, translation,
