@@ -105,13 +105,16 @@ window.simonDimensions = dimOverlay;
 const xform = new InteractiveTransformController(vp, {
   selection: () => S.selection,
   workspace: () => S.state?.workspace,
-  commit: async ({ name, args }) => {
+  commit: async (cmds) => {
     try {
-      const o = await api('tool', { name, args });
-      if (!o.ok) toast(o.error, 'bad');
-      else if (!o.committed) toast(`${name === 'move_object' ? 'Move' : 'Rotate'} proposed: review it in the conversation`, 'ok');
+      let ok = true;
+      for (const { name, args } of cmds) {
+        const o = await api('tool', { name, args });
+        if (!o.ok) { toast(o.error, 'bad'); ok = false; break; }
+        if (!o.committed) toast(`${name === 'move_object' ? 'Move' : 'Rotate'} proposed: review it in the conversation`, 'ok');
+      }
       await refresh();
-      return o.ok;
+      return ok;
     } catch (e) { toast(e.message, 'bad'); await refresh(); return false; }
   },
   // The editable dimensions would float at the old place: hidden while the object moves.
@@ -1280,23 +1283,7 @@ const actionEnv = {
   async transform(kind) {
     const ids = selIds();
     if (!ids.length) return;
-    // One object: the interactive Move/Rotate (G/R). Several: typed values (multi-object
-    // interactive transforms are a later phase).
-    if (ids.length === 1) { xform.begin(kind === 'move' ? 'translate' : 'rotate'); return; }
-    if (kind === 'move') {
-      const v = await formDialog({ title: `Move ${ids.length > 1 ? ids.length + ' objects' : ids[0]} (${units.symbol})`, ok: 'Move',
-        fields: [{ key: 'dx', label: 'X', value: 0, length: true }, { key: 'dy', label: 'Y', value: 0, length: true }, { key: 'dz', label: 'Z', value: 0, length: true }] });
-      if (!v) return;
-      for (const id of ids) await callTool('transform', { target: id, dx: v.dx, dy: v.dy, dz: v.dz, intent: `Move ${id}` }, 'Move');
-    } else {
-      const v = await formDialog({ title: `Rotate ${ids.length > 1 ? ids.length + ' objects' : ids[0]} about its centre`, ok: 'Rotate',
-        fields: [{ key: 'angle', label: `Angle (${units.angleSymbol})`, value: 90, angle: true }, { key: 'axis', label: 'Axis', options: ['X', 'Y', 'Z'], value: 'Z' }] });
-      if (!v) return;
-      const cs = ids.map((id) => vp.bodyCenter(id)).filter(Boolean);
-      const o = cs.length ? [0, 1, 2].map((i) => cs.reduce((t, c) => t + c[i], 0) / cs.length) : [0, 0, 0];
-      const axis = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }[v.axis];
-      for (const id of ids) await callTool('transform', { target: id, angle_deg: v.angle, ax: axis[0], ay: axis[1], az: axis[2], ox: o[0], oy: o[1], oz: o[2], intent: `Rotate ${id}` }, 'Rotate');
-    }
+    xform.begin(kind === 'move' ? 'translate' : 'rotate');
   },
   async boolean(op) {
     const ids = selIds();

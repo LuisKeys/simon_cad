@@ -121,7 +121,7 @@ export class TransformSession {
   get translating() { return this.mode === MODE.TRANSLATING; }
   get rotating() { return this.mode === MODE.ROTATING; }
   /** The fixed point of a rotation (or the moved reference point of a translation). */
-  get pivot() { return this.rotating && this.pivotKind === 'center' ? this.object.center : this.object.origin; }
+  get pivot() { return this.rotating && this.pivotKind === 'center' ? this.object.center : this.object.pivotOrigin ?? this.object.origin; }
 
   identity() {
     return this.translating ? { kind: 'translate', delta: [0, 0, 0], raw: [0, 0, 0], snapped: false }
@@ -208,15 +208,23 @@ export class TransformSession {
    * The tool call that commits the current candidate, or null when it changes nothing (then a
    * confirmation is a cancellation: no history entry). Values are already snapped.
    */
-  command() {
-    const r = this.result, id = this.object.object_id;
+  command() { return this.commands()?.[0] ?? null; }
+
+  /**
+   * One tool call per object (`object.members`, when several are selected: the same move, or a
+   * rotation about the shared pivot point), or null when the candidate changes nothing.
+   */
+  commands() {
+    const r = this.result, ids = this.object.members ?? [this.object.object_id];
+    const many = ids.length > 1;
     if (r.kind === 'translate') {
       if (r.delta.every((v) => Math.abs(v) < 1e-9)) return null;
       const [dx, dy, dz] = r.delta;
-      return { name: 'move_object', args: { object_id: id, dx, dy, dz, intent: `Move ${id}` } };
+      return ids.map((id) => ({ name: 'move_object', args: { object_id: id, dx, dy, dz, intent: `Move ${id}` } }));
     }
     const deg = (r.angle * 180) / Math.PI;
     if (Math.abs(wrap(r.angle)) < 1e-12) return null;
-    return { name: 'rotate_object', args: { object_id: id, angle: deg, axis: AXIS_NAMES[r.axis].toLowerCase(), pivot: this.pivotKind, intent: `Rotate ${id}` } };
+    const pivot = many ? { pivot: 'point', point: [...this.pivot] } : { pivot: this.pivotKind };
+    return ids.map((id) => ({ name: 'rotate_object', args: { object_id: id, angle: deg, axis: AXIS_NAMES[r.axis].toLowerCase(), ...pivot, intent: `Rotate ${id}` } }));
   }
 }

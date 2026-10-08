@@ -109,7 +109,7 @@ const signed = (s) => (/^[0-9]/.test(s) && !/^0(\.0*)?(\s|°|$)/.test(s) ? '+' +
 
 /**
  * The modal controller. Hooks: selection() (the selection view), workspace() (state.workspace),
- * commit({name, args}) → Promise<boolean> (runs the tool call and refreshes), onModal(active),
+ * commit([{name, args}…]) → Promise<boolean> (runs the tool calls and refreshes), onModal(active),
  * notify(message, kind).
  */
 export class InteractiveTransformController {
@@ -142,14 +142,28 @@ export class InteractiveTransformController {
   check() {
     if (this.session || this.committing) return { ok: false, reason: 'A transform is already in progress' };
     const sel = this.hooks.selection();
-    const ids = [...new Set((sel?.selectors ?? []).map(featureOf).filter(Boolean))];
+    let ids = [...new Set((sel?.selectors ?? []).map(featureOf).filter(Boolean))];
     if (ids.length === 0) return { ok: false, reason: 'Select an object to move or rotate' };
-    if (ids.length > 1) return { ok: false, reason: 'Interactive Move/Rotate works on one object at a time' };
-    const t = (sel.transforms ?? []).find((x) => x.object_id === ids[0]);
-    if (!t) return { ok: false, reason: `${ids[0]} is not a visible body: only visible bodies can be moved` };
-    if (!t.transformable) return { ok: false, reason: `${ids[0]} cannot be moved: ${t.reason}` };
-    if (!this.vp.bodies.get(ids[0])) return { ok: false, reason: `${ids[0]} is not shown in the viewport` };
-    return { ok: true, object: t };
+    const ts = [], skipped = [];
+    for (const id of ids) {
+      const t = (sel.transforms ?? []).find((x) => x.object_id === id);
+      // With several selected, the intermediate features (another one builds on them) and the
+      // bodies not shown are left out: the visible result they feed moves instead.
+      if (!t || !this.vp.bodies.get(id)) {
+        if (ids.length > 1) { skipped.push(id); continue; }
+        return { ok: false, reason: !t ? `${id} is not a visible body: only visible bodies can be moved` : `${id} is not shown in the viewport` };
+      }
+      if (!t.transformable) return { ok: false, reason: `${id} cannot be moved: ${t.reason}` };
+      ts.push(t);
+    }
+    if (ts.length === 0) return { ok: false, reason: 'None of the selected features is a visible body that can be moved' };
+    ids = ts.map((t) => t.object_id);
+    if (skipped.length) this.skipped = skipped;
+    if (ts.length === 1) return { ok: true, object: ts[0], ids };
+    // Several objects move as one: the reference is the first one's origin; a rotation turns
+    // about the mean of the origins / centers.
+    const mean = (k) => [0, 1, 2].map((i) => ts.reduce((a, t) => a + t[k][i], 0) / ts.length);
+    return { ok: true, ids, object: { ...ts[0], origin: ts[0].origin, center: mean('center'), pivotOrigin: mean('origin'), members: ids } };
   }
 
   /**
@@ -158,9 +172,10 @@ export class InteractiveTransformController {
    * is where the mouse is now, so the object never jumps on the first move.
    */
   begin(kind, { at = null } = {}) {
+    this.skipped = null;
     const c = this.check();
     if (!c.ok) { this.hooks.notify?.(c.reason, 'bad'); return false; }
-    const body = this.vp.bodies.get(c.object.object_id);
+    const bodies = c.ids.map((id) => this.vp.bodies.get(id));
     const where = at ?? this.mouse;
     const pane = where ? this.vp.layout.paneAt(where.x, where.y) : this.vp.layout.active;
     const r = pane.surface.getBoundingClientRect();
@@ -168,10 +183,12 @@ export class InteractiveTransformController {
     const ws = this.hooks.workspace() ?? {};
     this.session = new TransformSession(kind, c.object, { gridPlane: ws.grid?.plane ?? 'XY' });
     this.pane = pane;
-    this.body = body;
-    this.size = Math.max(new THREE.Box3().setFromObject(body.group).getSize(new THREE.Vector3()).length(), 1);
+    this.bodies = bodies;
+    const box = new THREE.Box3();
+    for (const b of bodies) box.expandByObject(b.group);
+    this.size = Math.max(box.getSize(new THREE.Vector3()).length(), 1);
     this.ctrl = false;
-    body.group.matrixAutoUpdate = false;
+    for (const b of bodies) b.group.matrixAutoUpdate = false;
     this.vp.selGroup.matrixAutoUpdate = false;
     this.vp.hover = null;
     this.vp._drawOverlay(this.vp.hoverGroup, [], 0);
@@ -181,6 +198,7 @@ export class InteractiveTransformController {
     window.addEventListener('keyup', this._onKeyUp, true);
     for (const p of this.vp.layout.panes) p.surface.style.cursor = kind === 'rotate' ? 'alias' : 'move';
     this.hooks.onModal?.(true);
+    if (this.skipped) this.hooks.notify?.(`${this.skipped.length} selected feature(s) that are not visible bodies were left out`, 'ok');
     this._refresh(); // records the reference: the object does not jump
     return true;
   }
@@ -222,7 +240,7 @@ export class InteractiveTransformController {
   }
 
   _applyMatrix(m) {
-    for (const g of [this.body.group, this.vp.selGroup]) { g.matrix.copy(m); g.matrixWorldNeedsUpdate = true; }
+    for (const g of [...this.bodies.map((b) => b.group), this.vp.selGroup]) { g.matrix.copy(m); g.matrixWorldNeedsUpdate = true; }
     this.vp.dirty();
   }
 
@@ -263,9 +281,9 @@ export class InteractiveTransformController {
   async confirm() {
     const s = this.session;
     if (!s) return;
-    const cmd = s.command();
+    const cmd = s.commands();
     if (!cmd) { this.cancel(); return; }
-    const body = this.body;
+    const bodies = this.bodies;
     this._end();
     this.committing = true;
     let ok = false;
@@ -273,20 +291,20 @@ export class InteractiveTransformController {
     // On success the refreshed scene has replaced the body; whatever is left (an error, or the
     // body was not replaced) goes back to where the model says it is. The selection overlay is
     // redrawn from the model either way, so it never keeps the preview's matrix.
-    this._reset(this.vp.bodies.get(body.data.id)?.group === body.group || !ok ? body.group : null);
+    this._reset(bodies.map((b) => (this.vp.bodies.get(b.data.id)?.group === b.group || !ok ? b.group : null)));
   }
 
   /** Cancel: restores the original transform exactly; nothing was sent, nothing to undo. */
   cancel(reason = '') {
     if (!this.session) return;
-    const body = this.body;
+    const bodies = this.bodies;
     this._end();
-    this._reset(body.group);
+    this._reset(bodies.map((b) => b.group));
     if (reason) this.hooks.notify?.(reason, 'bad');
   }
 
-  _reset(group) {
-    for (const g of [group, this.vp.selGroup]) {
+  _reset(groups) {
+    for (const g of [...groups, this.vp.selGroup]) {
       if (!g) continue;
       g.matrix.identity(); g.matrixAutoUpdate = true; g.matrixWorldNeedsUpdate = true;
     }
@@ -312,11 +330,11 @@ export class InteractiveTransformController {
    */
   validate() {
     if (!this.session) return;
-    const id = this.session.object.object_id;
     const sel = this.hooks.selection();
-    if (this.vp.bodies.get(id)?.group !== this.body.group) {
-      this.cancel(`${id} changed while it was being transformed; the transform was cancelled`);
-    } else if (!(sel?.selectors ?? []).some((x) => featureOf(x) === id)) {
+    const changed = this.bodies.find((b) => this.vp.bodies.get(b.data.id)?.group !== b.group);
+    if (changed) {
+      this.cancel(`${changed.data.id} changed while it was being transformed; the transform was cancelled`);
+    } else if (!this.bodies.every((b) => (sel?.selectors ?? []).some((x) => featureOf(x) === b.data.id))) {
       this.cancel('The selection changed; the transform was cancelled');
     }
   }
