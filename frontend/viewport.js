@@ -1,19 +1,23 @@
 // The Three.js viewport: draws bodies from the rendering API, picks faces/edges/vertices
 // and reports them as (body, kind, index/triangle) for the server to turn into selectors,
 // and draws selection, hover, preview ghost, section plane and measurement overlays.
+// One renderer and one scene serve every view of the Single/Quad layout (viewlayout.js):
+// each visible pane is drawn into its own rectangle of the canvas with its own camera.
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { MaterialManager } from './materials/pbr.js';
-import { WorldAxes, AxisGizmo } from './axes.js';
+import { WorldAxes } from './axes.js';
+import { ViewportLayoutManager } from './viewlayout.js';
 
 const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
 const PICK_PX = 7;
 const MAX_VERTEX_PICK = 4000;
-const VIEW_ANIM_MS = 350;
+const CUBE_MARGIN = 8;
+// The reference grid of each view plane (GridHelper lies in XZ): rotation and normal axis.
+const GRID_PLANES = { XY: { rot: [Math.PI / 2, 0, 0], axis: 2 }, XZ: { rot: [0, 0, 0], axis: 1 }, YZ: { rot: [0, 0, Math.PI / 2], axis: 0 } };
 
 export class Viewport {
-  constructor(canvas, cubeCanvas, hooks) {
+  constructor(canvas, hooks) {
     this.hooks = hooks;
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
@@ -22,13 +26,6 @@ export class Viewport {
     this.renderer.localClippingEnabled = false;
     this.scene = new THREE.Scene();
     this.scene.up.set(0, 0, 1);
-    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100000);
-    this.camera.up.set(0, 0, 1);
-    this.camera.position.set(120, -160, 110);
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.enableDamping = false;
-    this.controls.addEventListener('change', () => this.dirty());
-    this.controls.addEventListener('start', () => { this._anim = null; }); // the user takes over
     // Image-based lighting gives metals something to reflect; the direct lights stay as fill.
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     try {
@@ -41,10 +38,18 @@ export class Viewport {
     const key = new THREE.DirectionalLight(0xffffff, this.envMap ? 1.0 : 1.6);
     key.position.set(1, -1.5, 2.5);
     this.scene.add(key);
-    this.grid = new THREE.GridHelper(400, 40, 0x3a3a3a, 0x232323);
-    this.grid.rotation.x = Math.PI / 2; // lie in XY, Z up
-    this.grid.material.transparent = true; this.grid.material.opacity = 0.45;
-    this.scene.add(this.grid);
+    // One grid per view plane; each view shows the one of its ViewportConfig.gridPlane.
+    this.grids = {};
+    for (const [plane, def] of Object.entries(GRID_PLANES)) {
+      const g = new THREE.GridHelper(400, 40, 0x3a3a3a, 0x232323);
+      g.rotation.set(...def.rot);
+      g.material.transparent = true; g.material.opacity = 0.45;
+      g.visible = false;
+      this.grids[plane] = g;
+      this.scene.add(g);
+    }
+    this.grid = this.grids.XY; // the perspective view's grid
+    this.helperBox = new THREE.Box3();
     // Visual aids, not geometry: never in bounds(), picking, history or exports.
     this.axes = new WorldAxes();
     this.scene.add(this.axes);
@@ -68,14 +73,20 @@ export class Viewport {
     this.known = {};
     this.stats = { triangles: 0, bodies: 0 };
 
-    this._bindPointer();
-    this._initCube(cubeCanvas);
-    this.gizmo = new AxisGizmo(canvas.parentElement, { onView: (dir) => this.viewFrom(dir) });
+    this._initCube();
+    this.layout = new ViewportLayoutManager(canvas.parentElement, {
+      dirty: () => this.dirty(),
+      bounds: () => this.bounds(),
+      onChange: (st) => hooks.onLayout?.(st),
+      onPaneMenu: (i, el) => hooks.onPaneMenu?.(i, el),
+      onActive: (pane) => hooks.onActive?.(pane),
+    });
+    for (const p of this.layout.panes) { this._bindPointer(p.surface); this._bindCube(p); }
     this.setViewPrefs(this.viewPrefs);
     new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
     this.resize();
     const loop = () => {
-      if (this._anim) this._stepView();
+      if (this.layout.step()) this._dirty = true;
       if (this._dirty) { this._dirty = false; this.render(); }
       requestAnimationFrame(loop);
     };
@@ -83,6 +94,10 @@ export class Viewport {
   }
 
   dirty() { this._dirty = true; }
+
+  /** The active view's camera and controls (tools, fit and the View menu act on the active view). */
+  get camera() { return this.layout.active.camera; }
+  get controls() { return this.layout.active.controls; }
 
   /** Centre of a body's bounding box in model (CAD) coordinates, or null. */
   bodyCenter(id) {
@@ -106,8 +121,6 @@ export class Viewport {
     const p = this.canvas.parentElement;
     const w = Math.max(1, p.clientWidth), h = Math.max(1, p.clientHeight);
     this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
     this.dirty();
   }
 
@@ -126,7 +139,7 @@ export class Viewport {
     for (const b of this.bodies.values()) this._applyAppearance(b);
     this.stats = { bodies: this.bodies.size, triangles: delta.stats?.triangles ?? 0 };
     this._updateSectionRange();
-    if (!hadBodies && (this.bodies.size > 0 || (delta.sketches ?? []).length > 0)) this.fit();
+    if (!hadBodies && (this.bodies.size > 0 || (delta.sketches ?? []).length > 0)) this.fitAll({ auto: true });
     this.dirty();
   }
 
@@ -270,65 +283,70 @@ export class Viewport {
     return box;
   }
 
+  /** Fit to scene in the active view only (each view fits independently). */
   fit() {
     const box = this.bounds();
     if (box.isEmpty()) return;
+    this._updateHelpers(box);
+    this.layout.active.fit(box);
+    this.layout.changed();
+  }
+
+  /**
+   * Fits every view, shown or not, so switching to Quad finds them framed. `auto` (the first
+   * scene of a project) leaves views whose camera was restored from the saved layout alone.
+   */
+  fitAll({ auto = false } = {}) {
+    const box = this.bounds();
+    if (box.isEmpty()) return;
+    this._updateHelpers(box);
+    for (const p of this.layout.panes) {
+      if (auto && p.restored) { p.restored = false; continue; }
+      p.fit(box);
+    }
+    this.layout.changed();
+  }
+
+  /** Grid size and axis length follow the model; they are shared by every view. */
+  _updateHelpers(box) {
     const c = box.getCenter(new THREE.Vector3());
     const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1);
-    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
-    if (!isFinite(dir.x)) dir.set(0.5, -0.7, 0.55).normalize();
-    this.controls.target.copy(c);
-    this.camera.position.copy(c).addScaledVector(dir, r / Math.sin((this.camera.fov * Math.PI) / 360) * 1.1);
-    this.camera.near = Math.max(r / 1000, 0.01); this.camera.far = r * 200;
-    this.camera.updateProjectionMatrix();
-    this.controls.update();
     const gs = Math.pow(10, Math.ceil(Math.log10(r * 4)));
-    this.grid.scale.setScalar(gs / 400);
-    this.grid.position.set(c.x, c.y, box.min.z - 0.01);
+    for (const g of Object.values(this.grids)) g.scale.setScalar(gs / 400);
+    this.helperBox.copy(box);
     // The axes stay on the true origin and reach at least as far as the grid does.
-    this.axes.setExtent(gs / 2 + Math.max(Math.abs(c.x), Math.abs(c.y), Math.abs(box.min.z)));
+    this.axes.setExtent(gs / 2 + Math.max(Math.abs(c.x), Math.abs(c.y), Math.abs(c.z), Math.abs(box.min.z)));
     this.dirty();
   }
 
   /**
-   * Looks at the model from direction `dir` (from the target toward the camera). Used by the
-   * view cube, the axis gizmo and the view menu; the transition is animated unless
-   * `animate` is false or the user prefers reduced motion.
+   * Shows the grid of the pane's plane, centred on the model. The perspective grid lies just
+   * under the model (as always); an orthographic grid sits on the far side of the model so
+   * it never draws over it.
+   */
+  _placeGrid(pane, visible) {
+    const plane = pane.config.gridPlane;
+    for (const [k, g] of Object.entries(this.grids)) g.visible = visible && k === plane;
+    if (!visible) return;
+    const g = this.grids[plane], axis = GRID_PLANES[plane].axis;
+    const b = this.helperBox, empty = b.isEmpty();
+    const pos = empty ? new THREE.Vector3() : b.getCenter(new THREE.Vector3());
+    if (pane.perspective) pos.z = empty ? 0 : b.min.z - 0.01;
+    else if (!empty) {
+      const toCam = pane.camera.position.clone().sub(pane.controls.target).getComponent(axis);
+      const eps = Math.max(b.getSize(new THREE.Vector3()).length() * 1e-4, 0.01);
+      pos.setComponent(axis, toCam >= 0 ? b.min.getComponent(axis) - eps : b.max.getComponent(axis) + eps);
+    }
+    g.position.copy(pos);
+  }
+
+  /**
+   * Looks at the model from direction `dir` (from the target toward the camera) in the active
+   * view. Used by the view cube, the axis gizmo and the view menu; the transition is animated
+   * unless `animate` is false or the user prefers reduced motion.
    */
   viewFrom(dir, { animate = true } = {}) {
-    const box = this.bounds();
-    const c = box.isEmpty() ? this.controls.target.clone() : box.getCenter(new THREE.Vector3());
-    const dist = this.camera.position.distanceTo(this.controls.target);
-    const d = new THREE.Vector3(...dir).normalize();
-    // Looking straight down/up the Z axis, Y becomes the screen's up direction.
-    const up = Math.abs(d.z) > 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
-    const end = { target: c, position: c.clone().addScaledVector(d, dist), up };
-    if (!animate || matchMedia?.('(prefers-reduced-motion: reduce)').matches) { this._anim = null; this._setView(end); return; }
-    // Slerping the orientation (not the position) keeps the turn smooth even between
-    // opposite views, and never passes through a degenerate look-at.
-    const q1 = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(end.position, end.target, up));
-    this._anim = { t0: performance.now(), q0: this.camera.quaternion.clone(), q1, from: this.controls.target.clone(), end, dist };
-    this.dirty();
-  }
-
-  _setView({ target, position, up }) {
-    this.controls.target.copy(target);
-    this.camera.position.copy(position);
-    this.camera.up.copy(up);
-    this.controls.update();
-    this.dirty();
-  }
-
-  _stepView() {
-    const a = this._anim;
-    const t = Math.min(1, (performance.now() - a.t0) / VIEW_ANIM_MS);
-    if (t >= 1) { this._anim = null; this._setView(a.end); return; }
-    const k = t * t * (3 - 2 * t); // smoothstep
-    const q = a.q0.clone().slerp(a.q1, k);
-    this.controls.target.lerpVectors(a.from, a.end.target, k);
-    this.camera.quaternion.copy(q);
-    this.camera.position.copy(this.controls.target).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(q), a.dist);
-    this.dirty();
+    this.layout.viewFrom(this.layout.state.active, dir, { animate });
   }
 
   /**
@@ -339,7 +357,7 @@ export class Viewport {
     this.viewPrefs = { ...this.viewPrefs, ...p };
     const v = this.viewPrefs;
     this.axes.setPrefs({ opacity: Math.max(0, Math.min(100, v.axisOpacity)) / 100, labels: v.showAxisLabels });
-    this.gizmo.setOptions({ visible: v.showGizmo, size: v.gizmoSize, position: v.gizmoPosition });
+    this.layout.setViewPrefs({ showGizmo: v.showGizmo, gizmoSize: v.gizmoSize, gizmoPosition: v.gizmoPosition });
     this.dirty();
   }
 
@@ -373,8 +391,9 @@ export class Viewport {
 
   // ---- picking -------------------------------------------------------------------------
 
-  _ndc(ev) {
-    const r = this.canvas.getBoundingClientRect();
+  /** Pointer position in the pane's own space: NDC (x, y) and pixels (px, py of w × h). */
+  _ndc(ev, pane) {
+    const r = pane.surface.getBoundingClientRect();
     return { x: ((ev.clientX - r.left) / r.width) * 2 - 1, y: -((ev.clientY - r.top) / r.height) * 2 + 1, px: ev.clientX - r.left, py: ev.clientY - r.top, w: r.width, h: r.height };
   }
 
@@ -385,8 +404,8 @@ export class Viewport {
     return ps?.length ? ps[0].distanceToPoint(point) < 0 : false;
   }
 
-  _faceHit(n) {
-    this.ray.setFromCamera({ x: n.x, y: n.y }, this.camera);
+  _faceHit(n, cam) {
+    this.ray.setFromCamera({ x: n.x, y: n.y }, cam);
     const hits = this.ray.intersectObjects(this._visibleMeshes(), false);
     for (const hit of hits) {
       if (this._clipped(hit.point)) continue;
@@ -395,24 +414,29 @@ export class Viewport {
     return null;
   }
 
-  _toScreen(v, n) {
-    const p = v.clone().project(this.camera);
+  _toScreen(v, n, cam = this.camera) {
+    const p = v.clone().project(cam);
     return { x: ((p.x + 1) / 2) * n.w, y: ((1 - p.y) / 2) * n.h, z: p.z };
   }
 
-  _visibleAt(point, hit) {
-    // A vertex/edge point counts only when nothing opaque is in front of it.
+  _visibleAt(point, hit, cam) {
+    // A vertex/edge point counts only when nothing opaque is in front of it. Distances are
+    // measured from the ray origin: the eye in perspective, the near plane in orthographic.
     if (!hit) return true;
-    const d = point.distanceTo(this.camera.position);
+    const o = this.ray.ray.origin;
+    const d = cam.isOrthographicCamera ? point.clone().sub(o).dot(this.ray.ray.direction) : point.distanceTo(o);
     const tol = Math.max(1e-3 * d, 0.02);
     return d <= hit.distance + tol;
   }
 
-  /** Resolves the thing under the pointer, honouring the pick filter. */
+  /** Resolves the thing under the pointer, honouring the pick filter. The ray comes from the
+   *  camera of the view the pointer is in. */
   pick(ev) {
     if (this.bodies.size === 0) return null;
-    const n = this._ndc(ev);
-    const hit = this._faceHit(n);
+    const pane = this.layout.paneAt(ev.clientX, ev.clientY);
+    const cam = pane.camera;
+    const n = this._ndc(ev, pane);
+    const hit = this._faceHit(n, cam);
     const f = this.filter;
     const want = (k) => f === 'auto' || f === k;
 
@@ -425,10 +449,10 @@ export class Viewport {
         for (const v of vs) {
           const w = new THREE.Vector3(...v.pos);
           if (this._clipped(w)) continue;
-          const s = this._toScreen(w, n);
+          const s = this._toScreen(w, n, cam);
           if (s.z < -1 || s.z > 1) continue;
           const d = Math.hypot(s.x - n.px, s.y - n.py);
-          if (d < bd && this._visibleAt(w, hit)) { bd = d; best = { body: b.data.id, kind: 'vertex', index: v.index, point: w }; }
+          if (d < bd && this._visibleAt(w, hit, cam)) { bd = d; best = { body: b.data.id, kind: 'vertex', index: v.index, point: w }; }
         }
       }
       if (best) return best;
@@ -442,14 +466,14 @@ export class Viewport {
           for (let i = 0; i + 1 < e.pt_count; i++) {
             const a = (e.pt_start + i) * 3, c = (e.pt_start + i + 1) * 3;
             const A = new THREE.Vector3(ep[a], ep[a + 1], ep[a + 2]), C = new THREE.Vector3(ep[c], ep[c + 1], ep[c + 2]);
-            const sa = this._toScreen(A, n), sc = this._toScreen(C, n);
+            const sa = this._toScreen(A, n, cam), sc = this._toScreen(C, n, cam);
             const dx = sc.x - sa.x, dy = sc.y - sa.y, L2 = dx * dx + dy * dy;
             let t = L2 ? ((n.px - sa.x) * dx + (n.py - sa.y) * dy) / L2 : 0;
             t = Math.max(0, Math.min(1, t));
             const d = Math.hypot(sa.x + t * dx - n.px, sa.y + t * dy - n.py);
             if (d < bd) {
               const P = A.clone().lerp(C, t);
-              if (this._clipped(P) || !this._visibleAt(P, hit)) continue;
+              if (this._clipped(P) || !this._visibleAt(P, hit, cam)) continue;
               bd = d; best = { body: b.data.id, kind: 'edge', index: e.index, point: P };
             }
           }
@@ -465,9 +489,8 @@ export class Viewport {
     return { body, kind: 'face', index: faceOfTriangle(faces, hit.faceIndex), triangle: hit.faceIndex, point: hit.point };
   }
 
-  _bindPointer() {
+  _bindPointer(c) {
     let down = null;
-    const c = this.canvas;
     let rdown = null;
     let lp = null;                       // long-press timer (touch / pen): the touch equivalent of right-click
     const cancelLp = () => { clearTimeout(lp); lp = null; };
@@ -585,7 +608,7 @@ export class Viewport {
   setMeasure(on) {
     this.measure = { on, pts: [] };
     this._drawMeasure();
-    this.canvas.style.cursor = on ? 'crosshair' : '';
+    for (const p of this.layout.panes) p.surface.style.cursor = on ? 'crosshair' : '';
   }
 
   _measureClick(p) {
@@ -611,18 +634,18 @@ export class Viewport {
     this.dirty();
   }
 
+  /** Projects a model point with the active view's camera to pixels relative to the canvas. */
   projectToPixels(v) {
-    const n = { w: this.canvas.clientWidth, h: this.canvas.clientHeight };
-    return this._toScreen(v, n);
+    const pane = this.layout.active, r = pane.rect ?? { x: 0, y: 0, w: this.canvas.clientWidth, h: this.canvas.clientHeight };
+    const s = this._toScreen(v, { w: r.w, h: r.h }, pane.camera);
+    return { x: s.x + r.x, y: s.y + r.y, z: s.z };
   }
 
   // ---- view cube -----------------------------------------------------------------------
 
-  _initCube(canvas) {
-    this.cube = { canvas };
-    const r = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    r.setSize(canvas.width, canvas.height, false);
+  // The cube is drawn by the main renderer into a corner of each perspective view (no second
+  // WebGL context); every view has its own hit area for clicks.
+  _initCube() {
     const scene = new THREE.Scene();
     const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
     cam.up.set(0, 0, 1);
@@ -634,7 +657,7 @@ export class Viewport {
       g.fillStyle = '#e4e8ee'; g.font = 'bold 26px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.translate(64, 64); g.rotate(rot); g.fillText(txt, 0, 2);
       const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
-      return new THREE.MeshBasicMaterial({ map: t });
+      return new THREE.MeshBasicMaterial({ map: t, toneMapped: false });
     };
     // BoxGeometry material order: +X, -X, +Y, -Y, +Z, -Z
     const names = ['RIGHT', 'LEFT', 'BACK', 'FRONT', 'TOP', 'BOTTOM'];
@@ -643,13 +666,24 @@ export class Viewport {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 1.6), names.map((n, i) => face(n, rots[i])));
     mesh.userData.dirs = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
     scene.add(mesh);
-    Object.assign(this.cube, { r, scene, cam, mesh });
-    canvas.addEventListener('click', (e) => {
-      const b = canvas.getBoundingClientRect();
+    this.cube = { scene, cam, mesh };
+  }
+
+  _orientCube(camera) {
+    const { cam } = this.cube;
+    cam.quaternion.copy(camera.quaternion);
+    cam.position.set(0, 0, 6).applyQuaternion(cam.quaternion);
+    cam.updateMatrixWorld();
+  }
+
+  _bindCube(pane) {
+    pane.cubeEl.addEventListener('click', (e) => {
+      const b = pane.cubeEl.getBoundingClientRect();
+      this._orientCube(pane.camera);
       const ray = new THREE.Raycaster();
-      ray.setFromCamera({ x: ((e.clientX - b.left) / b.width) * 2 - 1, y: -((e.clientY - b.top) / b.height) * 2 + 1 }, cam);
-      const hit = ray.intersectObject(mesh)[0];
-      if (hit) this.viewFrom(mesh.userData.dirs[Math.floor(hit.faceIndex / 2)]);
+      ray.setFromCamera({ x: ((e.clientX - b.left) / b.width) * 2 - 1, y: -((e.clientY - b.top) / b.height) * 2 + 1 }, this.cube.cam);
+      const hit = ray.intersectObject(this.cube.mesh)[0];
+      if (hit) this.layout.viewFrom(pane.index, this.cube.mesh.userData.dirs[Math.floor(hit.faceIndex / 2)]);
     });
   }
 
@@ -657,12 +691,15 @@ export class Viewport {
   setTheme(theme) {
     const light = theme === 'light';
     const major = new THREE.Color(light ? 0xa9afba : 0x3a3a3a), minor = new THREE.Color(light ? 0xcdd1d9 : 0x232323);
-    const c = this.grid.geometry.getAttribute('color');
-    for (let v = 0; v < c.count; v++) { // GridHelper: 4 vertices per division, center line first colour
-      const col = Math.floor(v / 4) === 20 ? major : minor;
-      c.setXYZ(v, col.r, col.g, col.b);
+    for (const g of Object.values(this.grids)) {
+      const c = g.geometry.getAttribute('color');
+      for (let v = 0; v < c.count; v++) { // GridHelper: 4 vertices per division, center line first colour
+        const col = Math.floor(v / 4) === 20 ? major : minor;
+        c.setXYZ(v, col.r, col.g, col.b);
+      }
+      c.needsUpdate = true;
     }
-    c.needsUpdate = true;
+    this.dirty();
   }
 
   /** Mesh view: shows each body's triangle mesh and hides the grid, B-rep edges and sketch outlines. */
@@ -673,9 +710,7 @@ export class Viewport {
 
   render() {
     const mo = !!this.meshOnly;
-    this.grid.visible = !mo;
     this.axes.visible = !mo && this.viewPrefs.showAxes;
-    if (this.axes.visible) this.axes.update(this.camera, this.canvas.clientHeight);
     if (this.sketches) this.sketches.visible = !mo;
     for (const b of this.bodies.values()) {
       b.edges.visible = !mo;
@@ -687,14 +722,35 @@ export class Viewport {
       }
       if (b.wire) b.wire.visible = mo;
     }
-    this.renderer.render(this.scene, this.camera);
-    // The cube and the gizmo take the main camera's orientation as is: one source of truth,
-    // so they always agree with each other and with the axes in the scene.
-    const { r, scene, cam } = this.cube;
-    cam.quaternion.copy(this.camera.quaternion);
-    cam.position.set(0, 0, 6).applyQuaternion(cam.quaternion);
-    r.render(scene, cam);
-    this.gizmo.update(this.camera);
+    const r = this.renderer;
+    const H = this.canvas.clientHeight || 1, W = this.canvas.clientWidth || 1;
+    r.setScissorTest(true);
+    r.setViewport(0, 0, W, H); r.setScissor(0, 0, W, H);
+    r.clear();
+    for (const pane of this.layout.visible()) {
+      const { x, y, w, h } = pane.rect;
+      if (w < 1 || h < 1) continue;
+      const by = H - y - h; // WebGL rectangles start at the bottom left
+      r.setViewport(x, by, w, h); r.setScissor(x, by, w, h);
+      this._placeGrid(pane, !mo);
+      if (this.axes.visible) this.axes.update(pane.camera, h);
+      r.render(this.scene, pane.camera);
+      // The cube and the gizmo take the view's camera orientation as is: one source of truth,
+      // so they always agree with each other and with the axes in the scene.
+      if (pane.perspective && pane.cubeSize) {
+        const s = pane.cubeSize, cx = x + w - CUBE_MARGIN - s, cy = H - (y + CUBE_MARGIN) - s;
+        this._orientCube(pane.camera);
+        const clip = r.clippingPlanes;
+        r.clippingPlanes = []; // the section plane cuts the model, not the cube
+        r.setViewport(cx, cy, s, s); r.setScissor(cx, cy, s, s);
+        r.autoClear = false; r.clearDepth();
+        r.render(this.cube.scene, this.cube.cam);
+        r.autoClear = true;
+        r.clippingPlanes = clip;
+      }
+      pane.gizmo.update(pane.camera);
+    }
+    r.setScissorTest(false);
     this.frames++;
     this.hooks.onFrame?.();
   }

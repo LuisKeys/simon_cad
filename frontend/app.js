@@ -31,7 +31,7 @@ const panels = initPanels({ layout: $('layout'), toggles: { left: $('btn-panel-l
 const library = new MaterialLibrary();
 const textureUrl = (id, file) => materialUrl(id, file);
 
-const vp = new Viewport($('gl'), $('cube'), {
+const vp = new Viewport($('gl'), {
   library, textureUrl,
   onPick: async (p, mods) => {
     try {
@@ -71,6 +71,8 @@ const vp = new Viewport($('gl'), $('cube'), {
     placeMeasureLabel(m.mid);
   },
   onFrame: () => { if (vp.measure.pts.length === 2) placeMeasureLabel(vp.measure.pts[0].clone().lerp(vp.measure.pts[1], 0.5)); },
+  onPaneMenu: (i, el) => showPaneMenu(i, el),
+  onLayout: (st) => views.save(st),
 });
 window.simonViewport = vp;
 
@@ -115,10 +117,68 @@ async function dropMaterial(e, bodyId) {
   noteRecentMaterial(id);
   applyAppearance('set_material', sel.includes(bodyId) ? sel : [bodyId], { material_id: id });
 }
-$('gl').addEventListener('dragover', (e) => { if (hasMat(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
-$('gl').addEventListener('drop', (e) => { if (hasMat(e)) dropMaterial(e, vp.pick(e)?.body); });
+$('viewport').addEventListener('dragover', (e) => { if (hasMat(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+$('viewport').addEventListener('drop', (e) => { if (hasMat(e)) dropMaterial(e, vp.pick(e)?.body); });
 $('tree').addEventListener('dragover', (e) => { if (hasMat(e) && e.target.closest?.('[data-id]')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
 $('tree').addEventListener('drop', (e) => { if (hasMat(e)) dropMaterial(e, e.target.closest?.('[data-id]')?.dataset.id); }); // for e2e tests and debugging
+
+// ---- viewport layout: Single / Quad views ------------------------------------------------
+// The layout, split and each view's orientation and camera are presentation state, saved per
+// project in localStorage (never in the project file or its history).
+
+const ORIENT_KEYS = ['perspective', 'top', 'bottom', 'front', 'back', 'left', 'right'];
+const views = {
+  key: null,
+  timer: null,
+  /** Restores the views saved for `project`; with none saved, the current views carry over. */
+  load(project) {
+    const key = `views.v1:${project}`;
+    if (key === this.key) return;
+    this.flush();
+    this.key = key;
+    const saved = getPref(key, null);
+    if (saved) vp.layout.restore(saved); else this.save(vp.layout.serialize());
+    renderCtxBar();
+  },
+  save(st) {
+    this.pending = st;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.flush(), 300);
+  },
+  flush() {
+    clearTimeout(this.timer);
+    if (!this.pending) return;
+    if (this.key) setPref(this.key, this.pending);
+    this.pending = null;
+  },
+};
+addEventListener('pagehide', () => views.flush());
+
+function setLayoutMode(mode) { vp.layout.setMode(mode); renderCtxBar(); }
+
+function layoutMenuItems() {
+  const quad = vp.layout.mode === 'quad';
+  return [{ head: 'Viewport layout' },
+    { label: 'Single View', checked: !quad, key: 'Ctrl+Alt+4', data: { layout: 'single' }, run: () => setLayoutMode('single') },
+    { label: 'Quad View', checked: quad, key: 'Ctrl+Alt+4', data: { layout: 'quad' }, run: () => setLayoutMode('quad') }];
+}
+
+/** The menu of a view's label: its orientation, fit, maximize and the layout. */
+function showPaneMenu(i, el) {
+  const pane = vp.layout.panes[i];
+  const lay = vp.layout;
+  showMenu({ el }, [
+    { head: 'View' },
+    ...ORIENT_KEYS.map((o) => ({ label: o[0].toUpperCase() + o.slice(1), checked: pane.config.orientation === o, data: { orientation: o },
+      run: () => lay.setOrientation(i, o) })),
+    { sep: true },
+    { label: 'Fit to scene', icon: 'fit', key: 'F', run: () => { lay.setActive(i); vp.fit(); } },
+    lay.mode === 'quad' ? { label: lay.maximized === i ? 'Restore quad view' : 'Maximize view', icon: lay.maximized === i ? 'minimize' : 'maximize',
+      key: 'Double-click', run: () => lay.toggleMaximize(i) } : null,
+    { label: pane.config.showAxisGizmo !== false ? 'Hide axis gizmo' : 'Show axis gizmo', icon: 'view', run: () => lay.setGizmoVisible(i, pane.config.showAxisGizmo === false) },
+    { sep: true },
+    ...layoutMenuItems()]);
+}
 
 function placeMeasureLabel(mid) {
   const s = vp.projectToPixels(mid);
@@ -201,6 +261,7 @@ function render(st) {
   if (!st.refine_state) S.refineState = null;
   S.level = st.level;
   loadMaterials(st.path ?? st.name);
+  views.load(st.path ?? st.name);
   // replaceChildren stringifies null into a "null" text node, so drop absent children first.
   $('project').replaceChildren(...[h('span', { class: 'pname' }, st.name), st.dirty ? h('span', { class: 'dirty', title: 'Unsaved changes' }, '●') : null, icon('down')].filter(Boolean));
   $('btn-undo').disabled = !st.can_undo || st.busy;
@@ -859,7 +920,7 @@ async function playDesign() {
       const f = await api('playback', { index: i, known: vp.known });
       vp.applyDelta(f.scene);
       $('hud').textContent = i === 0 ? 'Playback…' : `${i}/${f.total} · ${f.changeset?.intent ?? ''}`;
-      if (i > 0) vp.fit();
+      if (i > 0) vp.fitAll();
       await new Promise((r) => setTimeout(r, 750));
     }
   } catch (e) { toast(e.message, 'bad'); }
@@ -965,6 +1026,8 @@ function triggerAction(a, sel, anchor) {
         { label: 'Mesh view', icon: 'mesh', checked: !!vp.meshOnly, data: { view: 'mesh' }, run: toggleMesh },
         { sep: true }, { head: 'Standard views' },
         ...VIEWS.map(([label, dir]) => ({ label, icon: 'view', run: () => vp.viewFrom(dir) })),
+        { sep: true },
+        ...layoutMenuItems(),
         { sep: true },
         { label: 'Play design', icon: 'play', data: { view: 'play' }, disabled: !S.state?.frames || S.playing, run: playDesign }]);
     default:
@@ -1361,6 +1424,7 @@ document.addEventListener('keydown', (e) => {
   else if (mod && !typing && !overlay && e.key.toLowerCase() === 'd' && selIds().length) { e.preventDefault(); actionEnv.duplicate(); }
   else if (mod && !typing && !overlay && e.key.toLowerCase() === 'g' && selIds().length) { e.preventDefault(); e.shiftKey ? actionEnv.ungroup() : actionEnv.group(); }
   else if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
+  else if (e.ctrlKey && e.altKey && !e.shiftKey && (e.code === 'Digit4' || e.code === 'Numpad4') && !typing && !overlay) { e.preventDefault(); vp.layout.toggleMode(); renderCtxBar(); }
   else if (!typing && !mod && !overlay && e.key === 'f') vp.fit();
   else if (!typing && !mod && !overlay && e.key === 'm') toggleMeasure();
 });

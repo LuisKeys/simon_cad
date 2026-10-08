@@ -367,11 +367,13 @@
 <h2 id="viewport" data-group="Using the viewport">Viewport and selection</h2>
 <table>
 <tr><th>Action</th><th>How</th></tr>
-<tr><td>Orbit / pan / zoom</td><td>Left-drag / right-drag (or shift-drag) / wheel</td></tr>
+<tr><td>Orbit / pan / zoom</td><td>Left-drag / middle- or right-drag (or shift-drag) / wheel. Orbit only in perspective views; in the orthographic views (Top, Front…) left-drag pans too and the orientation stays fixed.</td></tr>
 <tr><td>Select</td><td>Click. <kbd>Shift</kbd>-click adds to the selection; click empty space clears it.</td></tr>
 <tr><td>Pick filter (<b>Select: Auto ▾</b>)</td><td><b>Auto</b> picks the most specific thing under the cursor; <b>Face</b>, <b>Edge</b>, <b>Vertex</b>, <b>Body</b> force a kind. Edges and vertices are picked in screen space and only when not occluded.</td></tr>
 <tr><td>View cube</td><td>Click a face, edge or corner to snap the camera.</td></tr>
-<tr><td>Fit</td><td><b>Fit</b> button or <kbd>F</kbd></td></tr>
+<tr><td>Fit</td><td><b>Fit</b> button or <kbd>F</kbd> (fits the active view)</td></tr>
+<tr><td>Single / Quad View</td><td><b>View ▾ → Viewport layout</b> or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>4</kbd>. Quad shows Top, Perspective, Front and Right of the same scene, each with its own camera; a click makes a view active (orange border), and Fit, the View menu and measurement work in it. Drag the dividers to resize the views (double-click one to reset).</td></tr>
+<tr><td>View orientation</td><td>Click the label in a view's top-left corner to choose Perspective, Top, Bottom, Front, Back, Left or Right for that view only. Double-click the label to maximize the view; double-click again to restore the quad. Layout, sizes and cameras are remembered per project.</td></tr>
 <tr><td>Section plane</td><td>Choose X / Y / Z in <b>Section</b> and drag the offset slider to cut the view open.</td></tr>
 <tr><td>Measure</td><td>Toggle <b>Measure</b>, click two surface points.</td></tr>
 <tr><td>Mesh view</td><td><b>Mesh</b> shows the triangle mesh (hides grid, edges and sketches).</td></tr>
@@ -489,7 +491,8 @@
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>D</kbd></td><td>Duplicate the selected bodies</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>G</kbd></td><td>Group the selection</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>Ungroup the selection</td></tr>
-<tr><td><kbd>F</kbd></td><td>Fit view</td></tr>
+<tr><td><kbd>F</kbd></td><td>Fit the active view</td></tr>
+<tr><td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>4</kbd></td><td>Toggle Single / Quad View</td></tr>
 <tr><td><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>Delete selection (not while typing)</td></tr>
 <tr><td><kbd>Esc</kbd></td><td>Close palette / dialog / menu</td></tr>
 <tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Send prompt / new line</td></tr>

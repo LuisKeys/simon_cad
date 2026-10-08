@@ -116,13 +116,38 @@ section.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* ---- viewport --------------------------------------------------------------------------- */
 #viewport { position: relative; flex: 1; min-height: 0; background: radial-gradient(ellipse at 50% 35%, #1b1b1b, #0f0f0f); }
 #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
-#cube { position: absolute; top: 8px; right: 8px; width: 96px; height: 96px; cursor: pointer; opacity: .9; transition: opacity var(--ease); }
-#cube:hover { opacity: 1; }
+#gl { pointer-events: none; } /* the panes above it take the input */
+/* Single / Quad views: transparent panes over the one canvas (see viewlayout.js). */
+.vp-panes { position: absolute; inset: 0; }
+.vp-pane { position: absolute; overflow: hidden; }
+.vp-surface { position: absolute; inset: 0; outline: none; }
+#viewport[data-layout=quad] .vp-pane.active::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  box-shadow: inset 0 0 0 1.5px var(--accent-line); }
+.vp-label { position: absolute; z-index: 2; left: 8px; top: 8px; min-height: 26px; padding: 0 4px 0 8px; gap: 2px; border-radius: var(--radius);
+  background: rgba(0, 0, 0, .28); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.vp-label:hover:not(:disabled) { background: rgba(0, 0, 0, .45); color: var(--text); }
+.vp-label .caret { width: 14px; height: 14px; opacity: .7; }
+.vp-pane.active .vp-label { color: var(--text); }
+:root[data-theme=light] .vp-label { background: rgba(255, 255, 255, .6); }
+:root[data-theme=light] .vp-label:hover:not(:disabled) { background: rgba(255, 255, 255, .9); }
+@media (pointer: coarse) { .vp-label { min-height: 36px; } }
+.vp-cube { position: absolute; z-index: 1; top: 8px; right: 8px; cursor: pointer; border-radius: 6px; }
+.vp-cube.off { display: none; }
+.vp-split { position: absolute; z-index: 3; touch-action: none; }
+.vp-split.v { top: 0; bottom: 0; width: 9px; margin-left: -4px; cursor: col-resize; }
+.vp-split.h { left: 0; right: 0; height: 9px; margin-top: -4px; cursor: row-resize; }
+.vp-split.c { width: 17px; height: 17px; margin: -8px 0 0 -8px; cursor: move; z-index: 4; }
+.vp-split.v::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: var(--line); transition: background var(--ease); }
+.vp-split.h::after { content: ""; position: absolute; left: 0; right: 0; top: 4px; height: 1px; background: var(--line); transition: background var(--ease); }
+.vp-split:hover::after, .vp-split.drag::after, .vp-split:focus-visible::after { background: var(--accent); }
+.vp-split.c::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: transparent; transition: background var(--ease); }
+.vp-split.c:hover::after, .vp-split.c.drag::after, .vp-split.c:focus-visible::after { background: var(--accent); }
+.vp-split:focus-visible { outline: none; }
 .axis-gizmo { position: absolute; z-index: 1; opacity: .85; transition: opacity var(--ease); touch-action: none; }
 .axis-gizmo:hover { opacity: 1; }
 .axis-gizmo[data-position=bottom-left] { left: 8px; bottom: 8px; }
 .axis-gizmo[data-position=bottom-right] { right: 8px; bottom: 8px; }
-.axis-gizmo[data-position=top-left] { left: 8px; top: 8px; }
+.axis-gizmo[data-position=top-left] { left: 8px; top: 42px; } /* under the view label */
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; padding: 0 var(--gutter); color: var(--muted); pointer-events: none; }
 .empty-logo { width: min(300px, 60%); height: auto; opacity: .85; }
 .empty p { margin: 0; line-height: 1.5; }

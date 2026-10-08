@@ -35,7 +35,7 @@ free-form prompts still works (palette tools, parameter edits, undo/redo, timeli
 | `internal/rendering` | `Renderer.Scene(model, known)` meshes the visible bodies (the model's leaves), caches by node content key and returns only bodies the client does not have. `BodyMesh.SelectorFor(kind, index)` / `PickFor(selector)` are the bidirectional pick-ID ↔ selector map. |
 | `internal/ui` | `Service` (state, pick, selection, scene, preview ghost, prompt, ChangeSets, timeline, playback, project I/O, palette), `Server` (JSON API + SSE on loopback, per-run token, Host check), `Hub` (non-blocking notices). |
 | `internal/app/view.go`, `cards.go` | Read-only views the UI uses: `Snapshot`, `PreviewModel`, `ModelAfter`, `ChangeSetCard`. |
-| `frontend/` | `viewport.js` (Three.js, picking, overlays, view cube), `axes.js` (coordinate axes, axis gizmo), `app.js` (panels, palette, timeline), `api.js`. No build step; Three.js r186 is vendored under `frontend/vendor/`. |
+| `frontend/` | `viewport.js` (Three.js, picking, overlays, view cube), `viewlayout.js` (Single/Quad views, cameras, dividers), `axes.js` (coordinate axes, axis gizmo), `app.js` (panels, palette, timeline), `api.js`. No build step; Three.js r186 is vendored under `frontend/vendor/`. |
 | `cmd/simoncad` | Launcher. |
 
 ## Help microsite
@@ -75,12 +75,33 @@ backlog item "round only the outer edges after pocketing".
   (X/Y/Z + offset), two-point measurement overlay, fit. Selected geometry is an orange outline over
   a light tint. Edges/vertices are picked in screen space and only when not occluded. Nothing floats
   over the model; its controls live in the fixed action bar above it.
+- **Single / Quad View:** *View ▾ → Viewport layout* (or Ctrl+Alt+4) switches between one view
+  and a 2×2 grid: TOP | PERSPECTIVE over FRONT | RIGHT. There is still one `WebGLRenderer` and
+  one scene: `frontend/viewlayout.js` (`ViewportLayoutManager`) owns four panes, each a
+  transparent overlay with its own perspective and orthographic cameras, OrbitControls, axis
+  gizmo, view-cube hit area and label, and `Viewport.render` draws every visible pane into its
+  rectangle of the shared canvas (scissor). The cube is drawn by the same renderer; nothing is
+  duplicated. Picking raycasts with the camera of the pane under the pointer; selection,
+  hover, ghost, section and measurement are scene state, so every view shows them. A click
+  makes a view active (accent border): Fit, the View menu's standard views and the
+  measurement label act on it. Orbit only in perspective; orthographic views pan (left,
+  middle or right drag) and zoom (wheel, towards the cursor) with a fixed orientation.
+  Each pane has a `ViewportConfig` (`id`, `projectionType`, `orientation`, `cameraState`,
+  `gridPlane`, `showAxisGizmo`; pure model and validation in `viewlayout-model.js`). Clicking
+  the label picks one of seven orientations for that view only (Perspective, Top, Bottom,
+  Front, Back, Left, Right); the change is animated and a projection switch keeps the target
+  and visible size. Grid planes follow the Z-up model: Top/Bottom XY, Front/Back XZ,
+  Left/Right YZ (the orthographic grid sits behind the model). Double-clicking a label
+  maximizes that view and again restores the quad; the dividers resize the views. Single
+  View shows the active pane, so its configuration carries over between layouts. Layout,
+  split and cameras are saved per project path in `localStorage` (`simon.views.v1:<path>`),
+  never in the project file or its history.
 - **Coordinate axes:** X red `#E05252`, Y green `#56B870`, Z blue `#4A90E2`, defined once in
   `frontend/axes.js` and shared by the two places that show them: the axes through the true origin
   (both directions, the negative half fainter, labels at the positive ends) and the axis gizmo in a
   corner of the viewport (click an
   axis end to look along it, the centre for the isometric view). The cube and the gizmo take the
-  main camera's orientation directly, so they always agree; view changes from either are animated.
+  orientation of their view's camera directly, so they always agree; view changes from either are animated.
   All of it is presentation only: not pickable, not in the model bounds, never exported or recorded
   in the history. Settings → *Viewport* turns each part on or off and sets the axis opacity and the
   gizmo's size and corner; the choice is saved with the other settings.
