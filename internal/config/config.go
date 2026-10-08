@@ -79,6 +79,9 @@ type Settings struct {
 	ComponentLibrary string `json:"componentLibrary"`
 	// Currency labels the per-provider token prices; it is a label, not a conversion.
 	Currency string `json:"currency"`
+	// Viewport holds the display preferences of the 3D view. On save, nil leaves the saved
+	// preferences as they are (a client that does not know them cannot reset them to "off").
+	Viewport *ViewportSettings `json:"viewport,omitempty"`
 }
 
 // Env variable names per provider.
@@ -198,6 +201,8 @@ func Current() Settings {
 	}
 	s.ComponentLibrary = Get(keyComponent)
 	s.Currency = Currency()
+	vs := Viewport()
+	s.Viewport = &vs
 	for _, p := range Providers {
 		k := envKeys[p]
 		ps := ProviderSettings{BaseURL: GetOr(k.baseURL, DefaultBaseURL(p)), Model: Get(k.model)}
@@ -238,6 +243,15 @@ func Save(s Settings) error {
 		return fmt.Errorf("currency %q is too long (use a short code such as USD)", s.Currency)
 	}
 	next := map[string]string{keyProvider: s.Provider, keyTheme: s.Theme, keyComponent: lib, keyCurrency: cur}
+	if s.Viewport != nil {
+		vv, err := viewportValues(*s.Viewport)
+		if err != nil {
+			return err
+		}
+		for k, v := range vv {
+			next[k] = v
+		}
+	}
 	for _, p := range Providers {
 		ps, ok := s.Providers[p]
 		if !ok {

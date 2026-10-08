@@ -1,4 +1,4 @@
-// Settings screen: AI provider configuration and UI theme. Values come from, and are saved
+// Settings screen: AI provider configuration, UI theme and viewport display preferences. Values come from, and are saved
 // to, the backend configuration layer (internal/config); this module holds no other state.
 import { api, h } from './api.js';
 
@@ -8,6 +8,8 @@ const PROVIDERS = [['openai', 'OpenAI'], ['claude', 'Anthropic'], ['ollama', 'Ol
 const EFFORTS = [['', 'Model default'], ['none', 'None'], ['minimal', 'Minimal'], ['low', 'Low'],
   ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']];
 const THEME_KEY = 'simon.theme';
+const GIZMO_SIZES = [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']];
+const GIZMO_POSITIONS = [['bottom-left', 'Bottom Left'], ['bottom-right', 'Bottom Right'], ['top-left', 'Top Left']];
 
 /** Applies a theme to the interface; `onTheme` lets the viewport recolor its 3D scene. */
 export function applyTheme(theme, onTheme) {
@@ -15,20 +17,24 @@ export function applyTheme(theme, onTheme) {
   onTheme?.(document.documentElement.dataset.theme);
 }
 
-/** Reads the saved theme from the backend (the early-paint copy in localStorage is only a cache). */
-export async function loadTheme(onTheme) {
+/**
+ * Reads the saved theme and viewport preferences from the backend (the early-paint copy of
+ * the theme in localStorage is only a cache).
+ */
+export async function loadTheme(onTheme, onViewport) {
   try {
     const s = await api('settings');
     applyTheme(s.theme, onTheme);
+    if (s.viewport) onViewport?.(s.viewport);
     try { localStorage.setItem(THEME_KEY, s.theme); } catch { /* ignore */ }
   } catch { /* keep the early-paint theme */ }
 }
 
 /** Opens the Settings dialog. */
-export async function openSettings({ toast, onTheme }) {
+export async function openSettings({ toast, onTheme, onViewport }) {
   let cfg;
   try { cfg = await api('settings'); } catch (e) { toast(e.message, 'bad'); return; }
-  const saved = cfg.theme;
+  const saved = cfg.theme, savedView = { ...cfg.viewport };
   const el = document.getElementById('settings');
   const sel = (id, opts, value, onchange) => {
     const s = h('select', { id, onchange }, opts.map(([v, l]) => h('option', { value: v }, l)));
@@ -58,6 +64,21 @@ export async function openSettings({ toast, onTheme }) {
   const complib = h('input', { id: 'set-complib', type: 'text', autocomplete: 'off', spellcheck: 'false',
     placeholder: 'Absolute path — empty searches next to the open project',
     value: cfg.componentLibrary ?? '' });
+  // Viewport preferences preview live, like the theme, and are reverted on Cancel.
+  const view = { ...cfg.viewport };
+  const preview = () => onViewport?.({ ...view });
+  const check = (id, key) => {
+    const c = h('input', { id, type: 'checkbox', onchange: () => { view[key] = c.checked; preview(); } });
+    c.checked = !!view[key]; return c;
+  };
+  const opacityOut = h('output', { for: 'set-axis-opacity', class: 'muted' }, `${view.axisOpacity}%`);
+  const opacity = h('input', { id: 'set-axis-opacity', type: 'range', min: '0', max: '100', step: '5', oninput: () => {
+    view.axisOpacity = Number(opacity.value); opacityOut.textContent = `${opacity.value}%`; preview();
+  } });
+  opacity.value = String(view.axisOpacity);
+  const gizmoSize = sel('set-gizmo-size', GIZMO_SIZES, view.gizmoSize, () => { view.gizmoSize = gizmoSize.value; preview(); });
+  const gizmoPos = sel('set-gizmo-pos', GIZMO_POSITIONS, view.gizmoPosition, () => { view.gizmoPosition = gizmoPos.value; preview(); });
+  const srow = (id, text, ctl) => h('div', { class: 'srow' }, h('label', { for: id }, text), ctl);
   const status = h('span', { class: 'muted', role: 'status' });
   const rows = {
     key: h('div', { class: 'srow' }, h('label', { for: 'set-key' }, 'API Key'), h('div', { class: 'row' }, key, reveal)),
@@ -91,7 +112,7 @@ export async function openSettings({ toast, onTheme }) {
   }
 
   const close = (revert) => {
-    if (revert) applyTheme(saved, onTheme);
+    if (revert) { applyTheme(saved, onTheme); onViewport?.(savedView); }
     el.hidden = true; el.replaceChildren();
   };
   const form = h('form', { class: 'dialog settings', 'aria-label': 'Settings', onsubmit: async (e) => {
@@ -99,7 +120,7 @@ export async function openSettings({ toast, onTheme }) {
     stash();
     try {
       const out = await api('settings', { provider: provider.value, providers: cfg.providers, theme: theme.value,
-        componentLibrary: complib.value.trim(), currency: currency.value.trim() });
+        componentLibrary: complib.value.trim(), currency: currency.value.trim(), viewport: view });
       try { localStorage.setItem(THEME_KEY, out.theme); } catch { /* ignore */ }
       el.hidden = true; el.replaceChildren();
       toast('Settings saved', 'ok');
@@ -124,6 +145,13 @@ export async function openSettings({ toast, onTheme }) {
     h('h2', null, 'UI Configuration'),
     h('div', { class: 'srow' }, h('label', { for: 'set-theme' }, 'Theme'), theme),
     h('div', { class: 'srow' }, h('label', { for: 'set-complib' }, 'Component library'), complib),
+    h('h2', null, 'Viewport'),
+    srow('set-axes', 'Show Coordinate Axes', check('set-axes', 'showAxes')),
+    srow('set-axis-labels', 'Show Axis Labels', check('set-axis-labels', 'showAxisLabels')),
+    srow('set-axis-opacity', 'Axis Opacity', h('div', { class: 'row' }, opacity, opacityOut)),
+    srow('set-gizmo', 'Show Axis Gizmo', check('set-gizmo', 'showGizmo')),
+    srow('set-gizmo-size', 'Axis Gizmo Size', gizmoSize),
+    srow('set-gizmo-pos', 'Axis Gizmo Position', gizmoPos),
     h('div', { class: 'row' }, h('button', { type: 'submit', class: 'primary' }, 'Save Settings'),
       h('button', { type: 'button', onclick: () => close(true) }, 'Cancel'), status));
   form.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(true); });

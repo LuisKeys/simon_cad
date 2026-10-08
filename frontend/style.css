@@ -118,6 +118,11 @@ section.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
 #cube { position: absolute; top: 8px; right: 8px; width: 96px; height: 96px; cursor: pointer; opacity: .9; transition: opacity var(--ease); }
 #cube:hover { opacity: 1; }
+.axis-gizmo { position: absolute; z-index: 1; opacity: .85; transition: opacity var(--ease); touch-action: none; }
+.axis-gizmo:hover { opacity: 1; }
+.axis-gizmo[data-position=bottom-left] { left: 8px; bottom: 8px; }
+.axis-gizmo[data-position=bottom-right] { right: 8px; bottom: 8px; }
+.axis-gizmo[data-position=top-left] { left: 8px; top: 8px; }
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; padding: 0 var(--gutter); color: var(--muted); pointer-events: none; }
 .empty-logo { width: min(300px, 60%); height: auto; opacity: .85; }
 .empty p { margin: 0; line-height: 1.5; }
@@ -433,6 +438,8 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 .srow .row { align-items: center; }
 .srow .row input { flex: 1; min-width: 0; }
 .dialog.settings select, .dialog.settings input { width: 100%; }
+.dialog.settings input[type=checkbox] { width: auto; justify-self: start; }
+.dialog.settings output { min-width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
 .dialog.settings .row:last-child { align-items: center; margin-top: 6px; }
 .dialog.settings .bad { color: var(--bad); font-size: 12px; }
 @media (max-width: 480px) { .srow { grid-template-columns: 1fr; gap: 4px; } }

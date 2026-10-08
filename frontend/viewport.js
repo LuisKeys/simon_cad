@@ -5,10 +5,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { MaterialManager } from './materials/pbr.js';
+import { WorldAxes, AxisGizmo } from './axes.js';
 
 const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
 const PICK_PX = 7;
 const MAX_VERTEX_PICK = 4000;
+const VIEW_ANIM_MS = 350;
 
 export class Viewport {
   constructor(canvas, cubeCanvas, hooks) {
@@ -26,6 +28,7 @@ export class Viewport {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = false;
     this.controls.addEventListener('change', () => this.dirty());
+    this.controls.addEventListener('start', () => { this._anim = null; }); // the user takes over
     // Image-based lighting gives metals something to reflect; the direct lights stay as fill.
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     try {
@@ -42,6 +45,11 @@ export class Viewport {
     this.grid.rotation.x = Math.PI / 2; // lie in XY, Z up
     this.grid.material.transparent = true; this.grid.material.opacity = 0.45;
     this.scene.add(this.grid);
+    // Visual aids, not geometry: never in bounds(), picking, history or exports.
+    this.axes = new WorldAxes();
+    this.scene.add(this.axes);
+    this.viewPrefs = { showAxes: true, showAxisLabels: true, axisOpacity: 70,
+      showGizmo: true, gizmoSize: 'medium', gizmoPosition: 'bottom-left' };
 
     this.appearance = {};       // body id -> {color, opacity, visible, material_id, texture_scale} from the CAD-IR
     this.materials = new MaterialManager(hooks.library, hooks.textureUrl, () => this.dirty());
@@ -62,9 +70,15 @@ export class Viewport {
 
     this._bindPointer();
     this._initCube(cubeCanvas);
+    this.gizmo = new AxisGizmo(canvas.parentElement, { onView: (dir) => this.viewFrom(dir) });
+    this.setViewPrefs(this.viewPrefs);
     new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
     this.resize();
-    const loop = () => { if (this._dirty) { this._dirty = false; this.render(); } requestAnimationFrame(loop); };
+    const loop = () => {
+      if (this._anim) this._stepView();
+      if (this._dirty) { this._dirty = false; this.render(); }
+      requestAnimationFrame(loop);
+    };
     requestAnimationFrame(loop);
   }
 
@@ -271,19 +285,61 @@ export class Viewport {
     const gs = Math.pow(10, Math.ceil(Math.log10(r * 4)));
     this.grid.scale.setScalar(gs / 400);
     this.grid.position.set(c.x, c.y, box.min.z - 0.01);
+    // The axes stay on the true origin and reach at least as far as the grid does.
+    this.axes.setExtent(gs / 2 + Math.max(Math.abs(c.x), Math.abs(c.y), Math.abs(box.min.z)));
     this.dirty();
   }
 
-  viewFrom(dir) {
+  /**
+   * Looks at the model from direction `dir` (from the target toward the camera). Used by the
+   * view cube, the axis gizmo and the view menu; the transition is animated unless
+   * `animate` is false or the user prefers reduced motion.
+   */
+  viewFrom(dir, { animate = true } = {}) {
     const box = this.bounds();
     const c = box.isEmpty() ? this.controls.target.clone() : box.getCenter(new THREE.Vector3());
     const dist = this.camera.position.distanceTo(this.controls.target);
-    this.controls.target.copy(c);
     const d = new THREE.Vector3(...dir).normalize();
-    this.camera.position.copy(c).addScaledVector(d, dist);
     // Looking straight down/up the Z axis, Y becomes the screen's up direction.
-    if (Math.abs(d.z) > 0.99) this.camera.up.set(0, 1, 0); else this.camera.up.set(0, 0, 1);
+    const up = Math.abs(d.z) > 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+    const end = { target: c, position: c.clone().addScaledVector(d, dist), up };
+    if (!animate || matchMedia?.('(prefers-reduced-motion: reduce)').matches) { this._anim = null; this._setView(end); return; }
+    // Slerping the orientation (not the position) keeps the turn smooth even between
+    // opposite views, and never passes through a degenerate look-at.
+    const q1 = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(end.position, end.target, up));
+    this._anim = { t0: performance.now(), q0: this.camera.quaternion.clone(), q1, from: this.controls.target.clone(), end, dist };
+    this.dirty();
+  }
+
+  _setView({ target, position, up }) {
+    this.controls.target.copy(target);
+    this.camera.position.copy(position);
+    this.camera.up.copy(up);
     this.controls.update();
+    this.dirty();
+  }
+
+  _stepView() {
+    const a = this._anim;
+    const t = Math.min(1, (performance.now() - a.t0) / VIEW_ANIM_MS);
+    if (t >= 1) { this._anim = null; this._setView(a.end); return; }
+    const k = t * t * (3 - 2 * t); // smoothstep
+    const q = a.q0.clone().slerp(a.q1, k);
+    this.controls.target.lerpVectors(a.from, a.end.target, k);
+    this.camera.quaternion.copy(q);
+    this.camera.position.copy(this.controls.target).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(q), a.dist);
+    this.dirty();
+  }
+
+  /**
+   * Viewport display preferences (Settings → Viewport): coordinate axes, their labels and
+   * opacity, and the axis gizmo.
+   */
+  setViewPrefs(p) {
+    this.viewPrefs = { ...this.viewPrefs, ...p };
+    const v = this.viewPrefs;
+    this.axes.setPrefs({ opacity: Math.max(0, Math.min(100, v.axisOpacity)) / 100, labels: v.showAxisLabels });
+    this.gizmo.setOptions({ visible: v.showGizmo, size: v.gizmoSize, position: v.gizmoPosition });
     this.dirty();
   }
 
@@ -618,6 +674,8 @@ export class Viewport {
   render() {
     const mo = !!this.meshOnly;
     this.grid.visible = !mo;
+    this.axes.visible = !mo && this.viewPrefs.showAxes;
+    if (this.axes.visible) this.axes.update(this.camera, this.canvas.clientHeight);
     if (this.sketches) this.sketches.visible = !mo;
     for (const b of this.bodies.values()) {
       b.edges.visible = !mo;
@@ -630,10 +688,13 @@ export class Viewport {
       if (b.wire) b.wire.visible = mo;
     }
     this.renderer.render(this.scene, this.camera);
+    // The cube and the gizmo take the main camera's orientation as is: one source of truth,
+    // so they always agree with each other and with the axes in the scene.
     const { r, scene, cam } = this.cube;
-    const d = this.camera.position.clone().sub(this.controls.target).normalize().multiplyScalar(6);
-    cam.position.copy(d); cam.up.copy(this.camera.up); cam.lookAt(0, 0, 0);
+    cam.quaternion.copy(this.camera.quaternion);
+    cam.position.set(0, 0, 6).applyQuaternion(cam.quaternion);
     r.render(scene, cam);
+    this.gizmo.update(this.camera);
     this.frames++;
     this.hooks.onFrame?.();
   }

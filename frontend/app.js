@@ -1224,7 +1224,7 @@ async function openProject() {
 $('project').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
   { label: 'New project…', icon: 'file-plus', run: newProject },
   { label: 'Open project…', icon: 'folder', run: openProject }]));
-$('btn-settings').addEventListener('click', () => openSettings({ toast, onTheme: (t) => vp.setTheme(t) }));
+$('btn-settings').addEventListener('click', () => openSettings({ toast, onTheme: (t) => vp.setTheme(t), onViewport: (v) => vp.setViewPrefs(v) }));
 $('btn-more').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
   { label: 'Command palette', icon: 'command', key: 'Ctrl+K', run: openPalette },
   { sep: true }, { head: 'Agent level' },
@@ -1375,6 +1375,6 @@ function toast(msg, kind = '', ms = 4500) {
   toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
-loadTheme((t) => vp.setTheme(t));
+loadTheme((t) => vp.setTheme(t), (v) => vp.setViewPrefs(v));
 refresh();
 api('palette').then((p) => { S.paletteAll = p; }).catch(() => {}); // warm the palette so Ctrl+K is instant

@@ -35,7 +35,7 @@ free-form prompts still works (palette tools, parameter edits, undo/redo, timeli
 | `internal/rendering` | `Renderer.Scene(model, known)` meshes the visible bodies (the model's leaves), caches by node content key and returns only bodies the client does not have. `BodyMesh.SelectorFor(kind, index)` / `PickFor(selector)` are the bidirectional pick-ID ↔ selector map. |
 | `internal/ui` | `Service` (state, pick, selection, scene, preview ghost, prompt, ChangeSets, timeline, playback, project I/O, palette), `Server` (JSON API + SSE on loopback, per-run token, Host check), `Hub` (non-blocking notices). |
 | `internal/app/view.go`, `cards.go` | Read-only views the UI uses: `Snapshot`, `PreviewModel`, `ModelAfter`, `ChangeSetCard`. |
-| `frontend/` | `viewport.js` (Three.js, picking, overlays, view cube), `app.js` (panels, palette, timeline), `api.js`. No build step; Three.js r186 is vendored under `frontend/vendor/`. |
+| `frontend/` | `viewport.js` (Three.js, picking, overlays, view cube), `axes.js` (coordinate axes, axis gizmo), `app.js` (panels, palette, timeline), `api.js`. No build step; Three.js r186 is vendored under `frontend/vendor/`. |
 | `cmd/simoncad` | Launcher. |
 
 ## Help microsite
@@ -75,6 +75,15 @@ backlog item "round only the outer edges after pocketing".
   (X/Y/Z + offset), two-point measurement overlay, fit. Selected geometry is an orange outline over
   a light tint. Edges/vertices are picked in screen space and only when not occluded. Nothing floats
   over the model; its controls live in the fixed action bar above it.
+- **Coordinate axes:** X red `#E05252`, Y green `#56B870`, Z blue `#4A90E2`, defined once in
+  `frontend/axes.js` and shared by the two places that show them: the axes through the true origin
+  (both directions, the negative half fainter, labels at the positive ends) and the axis gizmo in a
+  corner of the viewport (click an
+  axis end to look along it, the centre for the isometric view). The cube and the gizmo take the
+  main camera's orientation directly, so they always agree; view changes from either are animated.
+  All of it is presentation only: not pickable, not in the model bounds, never exported or recorded
+  in the history. Settings → *Viewport* turns each part on or off and sets the axis opacity and the
+  gizmo's size and corner; the choice is saved with the other settings.
 - **Contextual action bar:** a fixed strip above the viewport that shows only the actions valid for
   the current selection (none / body / face / edge / vertex / several bodies / mixed). It is a pure
   function of the selection: `frontend/actions.js` maps each context to actions (id, label, icon,
