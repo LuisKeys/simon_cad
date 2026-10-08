@@ -5,8 +5,7 @@ import { isPhysical, physicalProps, usesTransmission } from './physical.js';
 test('plain definitions stay standard materials', () => {
   assert.equal(isPhysical({ metalness: 1, roughness: 0.3 }), false);
   assert.deepEqual(physicalProps({ metalness: 1 }), {});
-  assert.equal(isPhysical({ envMapIntensity: 1.5 }), false); // standard materials support it
-  assert.deepEqual(physicalProps({ envMapIntensity: 1.5 }), { envMapIntensity: 1.5 });
+  assert.deepEqual(physicalProps({ envMapIntensity: 1.5 }), {}); // reflections are scaled globally (Settings → Rendering)
 });
 
 test('clearcoat, transmission and friends need a physical material', () => {

@@ -3,7 +3,6 @@
 // MeshPhysicalMaterial when it asks for something MeshStandardMaterial cannot do.
 
 const PHYSICAL_ONLY = ['clearcoat', 'clearcoatRoughness', 'transmission', 'ior', 'thickness', 'sheen', 'anisotropy'];
-const SHARED = ['envMapIntensity']; // standard materials have it too
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
@@ -15,7 +14,7 @@ export function isPhysical(def) {
 /** The extra material properties a definition asks for (only the ones it sets). */
 export function physicalProps(def) {
   const out = {};
-  for (const k of [...(isPhysical(def) ? PHYSICAL_ONLY : []), ...SHARED]) {
+  for (const k of (isPhysical(def) ? PHYSICAL_ONLY : [])) {
     const v = num(def?.[k]);
     if (v !== undefined) out[k] = v;
   }

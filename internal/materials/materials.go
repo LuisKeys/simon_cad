@@ -52,8 +52,7 @@ type Material struct {
 	Thickness          *float64 `json:"thickness,omitempty"` // mm, for transmission
 	Sheen              *float64 `json:"sheen,omitempty"`
 	Anisotropy         *float64 `json:"anisotropy,omitempty"`
-	Emissive           string   `json:"emissive,omitempty"`        // #RRGGBB
-	EnvMapIntensity    *float64 `json:"envMapIntensity,omitempty"` // >= 0
+	Emissive           string   `json:"emissive,omitempty"` // #RRGGBB
 	License            License  `json:"license,omitempty"`
 	// Project is true for materials that come from a project's assets/materials folder.
 	Project bool `json:"project,omitempty"`
@@ -99,7 +98,6 @@ func (m *Material) Validate() error {
 		{"clearcoat", m.Clearcoat, 0, 1}, {"clearcoatRoughness", m.ClearcoatRoughness, 0, 1},
 		{"transmission", m.Transmission, 0, 1}, {"sheen", m.Sheen, 0, 1}, {"anisotropy", m.Anisotropy, 0, 1},
 		{"ior", m.IOR, 1, 2.333}, {"thickness", m.Thickness, 0, math.MaxFloat64},
-		{"envMapIntensity", m.EnvMapIntensity, 0, math.MaxFloat64},
 	} {
 		if f.v != nil && !(*f.v >= f.min && *f.v <= f.max) {
 			return fmt.Errorf("material %q: %s %v out of [%v,%v]", m.ID, f.name, *f.v, f.min, f.max)
