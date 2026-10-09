@@ -187,6 +187,24 @@ class ViewPane {
     return this.persp.position.distanceTo(this.controls.target) * Math.tan((this.persp.fov * Math.PI) / 360);
   }
 
+  /** The current camera pose, to hand back with restorePose (print simulation borrows the view). */
+  pose() {
+    const c = this.camera;
+    return { perspective: this.perspective, position: c.position.clone(), target: this.controls.target.clone(), up: c.up.clone(),
+      near: c.near, far: c.far, zoom: c.zoom, orthoH: this.orthoH };
+  }
+
+  restorePose(p) {
+    if (!p || p.perspective !== this.perspective) return false;
+    const c = this.camera;
+    this.anim = null;
+    c.near = p.near; c.far = p.far;
+    if (this.perspective) c.updateProjectionMatrix();
+    else { this.orthoH = p.orthoH; c.zoom = p.zoom; this._orthoFrustum(); }
+    this._setView(p);
+    return true;
+  }
+
   _snapshot(cam = this.camera) {
     return { position: arr(cam.position), target: arr(this.controls.target), up: arr(cam.up) };
   }

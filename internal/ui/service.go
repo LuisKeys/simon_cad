@@ -36,6 +36,7 @@ import (
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
+	"github.com/accelone/simoncad/internal/printsim/job"
 	"github.com/accelone/simoncad/internal/rendering"
 	"github.com/accelone/simoncad/internal/selection"
 	"github.com/accelone/simoncad/internal/tools"
@@ -87,6 +88,8 @@ type Service struct {
 	// refineCancel stops the running visual refinement; refineState is its latest event.
 	refineCancel context.CancelFunc
 	refineState  *refine.Event
+	// printsim runs print-simulation slicing jobs (nil until first used).
+	printsim *job.Manager
 	// draft holds the ChangeSets an agent turn committed at the Review level; the user keeps
 	// or discards them as one batch.
 	draft []string
@@ -135,6 +138,7 @@ func (s *Service) Hub() *Hub { return s.hub }
 
 func (s *Service) attach(a *app.App, path string) {
 	if s.app != nil {
+		s.stopPrintSim()
 		s.app.Close()
 	}
 	s.app, s.path, s.dirty, s.sel, s.chat, s.draft, s.specs = a, path, false, nil, nil, nil, nil
@@ -152,6 +156,7 @@ func (s *Service) attach(a *app.App, path string) {
 func (s *Service) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.stopPrintSim()
 	s.app.Close()
 }
 
@@ -1923,6 +1928,7 @@ func (s *Service) Palette() []PaletteEntry {
 		{ID: "export_step", Title: "Export STEP", Description: "Write a validated STEP file"},
 		{ID: "export_stl", Title: "Export STL", Description: "Write a watertight STL for printing"},
 		{ID: "playback", Title: "Play back the design", Description: "Replay the build feature by feature"},
+		{ID: "print_simulation", Title: "Print simulation", Description: "Slice the model and watch it being 3D printed, layer by layer"},
 		{ID: "new", Title: "New project", Description: "Start an empty project"},
 	} {
 		c.Kind = "command"

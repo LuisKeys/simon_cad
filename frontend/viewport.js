@@ -68,6 +68,11 @@ export class Viewport {
     this._dirty = true;
     this.known = {};
     this.stats = { triangles: 0, bodies: 0 };
+    // Print simulation (printsim.js) borrows this viewport: simMode hides the CAD scene and its helpers,
+    // boundsOverride replaces what Fit and the shadow map frame, frameHooks run before every frame.
+    this.simMode = false;
+    this.boundsOverride = null;
+    this.frameHooks = [];
 
     this._initCube();
     this.layout = new ViewportLayoutManager(canvas.parentElement, {
@@ -81,7 +86,8 @@ export class Viewport {
     this.setViewPrefs(this.viewPrefs);
     new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
     this.resize();
-    const loop = () => {
+    const loop = (now) => {
+      for (const f of this.frameHooks) f(now);
       if (this.layout.step()) this._dirty = true;
       if (this._dirty) { this._dirty = false; this.render(); }
       requestAnimationFrame(loop);
@@ -119,6 +125,7 @@ export class Viewport {
 
   /** The model's silhouette changed (bodies, visibility, cut, mesh view): redraw the shadow map. */
   _shadowsChanged() { this._shadowStale = true; this._dirty = true; }
+  shadowsChanged() { this._shadowsChanged(); }
 
   /** The active view's camera and controls (tools, fit and the View menu act on the active view). */
   get camera() { return this.layout.active.camera; }
@@ -305,6 +312,8 @@ export class Viewport {
   }
 
   bounds() {
+    const over = this.boundsOverride?.();
+    if (over) return over;
     const box = new THREE.Box3();
     for (const b of this.bodies.values()) if (b.group.visible) box.expandByObject(b.group);
     if (this.sketches && this.sketches.children.length) box.expandByObject(this.sketches);
@@ -473,7 +482,7 @@ export class Viewport {
   /** Resolves the thing under the pointer, honouring the pick filter. The ray comes from the
    *  camera of the view the pointer is in. */
   pick(ev) {
-    if (this.bodies.size === 0) return null;
+    if (this.simMode || this.bodies.size === 0) return null;
     const pane = this.layout.paneAt(ev.clientX, ev.clientY);
     const cam = pane.camera;
     const n = this._ndc(ev, pane);
@@ -803,10 +812,11 @@ export class Viewport {
   }
 
   render() {
-    const mo = !!this.meshOnly;
-    this.axes.visible = !mo && this.viewPrefs.showAxes;
-    if (this.sketches) this.sketches.visible = !mo;
+    const mo = !!this.meshOnly, sim = this.simMode;
+    this.axes.visible = !mo && !sim && this.viewPrefs.showAxes;
+    if (this.sketches) this.sketches.visible = !mo && !sim;
     for (const b of this.bodies.values()) {
+      if (sim) { b.group.visible = false; continue; } // the printer scene replaces the CAD scene; geometry stays loaded
       b.edges.visible = !mo;
       b.mesh.visible = !mo; // picking raycasts the mesh regardless of visibility
       if (mo && !b.wire) { // built lazily, once per body
@@ -822,7 +832,7 @@ export class Viewport {
       this.lighting.fitTo(this.bounds());
       r.shadowMap.needsUpdate = true;
     }
-    this.lighting.floor.visible = this.lighting.framed && this.lighting.shadowsOn && !mo; // the mesh view is a bare wireframe
+    this.lighting.floor.visible = this.lighting.framed && this.lighting.shadowsOn && !mo && !sim; // the mesh view is a bare wireframe
     const H = this.canvas.clientHeight || 1, W = this.canvas.clientWidth || 1;
     r.setScissorTest(true);
     r.setViewport(0, 0, W, H); r.setScissor(0, 0, W, H);
@@ -832,7 +842,7 @@ export class Viewport {
       if (w < 1 || h < 1) continue;
       const by = H - y - h; // WebGL rectangles start at the bottom left
       r.setViewport(x, by, w, h); r.setScissor(x, by, w, h);
-      this._placeGrid(pane, !mo);
+      this._placeGrid(pane, !mo && !sim);
       for (const hook of this.paneHooks) hook(pane);
       if (this.axes.visible) this.axes.update(pane.camera, h);
       r.render(this.scene, pane.camera);

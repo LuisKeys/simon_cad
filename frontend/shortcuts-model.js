@@ -33,6 +33,11 @@ export const SECTIONS = [
     { keys: [['Ctrl', 'Alt', '4']], label: 'Single / Quad view' },
     { keys: [['Double-click']], label: 'Maximize a view (on its label, Quad view)' },
   ] },
+  { title: 'Print simulation', rows: [
+    { keys: [['Space']], label: 'Play / pause the simulated print' },
+    { keys: [['[']], label: 'Previous layer' },
+    { keys: [[']']], label: 'Next layer' },
+  ] },
   { title: 'While moving or rotating', rows: [
     { keys: [['Click'], ['Enter']], label: 'Confirm' },
     { keys: [['Esc'], ['Right-click']], label: 'Cancel (the object goes back)' },

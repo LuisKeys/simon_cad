@@ -30,7 +30,8 @@ ensamblajes) no están iniciadas. Ver el [README](../README.md#status).
 19. [Configuración y proveedores de modelo](#19-configuración-y-proveedores-de-modelo)
 20. [Calidad, seguridad y pruebas](#20-calidad-seguridad-y-pruebas)
 21. [Ayuda integrada](#21-ayuda-integrada)
-22. [Fuera de alcance / pendiente](#22-fuera-de-alcance--pendiente)
+22. [Simulación de impresión 3D](#22-simulación-de-impresión-3d)
+23. [Fuera de alcance / pendiente](#23-fuera-de-alcance--pendiente)
 
 ---
 
@@ -297,7 +298,19 @@ Banderas del agente: `--preview`, `--commit`, `--label`, `--autonomous`.
   círculo de pernos, carcasa), referencia de herramientas, atajos, configuración y solución de
   problemas.
 
-## 22. Fuera de alcance / pendiente
+## 22. Simulación de impresión 3D
+
+- Modo **Print** (barra superior o paleta): rebanado en segundo plano con PrusaSlicer (subproceso, instalado
+  por el usuario) o un slicer *preview* interno, y reproducción de los toolpaths reales en el mismo viewport:
+  cama con marcas en mm, nozzle animado, filamento depositado capa por capa.
+- Línea de tiempo con velocidades 1x–500x, salto y búsqueda sin reproducir, inspección de capa, filtros
+  (viajes, paredes, relleno, soportes), overlay translúcido del modelo original y tres presets de
+  visualización (Realista, Técnico, Diagnóstico).
+- Perfil genérico etiquetado como *simulación, no hardware verificado*; resultados cacheados por revisión
+  de geometría y ajustes; cancelación; el modelo CAD nunca se modifica. Detalle en `docs/printsim.md`.
+- Pendiente de esta línea: análisis de imprimibilidad, herramientas del agente/Critic, modo cinemático.
+
+## 23. Fuera de alcance / pendiente
 
 - Fases 3–7: catálogo y macros de robótica, análisis, diseño generativo, ensamblajes, juntas y
   cinemática.

@@ -222,6 +222,7 @@ third_party/           (git-ignored) local Go toolchain and OCCT build
 - [docs/architecture.md](docs/architecture.md) — principles, layers, data flow, key decisions
 - [docs/modules.md](docs/modules.md) — every package and component in detail
 - [docs/ui.md](docs/ui.md) — the visual front end: rendering, picking, preview, guarantees, open items
+- [docs/printsim.md](docs/printsim.md) — print simulation: slicing, toolpath playback, architecture, licences, limits
 - [docs/tools.md](docs/tools.md) — the tool reference (what the agent can call)
 - [docs/project-format.md](docs/project-format.md) — the `.scadproj` on-disk format
 - [docs/development.md](docs/development.md) — testing, evals, adding features and tools

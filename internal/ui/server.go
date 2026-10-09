@@ -435,6 +435,37 @@ func (s *Server) routes() {
 	m.HandleFunc("/api/palette", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.Svc.Palette())
 	})
+	m.HandleFunc("/api/printsim/info", func(w http.ResponseWriter, r *http.Request) {
+		info, err := s.Svc.PrintSimInfo()
+		reply(w, info, err)
+	})
+	m.HandleFunc("/api/printsim/slice", func(w http.ResponseWriter, r *http.Request) {
+		var in PrintSimSliceRequest
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		st, err := s.Svc.PrintSimSlice(in)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "job": st.Job, "cached": st.Cached})
+	})
+	m.HandleFunc("/api/printsim/cancel", func(w http.ResponseWriter, r *http.Request) {
+		s.Svc.PrintSimCancel()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	m.HandleFunc("/api/printsim/result/", func(w http.ResponseWriter, r *http.Request) {
+		b, err := s.Svc.PrintSimResult(strings.TrimPrefix(r.URL.Path, "/api/printsim/result/"))
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write(b)
+	})
 	m.HandleFunc("/api/playback", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Index int               `json:"index"`

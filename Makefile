@@ -74,6 +74,7 @@ e2e: build
 	node e2e/models.mjs
 	node e2e/transform.mjs
 	node e2e/shortcuts.mjs
+	node e2e/printsim.mjs
 
 # Pure frontend helpers (confidence bands, SVG geometry, ambiguity edits); needs Node >= 18.
 test-js:

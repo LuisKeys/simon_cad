@@ -14,6 +14,17 @@ export async function api(path, body) {
   return data;
 }
 
+// Binary reply (the print simulation's toolpath buffer).
+export async function apiBytes(path) {
+  const res = await fetch('/api/' + path, { headers: { 'X-Simon-Token': token } });
+  if (!res.ok) {
+    let data = null;
+    try { data = await res.json(); } catch { /* empty body */ }
+    throw failure(data, res.status, `${path}: HTTP ${res.status}`);
+  }
+  return res.arrayBuffer();
+}
+
 // failure turns an error reply into an Error that keeps its status, its code (e.g. "fallback_consent") and its details.
 function failure(data, status, fallback) {
   const err = new Error(data?.error ?? fallback);

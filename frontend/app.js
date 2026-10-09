@@ -1,7 +1,7 @@
 // Simon CAD UI: panels over the ui.Service API. Every mutation here is a call that ends in
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
-import { api, subscribe, h, materialUrl } from './api.js';
+import { api, apiBytes, subscribe, h, materialUrl } from './api.js';
 import { Viewport } from './viewport.js';
 import { initVision } from './vision.js';
 import { initVisualPanel } from './visualcmp.js';
@@ -19,6 +19,7 @@ import { units, setUnits } from './units.js';
 import { InteractiveTransformController } from './transform.js';
 import { initShortcuts } from './shortcuts.js';
 import { isToggleKey } from './shortcuts-model.js';
+import { initPrintSim } from './printsim-panel.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
@@ -273,6 +274,7 @@ async function refresh() {
     S.state = st;
     render(st);
     await refreshScene();
+    printsim.onModelChanged();
     vp.setSelection(st.selection.highlights ?? []);
     if (S.previewing && !st.pending.some((c) => c.id === S.previewing)) clearPreview();
   } catch (e) { toast(e.message, 'bad'); }
@@ -286,6 +288,7 @@ function scheduleRefresh() {
 
 subscribe((n) => {
   visualPanel.onNotice(n);
+  printsim.onNotice(n);
   if (n.kind === 'refine' && n.refine) { S.refineState = n.refine; renderAgentState(); return; }
   if (n.kind === 'visual') return;
   if (n.kind === 'chat' && n.chat) { addChat(n.chat); return; }
@@ -326,6 +329,15 @@ const visualPanel = initVisualPanel({
   $, toast: (...a) => toast(...a), getState: () => S.state, withFallbackConsent,
   attachmentIds: () => vision.attachmentIds(), clearAttachments: () => vision.clearAttachments(),
 });
+
+// Print simulation: a printer scene in this same viewport, a Print tab in the agent panel and a playback bar.
+// It only reads the model (slicing runs on the server); the CAD scene is hidden, not changed.
+const printsim = initPrintSim({
+  vp, api, apiBytes, toast: (...a) => toast(...a), $, S,
+  clearSelection: async () => { try { applySelection(await api('select', { selectors: [] })); } catch { /* nothing selected */ } },
+  onChange: () => { renderCtxBar(); $('hud').textContent = hudStats(); },
+});
+window.simonPrintSim = printsim;
 
 // Workspace settings of the project (units, grid, snapping): the grid redraws at once and every
 // displayed length follows the display units. Values stay canonical millimetres underneath.
@@ -1557,6 +1569,7 @@ async function runPalette(e) {
     case 'save': return save();
     case 'export_step': case 'export_stl': return $('btn-export').click();
     case 'playback': return playDesign();
+    case 'print_simulation': return printsim.toggle();
     case 'new': return newProject();
   }
 }
@@ -1599,7 +1612,7 @@ document.addEventListener('keydown', (e) => {
   }
   const overlay = !$('palette').hidden || !$('dialog').hidden || !$('confirm').hidden || !$('formdlg').hidden;
   if (isToggleKey(e, typing) && !overlay && !S.playing && $('visual').hidden && $('settings').hidden && $('interp').hidden) { e.preventDefault(); $('ctxmenu').hidden = true; shortcuts.open(); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !mod && !overlay && !S.playing && S.selection?.selectors?.length) {
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !mod && !overlay && !S.playing && !S.printsim && S.selection?.selectors?.length) {
     e.preventDefault(); // Backspace must not navigate back
     deleteObjects();
   } else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('palette').hidden ? openPalette() : closePalette(); }
@@ -1617,12 +1630,12 @@ document.addEventListener('keydown', (e) => {
   else if (mod && !typing && !overlay && e.key.toLowerCase() === 'g' && selIds().length) { e.preventDefault(); e.shiftKey ? actionEnv.ungroup() : actionEnv.group(); }
   else if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
   else if (e.ctrlKey && e.altKey && !e.shiftKey && (e.code === 'Digit4' || e.code === 'Numpad4') && !typing && !overlay) { e.preventDefault(); vp.layout.toggleMode(); renderCtxBar(); }
-  else if (!typing && !mod && !overlay && !e.altKey && (e.key === 'g' || e.key === 'r') && !S.playing && viewportFocused()) {
+  else if (!typing && !mod && !overlay && !e.altKey && (e.key === 'g' || e.key === 'r') && !S.playing && !S.printsim && viewportFocused()) {
     e.preventDefault();
     xform.begin(e.key === 'g' ? 'translate' : 'rotate');
   } else if (!typing && !mod && !overlay && e.key === 'f') vp.fit();
-  else if (!typing && !mod && !overlay && e.key === 'm') toggleMeasure();
-  else if (!typing && !mod && !overlay && !e.altKey && e.key === 'b') toggleBoxSelect();
+  else if (!typing && !mod && !overlay && !S.printsim && e.key === 'm') toggleMeasure();
+  else if (!typing && !mod && !overlay && !e.altKey && !S.printsim && e.key === 'b') toggleBoxSelect();
 });
 
 // ---- toast ---------------------------------------------------------------------------

@@ -6,12 +6,13 @@ import (
 	"github.com/accelone/simoncad/internal/agent/refine"
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/agent/workflow"
+	"github.com/accelone/simoncad/internal/printsim/job"
 )
 
 // Notice tells a front end that something changed; it carries no model data, so a client
 // refetches the state or scene it needs.
 type Notice struct {
-	Kind  string          `json:"kind"` // state | selection | chat | event | agent_state | agent_done | refine | visual | model
+	Kind  string          `json:"kind"` // state | selection | chat | event | agent_state | agent_done | refine | visual | model | printsim
 	Type  string          `json:"type,omitempty"`
 	Seq   int             `json:"seq,omitempty"`
 	Chat  *ChatMessage    `json:"chat,omitempty"`
@@ -21,6 +22,8 @@ type Notice struct {
 	Refine *refine.Event `json:"refine,omitempty"`
 	// Model is the model now serving the request (kind "model").
 	Model *runtime.RouteEvent `json:"model,omitempty"`
+	// PrintSim is a slicing-job progress event (kind "printsim").
+	PrintSim *job.Event `json:"printsim,omitempty"`
 }
 
 // Hub fans notices out to subscribers without ever blocking the publisher.

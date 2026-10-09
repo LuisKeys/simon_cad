@@ -1,12 +1,15 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
 	"github.com/accelone/simoncad/internal/dimensions"
+	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/tools"
 	"github.com/accelone/simoncad/internal/transform"
@@ -15,6 +18,31 @@ import (
 // Read-only views for front ends. The UI never touches App.Graph or App.Mgr directly: it
 // reads these snapshots and mutates only through ApplyTool and the ChangeSet lifecycle
 // (Commit, Reject, Undo, Redo, Restore).
+
+// PrintShape returns the model's combined solid for read-only consumers such as print
+// simulation, with the geometry revision (appearance excluded) it was built from. The
+// shape is a fresh copy owned by the caller, who must Release it; the model is not touched.
+func (a *App) PrintShape() (*api.Shape, string, error) {
+	m, err := a.Model()
+	if err != nil {
+		return nil, "", err
+	}
+	if f := m.Failed(); len(f) > 0 {
+		return nil, "", fmt.Errorf("features are failing: %s", strings.Join(f, ", "))
+	}
+	if len(m.Leaves) == 0 {
+		return nil, "", errors.New("the model has no solid geometry")
+	}
+	shape, err := m.ResultShape(a.K)
+	if err != nil {
+		return nil, "", err
+	}
+	if ok, err := shape.IsValid(); err != nil || !ok {
+		shape.Release()
+		return nil, "", errors.New("the model is not a valid solid")
+	}
+	return shape, a.Graph.GeometryHash(), nil
+}
 
 // Snapshot returns a deep copy of the live graph; changing it has no effect on the model.
 func (a *App) Snapshot() *cadir.Graph { return a.Graph.Clone() }
