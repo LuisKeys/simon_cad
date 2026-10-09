@@ -1101,7 +1101,7 @@ async function playDesign() {
       vp.applyDelta(f.scene);
       $('hud').textContent = i === 0 ? 'Playback…' : `${i}/${f.total} · ${f.changeset?.intent ?? ''}`;
       if (i > 0) vp.fitAll();
-      await new Promise((r) => setTimeout(r, 750));
+      await new Promise((r) => setTimeout(r, 375));
     }
   } catch (e) { toast(e.message, 'bad'); }
   S.playing = false;
