@@ -119,7 +119,12 @@ const xform = new InteractiveTransformController(vp, {
     } catch (e) { toast(e.message, 'bad'); await refresh(); return false; }
   },
   // The editable dimensions would float at the old place: hidden while the object moves.
-  onModal: (on) => { dimOverlay?.set(on ? [] : S.selection?.dimensions ?? []); document.body.classList.toggle('transforming', on); },
+  onModal: (on) => {
+    // Box select disables the camera controls: a Move/Rotate leaves it, or the view stays locked afterwards.
+    if (on && vp.boxMode) toggleBoxSelect();
+    dimOverlay?.set(on ? [] : S.selection?.dimensions ?? []);
+    document.body.classList.toggle('transforming', on);
+  },
   notify: (msg, kind) => toast(msg, kind),
 });
 window.simonTransform = xform;
