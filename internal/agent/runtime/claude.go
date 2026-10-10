@@ -49,19 +49,34 @@ func (c *Claude) Name() string { return c.Model }
 // Identity names the provider and model (see Identify).
 func (c *Claude) Identity() (string, string) { return ProviderClaude, c.Model }
 
+// cacheControl marks a prompt-cache breakpoint: everything up to and including the
+// block that carries it (tools, then system, then messages) is cached.
+type cacheControl struct {
+	Type string `json:"type"`
+}
+
+func ephemeral() *cacheControl { return &cacheControl{Type: "ephemeral"} }
+
 type apiTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"input_schema"`
+	CacheControl *cacheControl  `json:"cache_control,omitempty"`
+}
+
+type apiSystemBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
 }
 
 type apiRequest struct {
-	Model     string       `json:"model"`
-	MaxTokens int          `json:"max_tokens"`
-	System    string       `json:"system,omitempty"`
-	Messages  []Message    `json:"messages"`
-	Tools     []apiTool    `json:"tools,omitempty"`
-	Thinking  *apiThinking `json:"thinking,omitempty"`
+	Model     string           `json:"model"`
+	MaxTokens int              `json:"max_tokens"`
+	System    []apiSystemBlock `json:"system,omitempty"`
+	Messages  []Message        `json:"messages"`
+	Tools     []apiTool        `json:"tools,omitempty"`
+	Thinking  *apiThinking     `json:"thinking,omitempty"`
 }
 
 type apiThinking struct {
@@ -112,7 +127,12 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 	if max == 0 {
 		max = 4096
 	}
-	body := apiRequest{Model: model, MaxTokens: max, System: req.System, Messages: req.Messages}
+	body := apiRequest{Model: model, MaxTokens: max, Messages: req.Messages}
+	if req.System != "" {
+		// The tool definitions and system prompt dominate the input and are resent every
+		// step, so the system block closes a cached prefix (tools come first in it).
+		body.System = []apiSystemBlock{{Type: "text", Text: req.System, CacheControl: ephemeral()}}
+	}
 	if !req.NoThinking {
 		body.Thinking = &apiThinking{Type: "enabled", BudgetTokens: thinkingBudget}
 		if body.MaxTokens <= thinkingBudget {
@@ -120,7 +140,11 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 		}
 	}
 	for _, t := range req.Tools {
-		body.Tools = append(body.Tools, apiTool(t))
+		body.Tools = append(body.Tools, apiTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
+	}
+	if n := len(body.Tools); n > 0 {
+		// Also cache the tools alone, so a changed system prompt still reuses them.
+		body.Tools[n-1].CacheControl = ephemeral()
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -164,7 +188,8 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 			Usage      struct {
 				// Anthropic reports cache tokens *beside* input_tokens, not inside it, so the
 				// billed input is their sum. Cache writes cost more than fresh input rather
-				// than less; this agent never writes a cache, so they join the fresh side.
+				// than less; the pricing model has no write rate, so they join the fresh side
+				// (a slight underestimate: writes bill at 1.25x input).
 				InputTokens   int `json:"input_tokens"`
 				CacheRead     int `json:"cache_read_input_tokens"`
 				CacheCreation int `json:"cache_creation_input_tokens"`

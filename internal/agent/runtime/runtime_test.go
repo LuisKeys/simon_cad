@@ -126,6 +126,16 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
+// systemIs reports whether the request's system field is the single text block text.
+func systemIs(v any, text string) bool {
+	blocks, _ := v.([]any)
+	if len(blocks) != 1 {
+		return false
+	}
+	b, _ := blocks[0].(map[string]any)
+	return b["text"] == text
+}
+
 func TestClaudeProviderWireFormat(t *testing.T) {
 	var got map[string]any
 	var hdr http.Header
@@ -147,7 +157,7 @@ func TestClaudeProviderWireFormat(t *testing.T) {
 	if hdr.Get("x-api-key") != "test-key" || hdr.Get("anthropic-version") == "" {
 		t.Fatalf("headers %v", hdr)
 	}
-	if got["model"] != "m" || got["system"] != "sys" || got["tools"] == nil || got["max_tokens"] == nil {
+	if got["model"] != "m" || !systemIs(got["system"], "sys") || got["tools"] == nil || got["max_tokens"] == nil {
 		t.Fatalf("request body %v", got)
 	}
 	if uses := resp.ToolUses(); len(uses) != 1 || uses[0].Name != "create_box" || resp.Usage.OutputTokens != 7 {

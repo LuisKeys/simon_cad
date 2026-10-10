@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -70,5 +71,39 @@ func TestNoCacheFieldMeansNothingCached(t *testing.T) {
 	}
 	if u := resp.Usage; u.CachedInputTokens != 0 || u.FreshInputTokens() != 500 {
 		t.Fatalf("usage = %+v", u)
+	}
+}
+
+// The tool definitions and system prompt are resent every step, so the request must
+// mark them as cache breakpoints: the last tool and the system block.
+func TestClaudeRequestMarksCacheBreakpoints(t *testing.T) {
+	var got struct {
+		System []struct {
+			Text         string         `json:"text"`
+			CacheControl map[string]any `json:"cache_control"`
+		} `json:"system"`
+		Tools []struct {
+			Name         string         `json:"name"`
+			CacheControl map[string]any `json:"cache_control"`
+		} `json:"tools"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}`))
+	}))
+	defer srv.Close()
+	c := &Claude{APIKey: "k", BaseURL: srv.URL, Model: "sonnet", HTTP: srv.Client()}
+	_, err := c.Complete(context.Background(), Request{
+		System:   "be brief",
+		Tools:    []ToolDef{{Name: "a", InputSchema: map[string]any{}}, {Name: "b", InputSchema: map[string]any{}}},
+		Messages: []Message{{Role: "user", Content: []Block{{Type: "text", Text: "hi"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.System) != 1 || got.System[0].Text != "be brief" || got.System[0].CacheControl["type"] != "ephemeral" {
+		t.Fatalf("system = %+v, want one ephemeral-cached block", got.System)
+	}
+	if len(got.Tools) != 2 || got.Tools[0].CacheControl != nil || got.Tools[1].CacheControl["type"] != "ephemeral" {
+		t.Fatalf("tools = %+v, want only the last tool cached", got.Tools)
 	}
 }
