@@ -13,7 +13,9 @@ are exact. Do not edit by hand.
 **Pipeline per call:** unknown-tool check → strict JSON decode → JSON-schema validation (unknown
 arguments are rejected) → semantic validation → *edit* tools return a plan of commands that becomes a
 ChangeSet; *query* tools return data directly. Errors are written to be actionable (they are fed
-back to the model). Tools belong to the `geometry` capability, or to `vision` (image interpretation).
+back to the model). Tools belong to the `geometry` capability, or to `vision` (image interpretation)
+or `visual` (refinement against references). The sections below group tools by category (domain),
+the same grouping the registry exposes via `Tool.Category`.
 
 Common optional arguments on feature-creating tools: `id` (lowercase letters / digits / underscores;
 generated from `name` or the type if omitted), `name` (human-readable), `intent` (the engineering
@@ -21,6 +23,10 @@ intent in natural language, stored on the node).
 
 Invoke directly with: `simoncad-cli tool <project> <tool> '<json>'`.
 """
+
+
+CATEGORY_ORDER = ["primitives", "sketch", "edit", "transform", "parametric", "components", "appearance",
+                  "workspace", "project", "image", "refine"]
 
 
 def typ(p):
@@ -44,14 +50,20 @@ def main():
     cli = sys.argv[1] if len(sys.argv) > 1 else "./out/simoncad-cli"
     tools = json.loads(subprocess.check_output([cli, "tools", "--json"]))["tools"]
     out = [HEADER]
-    for kind, title in (("edit", "Edit tools (produce a ChangeSet)"), ("query", "Query tools (no model change)")):
-        out.append("\n## %s\n" % title)
-        for t in tools:
-            if t["mutating"] != (kind == "edit"):
-                continue
+    order = []
+    for t in tools:
+        if t["category"] not in order:
+            order.append(t["category"])
+    for cat in CATEGORY_ORDER + [c for c in order if c not in CATEGORY_ORDER]:
+        group = [t for t in tools if t["category"] == cat]
+        if not group:
+            continue
+        out.append("\n## %s\n" % cat)
+        for t in group:
+            kind = "edit" if t["mutating"] else "query"
             s = t["schema"]
             req = set(s.get("required", []))
-            out.append("### `%s`\n\n%s\n" % (t["name"], t["description"]))
+            out.append("### `%s`\n\n_%s tool._ %s\n" % (t["name"], kind, t["description"]))
             props = s.get("properties", {})
             if not props:
                 out.append("_No arguments._\n")

@@ -106,7 +106,9 @@ type Tool struct {
 	Name        string
 	Description string
 	Capability  string
-	Schema      map[string]any
+	// Category is the tool's domain (see categories.go); Register fills it from the table.
+	Category string
+	Schema   map[string]any
 	// Plan is set for tools that edit the model.
 	Plan func(env Env, a Args) (*Plan, error)
 	// Query is set for read-only (or file-exporting) tools.
@@ -128,6 +130,9 @@ func (r *Registry) Register(t *Tool) {
 	}
 	if (t.Plan == nil) == (t.Query == nil) {
 		panic("tool " + t.Name + " must define exactly one of Plan or Query")
+	}
+	if t.Category == "" {
+		t.Category = CategoryOf(t.Name)
 	}
 	r.tools[t.Name] = t
 	r.order = append(r.order, t.Name)

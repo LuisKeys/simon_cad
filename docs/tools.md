@@ -7,7 +7,9 @@ are exact. Do not edit by hand.
 **Pipeline per call:** unknown-tool check → strict JSON decode → JSON-schema validation (unknown
 arguments are rejected) → semantic validation → *edit* tools return a plan of commands that becomes a
 ChangeSet; *query* tools return data directly. Errors are written to be actionable (they are fed
-back to the model). Tools belong to the `geometry` capability, or to `vision` (image interpretation).
+back to the model). Tools belong to the `geometry` capability, or to `vision` (image interpretation)
+or `visual` (refinement against references). The sections below group tools by category (domain),
+the same grouping the registry exposes via `Tool.Category`.
 
 Common optional arguments on feature-creating tools: `id` (lowercase letters / digits / underscores;
 generated from `name` or the type if omitted), `name` (human-readable), `intent` (the engineering
@@ -16,83 +18,11 @@ intent in natural language, stored on the node).
 Invoke directly with: `simoncad-cli tool <project> <tool> '<json>'`.
 
 
-## Edit tools (produce a ChangeSet)
-
-### `add_hole`
-
-Drill one or more holes into a feature's face. `positions` are world coordinates [x,y] (or [x,y,z]); the coordinate along the face normal is ignored. Omit positions for one hole at the face center. The face defaults to the top (+Z) of `target`; pass `face` as a selector such as face(feature=plate,side=-X) to drill elsewhere. Omit depth for a through hole. Use kind=counterbore (cb_diameter, cb_depth) or countersink (cs_diameter, optional cs_angle_deg).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `cb_depth` | number > 0 |  | Counterbore depth (mm) |
-| `cb_diameter` | number > 0 |  | Counterbore diameter (mm) |
-| `cs_angle_deg` | number > 0 |  | Countersink included angle (deg), default 90 |
-| `cs_diameter` | number > 0 |  | Countersink outer diameter (mm) |
-| `depth` | number > 0 |  | Blind depth (mm); omit for through |
-| `diameter` | number > 0 | yes | Hole diameter (mm). M3 clearance is 3.2-3.4 |
-| `face` | string |  | Face selector, e.g. face(feature=plate,side=+Z) |
-| `kind` | simple \| counterbore \| countersink |  | Hole style (simple \| counterbore \| countersink) |
-| `positions` | array of array |  | Hole centers in world coordinates |
-| `target` | string |  | Feature id to drill into (required unless face is given) |
-
-### `align`
-
-Align bodies along one or more axes by moving them (each moved body gets a transform feature). mode min/center/max aligns the bodies' bounding-box minimum, center or maximum. to=first (default with 2+ bodies): to the first listed body, which stays put; to=selection: to the bounds of all listed bodies; to=origin (default with 1 body): to the world plane through 0 (e.g. axes=[z], mode=min puts a part on the floor; axes=[x,y], mode=center centers it). `reference` names a body that stays put instead. Omit `features` to use the current selection.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `axes` | array of x \| y \| z | yes | Axes to align along |
-| `features` | array of string |  | Bodies to align; omit to use the current selection |
-| `mode` | min \| center \| max |  | Which side of the bounding boxes to align (min \| center \| max) |
-| `reference` | string |  | Optional body that stays put and is aligned to |
-| `to` | first \| selection \| origin |  | What to align to (first \| selection \| origin) |
-
-### `bind_parameters`
-
-Drive several parameters of one feature by expressions over design parameters in ONE ChangeSet, e.g. feature='body', bindings={dx:'vehicle.length', dz:'vehicle.height - vehicle.ground_clearance'}.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `bindings` | object | yes | parameter → expression |
-| `feature` | string | yes | Feature id |
-
-### `boolean`
-
-Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`; op=intersect keeps only the volume shared by both. Both inputs are consumed (they stop appearing as separate bodies).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `op` | union \| subtract \| intersect | yes | Boolean operation (union \| subtract \| intersect) |
-| `target` | string | yes | Feature to keep |
-| `tool` | string | yes | Feature to merge or remove |
-
-### `chamfer`
-
-Chamfer all edges of a feature with the given distance (mm). Treats every edge of the body unless `edges` lists edge(feature=<target>,index=N) selectors (the user's selected edges), in which case only those.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `distance` | number > 0 | yes | Size (mm) |
-| `edges` | array of string |  | Only these edges: edge(feature=<target>,index=N) selectors from the selection context. Omit for every edge. |
-| `target` | string | yes | Feature to treat |
-
-### `circular_pattern`
-
-Repeat a hole or extrude-cut feature around an axis through (cx,cy,cz). count is the total number of instances; total_angle_deg defaults to 360 (evenly around the circle).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `axis` | x \| y \| z |  | Axis direction (x \| y \| z) |
-| `count` | integer ≥ 2 ≤ 500 | yes | Total instances including the original |
-| `cx` | number |  | Axis point X (mm) |
-| `cy` | number |  | Axis point Y (mm) |
-| `cz` | number |  | Axis point Z (mm) |
-| `source` | string | yes | Id of the hole/extrude feature to repeat |
-| `total_angle_deg` | number > 0 |  | Angular span (deg), default 360 |
+## primitives
 
 ### `create_box`
 
-Create a rectangular block (e.g. a plate). Dimensions in mm; dx/dy/dz are the extents along X/Y/Z. The block's minimum corner sits at (x,y,z), default the origin, so 'a 100 x 60 x 4 plate' is dx=100, dy=60, dz=4.
+_edit tool._ Create a rectangular block (e.g. a plate). Dimensions in mm; dx/dy/dz are the extents along X/Y/Z. The block's minimum corner sits at (x,y,z), default the origin, so 'a 100 x 60 x 4 plate' is dx=100, dy=60, dz=4.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -103,20 +33,9 @@ Create a rectangular block (e.g. a plate). Dimensions in mm; dx/dy/dz are the ex
 | `y` | number |  | Min-corner Y (mm), default 0 |
 | `z` | number |  | Min-corner Z (mm), default 0 |
 
-### `create_component`
-
-Turn the selected features (or the ones named in `features`) into a reusable component: they move into a new reusable project and are replaced in place by a single instance that references it. The selection must be self-contained — nothing outside it may depend on it, and it may not depend on anything outside.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `description` | string |  | what the component is for |
-| `features` | array of string |  | feature ids to move into the component (default: the selection) |
-| `name` | string | yes | the component's name |
-| `tags` | array of string |  | tags to find the component by |
-
 ### `create_cone`
 
-Create a cone or frustum (taper, funnel, chamfer cutter). The base circle (`radius`) is centered at (x,y,z) and the cone extends `height` along `axis` (default z), narrowing to `top_radius` (default 0 = a point).
+_edit tool._ Create a cone or frustum (taper, funnel, chamfer cutter). The base circle (`radius`) is centered at (x,y,z) and the cone extends `height` along `axis` (default z), narrowing to `top_radius` (default 0 = a point).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -130,7 +49,7 @@ Create a cone or frustum (taper, funnel, chamfer cutter). The base circle (`radi
 
 ### `create_cylinder`
 
-Create a cylinder (shaft, boss, standoff, pin). The base circle is centered at (x,y,z) and the cylinder extends `height` along `axis` (default z).
+_edit tool._ Create a cylinder (shaft, boss, standoff, pin). The base circle is centered at (x,y,z) and the cylinder extends `height` along `axis` (default z).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -141,46 +60,9 @@ Create a cylinder (shaft, boss, standoff, pin). The base circle is centered at (
 | `y` | number |  | Base center Y (mm) |
 | `z` | number |  | Base center Z (mm) |
 
-### `create_from_image`
-
-Turn a ready interpretation into editable parametric geometry: a sketch, then extrude / cut / boolean features in order (normal CAD-IR features, no image object). Refuses and lists what is missing or unconfirmed until the interpretation is ready. `extrusion_depth` (mm) is the user's explicit thickness for operations that lack one. The ChangeSet is always left proposed for preview and commit.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
-| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
-| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
-| `mode` | solid \| sketch |  | solid builds the geometry; sketch stops at the sketch (solid \| sketch) |
-| `offset` | number |  | Override the plane offset (mm) |
-| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
-
-### `create_sketch`
-
-Create a planar 2D sketch (no solid yet). Entities (mm, plane coordinates u,v): line{p1,p2}, arc{p1,mid,p2}, circle{cx,cy,r}, rectangle{x,y,w,h}, polygon{points}, slot{x1,y1,x2,y2,width}. `regions` group closed loops into faces (outer loop + holes); if omitted every closed entity (circle/rectangle/polygon/slot) is its own region. Place it on plane XY (normal +Z, u=X,v=Y), YZ (normal +X, u=Y,v=Z) or XZ (normal +Y, u=Z,v=X) with `offset`, or on a planar `face` (origin at the face centroid, u along its longest straight edge). Turn regions into material with extrude_sketch.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `entities` | array of object | yes | Sketch entities |
-| `face` | string |  | Planar face selector to draw on, e.g. face(feature=plate,side=+Z); overrides plane |
-| `offset` | number |  | Offset along the sketch normal (mm) |
-| `plane` | XY \| XZ \| YZ |  | Sketch plane (XY \| XZ \| YZ) |
-| `regions` | array of object |  | Closed regions (outer loop + holes) |
-
-### `create_sketch_from_image`
-
-Create only the planar sketch (no solid) from a ready interpretation, as a normal editable sketch feature. The result stays proposed until the user commits it.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
-| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
-| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
-| `offset` | number |  | Override the plane offset (mm) |
-| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
-
 ### `create_sphere`
 
-Create a sphere (ball, dome when cut, rounded end). Centered at (x,y,z), default the origin.
+_edit tool._ Create a sphere (ball, dome when cut, rounded end). Centered at (x,y,z), default the origin.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -191,7 +73,7 @@ Create a sphere (ball, dome when cut, rounded end). Centered at (x,y,z), default
 
 ### `create_torus`
 
-Create a torus (ring, O-ring seat, donut). Centered at (x,y,z); `major_radius` is the distance from the center to the middle of the tube, `minor_radius` the tube radius (must be smaller). The ring lies perpendicular to `axis` (default z).
+_edit tool._ Create a torus (ring, O-ring seat, donut). Centered at (x,y,z); `major_radius` is the distance from the center to the middle of the tube, `minor_radius` the tube radius (must be smaller). The ring lies perpendicular to `axis` (default z).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -202,59 +84,24 @@ Create a torus (ring, O-ring seat, donut). Centered at (x,y,z); `major_radius` i
 | `y` | number |  | Center Y (mm) |
 | `z` | number |  | Center Z (mm) |
 
-### `define_parameters`
 
-Create or extend a named set of design parameters (numbers in mm or degrees) that control major geometry, e.g. set='vehicle' with length, width, height, wheelbase, front_overhang, roof_height, windshield_angle. Then drive feature parameters from them with bind_parameters (dx = 'vehicle.length'), so later refinement edits one parameter (set_parameter) and every dependent feature regenerates. Prefer this over destructive edits.
+## sketch
 
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `parameters` | object | yes | name → number |
-| `set` | string | yes | Parameter set id, lowercase (e.g. vehicle) |
+### `create_sketch`
 
-### `delete_objects`
-
-Delete the selected objects ('delete this', 'remove the selected part', 'delete these objects') or the listed features, as ONE ChangeSet that can be undone. Faces, edges and vertices cannot be deleted: they belong to a feature, so the call is rejected and names the owning feature — ask the user whether to delete that feature (resolve_owner=true) or modify it instead. If other features depend on the targets the call fails and lists them; retry with cascade=true only when the user accepts deleting them too. Deleting a feature that is an input of another (e.g. a box inside a union) is refused unless cascaded.
+_edit tool._ Create a planar 2D sketch (no solid yet). Entities (mm, plane coordinates u,v): line{p1,p2}, arc{p1,mid,p2}, circle{cx,cy,r}, rectangle{x,y,w,h}, polygon{points}, slot{x1,y1,x2,y2,width}. `regions` group closed loops into faces (outer loop + holes); if omitted every closed entity (circle/rectangle/polygon/slot) is its own region. Place it on plane XY (normal +Z, u=X,v=Y), YZ (normal +X, u=Y,v=Z) or XZ (normal +Y, u=Z,v=X) with `offset`, or on a planar `face` (origin at the face centroid, u along its longest straight edge). Turn regions into material with extrude_sketch.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `cascade` | boolean |  | true also deletes every feature that depends on the targets; without it the call fails when dependents exist |
-| `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
-| `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
-
-### `detach_component`
-
-Replace a component instance with its own local copy of the geometry. After detaching, changes to the component no longer affect it.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `instance` | string | yes | the component instance's feature id |
-
-### `duplicate`
-
-Duplicate bodies: each copy is a linked copy of its source moved by (dx,dy,dz) mm. The source stays as it is; the copy follows later parameter edits of the source. Pass `features` (several ids → one copy each, in one change) or omit it to copy the current selection. The copy keeps the source's appearance and group.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `dx` | number |  | Offset X (mm) |
-| `dy` | number |  | Offset Y (mm) |
-| `dz` | number |  | Offset Z (mm) |
-| `features` | array of string |  | Feature ids to duplicate; omit to use the current selection |
-
-### `extrude_detected_profile`
-
-Extrude / cut / combine the profiles of an interpretation whose sketch already exists (created by create_sketch_from_image). Same operations and rules as create_from_image, without creating the sketch again.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
-| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
-| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
-| `offset` | number |  | Override the plane offset (mm) |
-| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
+| `entities` | array of object | yes | Sketch entities |
+| `face` | string |  | Planar face selector to draw on, e.g. face(feature=plate,side=+Z); overrides plane |
+| `offset` | number |  | Offset along the sketch normal (mm) |
+| `plane` | XY \| XZ \| YZ |  | Sketch plane (XY \| XZ \| YZ) |
+| `regions` | array of object |  | Closed regions (outer loop + holes) |
 
 ### `extrude_profile`
 
-Sketch a planar profile and extrude it, adding material (mode=add, optionally merged into `target`) or cutting (mode=cut, requires `target`). Profiles (plane coordinates u,v = x,y): rectangle{x,y,w,h} (x,y = min corner); circle{x,y,r}; slot{x1,y1,x2,y2,width}; polygon{points:[[u,v],...]}. plane XY has normal +Z (u=X,v=Y), YZ normal +X (u=Y,v=Z), XZ normal +Y (u=Z,v=X); `offset` moves the sketch along the normal. Use through=true for a cut through everything.
+_edit tool._ Sketch a planar profile and extrude it, adding material (mode=add, optionally merged into `target`) or cutting (mode=cut, requires `target`). Profiles (plane coordinates u,v = x,y): rectangle{x,y,w,h} (x,y = min corner); circle{x,y,r}; slot{x1,y1,x2,y2,width}; polygon{points:[[u,v],...]}. plane XY has normal +Z (u=X,v=Y), YZ normal +X (u=Y,v=Z), XZ normal +Y (u=Z,v=X); `offset` moves the sketch along the normal. Use through=true for a cut through everything.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -280,7 +127,7 @@ Sketch a planar profile and extrude it, adding material (mode=add, optionally me
 
 ### `extrude_sketch`
 
-Extrude regions of an existing sketch. mode=add makes a solid (merged into `target` if given); mode=cut removes material from `target` (a cut from a sketch drawn on a face goes into the material). `region` picks one region (default: all). Use through=true for a cut through everything, or symmetric=true to extrude half the depth each way.
+_edit tool._ Extrude regions of an existing sketch. mode=add makes a solid (merged into `target` if given); mode=cut removes material from `target` (a cut from a sketch drawn on a face goes into the material). `region` picks one region (default: all). Use through=true for a cut through everything, or symmetric=true to extrude half the depth each way.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -293,9 +140,69 @@ Extrude regions of an existing sketch. mode=add makes a solid (merged into `targ
 | `target` | string |  | Feature to add to / cut from |
 | `through` | boolean |  | Cut through the entire target |
 
+
+## edit
+
+### `add_hole`
+
+_edit tool._ Drill one or more holes into a feature's face. `positions` are world coordinates [x,y] (or [x,y,z]); the coordinate along the face normal is ignored. Omit positions for one hole at the face center. The face defaults to the top (+Z) of `target`; pass `face` as a selector such as face(feature=plate,side=-X) to drill elsewhere. Omit depth for a through hole. Use kind=counterbore (cb_diameter, cb_depth) or countersink (cs_diameter, optional cs_angle_deg).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `cb_depth` | number > 0 |  | Counterbore depth (mm) |
+| `cb_diameter` | number > 0 |  | Counterbore diameter (mm) |
+| `cs_angle_deg` | number > 0 |  | Countersink included angle (deg), default 90 |
+| `cs_diameter` | number > 0 |  | Countersink outer diameter (mm) |
+| `depth` | number > 0 |  | Blind depth (mm); omit for through |
+| `diameter` | number > 0 | yes | Hole diameter (mm). M3 clearance is 3.2-3.4 |
+| `face` | string |  | Face selector, e.g. face(feature=plate,side=+Z) |
+| `kind` | simple \| counterbore \| countersink |  | Hole style (simple \| counterbore \| countersink) |
+| `positions` | array of array |  | Hole centers in world coordinates |
+| `target` | string |  | Feature id to drill into (required unless face is given) |
+
+### `boolean`
+
+_edit tool._ Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`; op=intersect keeps only the volume shared by both. Both inputs are consumed (they stop appearing as separate bodies).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `op` | union \| subtract \| intersect | yes | Boolean operation (union \| subtract \| intersect) |
+| `target` | string | yes | Feature to keep |
+| `tool` | string | yes | Feature to merge or remove |
+
+### `chamfer`
+
+_edit tool._ Chamfer all edges of a feature with the given distance (mm). Treats every edge of the body unless `edges` lists edge(feature=<target>,index=N) selectors (the user's selected edges), in which case only those.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `distance` | number > 0 | yes | Size (mm) |
+| `edges` | array of string |  | Only these edges: edge(feature=<target>,index=N) selectors from the selection context. Omit for every edge. |
+| `target` | string | yes | Feature to treat |
+
+### `check_delete`
+
+_query tool._ Dry run of delete_objects: reports which features would be deleted, which selected faces/edges/vertices resolve to which owning feature, and which other features depend on the targets. Changes nothing.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `cascade` | boolean |  | true also deletes every feature that depends on the targets; without it the call fails when dependents exist |
+| `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
+| `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
+
+### `delete_objects`
+
+_edit tool._ Delete the selected objects ('delete this', 'remove the selected part', 'delete these objects') or the listed features, as ONE ChangeSet that can be undone. Faces, edges and vertices cannot be deleted: they belong to a feature, so the call is rejected and names the owning feature — ask the user whether to delete that feature (resolve_owner=true) or modify it instead. If other features depend on the targets the call fails and lists them; retry with cascade=true only when the user accepts deleting them too. Deleting a feature that is an input of another (e.g. a box inside a union) is refused unless cascaded.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `cascade` | boolean |  | true also deletes every feature that depends on the targets; without it the call fails when dependents exist |
+| `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
+| `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
+
 ### `face_extrude`
 
-Push/pull a planar face: extrude its exact outline along its outward normal. distance > 0 adds material outward, distance < 0 cuts into the body. Use the selected face's selector as `face`.
+_edit tool._ Push/pull a planar face: extrude its exact outline along its outward normal. distance > 0 adds material outward, distance < 0 cuts into the body. Use the selected face's selector as `face`.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -304,7 +211,7 @@ Push/pull a planar face: extrude its exact outline along its outward normal. dis
 
 ### `face_inset`
 
-Inset a planar face: shrink its outline by `inset` mm from every edge. With `depth` the inset region is raised (depth > 0, a pad) or sunk (depth < 0, a pocket leaving a rim). Without depth the inset outline is imprinted, splitting the face so the inner face can be selected and extruded on its own.
+_edit tool._ Inset a planar face: shrink its outline by `inset` mm from every edge. With `depth` the inset region is raised (depth > 0, a pad) or sunk (depth < 0, a pocket leaving a rim). Without depth the inset outline is imprinted, splitting the face so the inner face can be selected and extruded on its own.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -314,7 +221,7 @@ Inset a planar face: shrink its outline by `inset` mm from every edge. With `dep
 
 ### `face_offset`
 
-Offset a face: move it along its normal by `distance` mm, extending or trimming the faces around it. Works on any face: a planar face moves (like push/pull), a cylindrical face changes radius (positive = outward: a hole gets smaller, a boss bigger).
+_edit tool._ Offset a face: move it along its normal by `distance` mm, extending or trimming the faces around it. Works on any face: a planar face moves (like push/pull), a cylindrical face changes radius (positive = outward: a hole gets smaller, a boss bigger).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -323,7 +230,7 @@ Offset a face: move it along its normal by `distance` mm, extending or trimming 
 
 ### `fillet`
 
-Round all edges of a feature with the given radius (mm). Treats every edge of the body unless `edges` lists edge(feature=<target>,index=N) selectors (the user's selected edges), in which case only those.
+_edit tool._ Round all edges of a feature with the given radius (mm). Treats every edge of the body unless `edges` lists edge(feature=<target>,index=N) selectors (the user's selected edges), in which case only those.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -331,18 +238,276 @@ Round all edges of a feature with the given radius (mm). Treats every edge of th
 | `radius` | number > 0 | yes | Size (mm) |
 | `target` | string | yes | Feature to treat |
 
+### `remove_feature`
+
+_edit tool._ Delete a feature. Fails if other features depend on it; remove or re-point those first.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `feature` | string | yes | Feature id |
+
+### `rename_feature`
+
+_edit tool._ Change a feature's human-readable name (its id does not change).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `feature` | string | yes | Feature id |
+| `name` | string | yes | New name |
+
+### `suppress_feature`
+
+_edit tool._ Suppress or unsuppress a feature. A suppressed modifying feature (hole, fillet, ...) passes its target through unchanged.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `feature` | string | yes | Feature id |
+| `suppressed` | boolean | yes | true to suppress, false to restore |
+
+
+## transform
+
+### `align`
+
+_edit tool._ Align bodies along one or more axes by moving them (each moved body gets a transform feature). mode min/center/max aligns the bodies' bounding-box minimum, center or maximum. to=first (default with 2+ bodies): to the first listed body, which stays put; to=selection: to the bounds of all listed bodies; to=origin (default with 1 body): to the world plane through 0 (e.g. axes=[z], mode=min puts a part on the floor; axes=[x,y], mode=center centers it). `reference` names a body that stays put instead. Omit `features` to use the current selection.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `axes` | array of x \| y \| z | yes | Axes to align along |
+| `features` | array of string |  | Bodies to align; omit to use the current selection |
+| `mode` | min \| center \| max |  | Which side of the bounding boxes to align (min \| center \| max) |
+| `reference` | string |  | Optional body that stays put and is aligned to |
+| `to` | first \| selection \| origin |  | What to align to (first \| selection \| origin) |
+
+### `circular_pattern`
+
+_edit tool._ Repeat a hole or extrude-cut feature around an axis through (cx,cy,cz). count is the total number of instances; total_angle_deg defaults to 360 (evenly around the circle).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `axis` | x \| y \| z |  | Axis direction (x \| y \| z) |
+| `count` | integer ≥ 2 ≤ 500 | yes | Total instances including the original |
+| `cx` | number |  | Axis point X (mm) |
+| `cy` | number |  | Axis point Y (mm) |
+| `cz` | number |  | Axis point Z (mm) |
+| `source` | string | yes | Id of the hole/extrude feature to repeat |
+| `total_angle_deg` | number > 0 |  | Angular span (deg), default 360 |
+
+### `duplicate`
+
+_edit tool._ Duplicate bodies: each copy is a linked copy of its source moved by (dx,dy,dz) mm. The source stays as it is; the copy follows later parameter edits of the source. Pass `features` (several ids → one copy each, in one change) or omit it to copy the current selection. The copy keeps the source's appearance and group.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `dx` | number |  | Offset X (mm) |
+| `dy` | number |  | Offset Y (mm) |
+| `dz` | number |  | Offset Z (mm) |
+| `features` | array of string |  | Feature ids to duplicate; omit to use the current selection |
+
+### `get_object_dimensions`
+
+_query tool._ Measure an object: width, depth and height in mm along its local X, Y and Z axes (Z up; the axes follow the object's own rotation), its local axes, box, center, origin and whether proportional scaling is locked. Use it to check a resize.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+
+### `get_object_transform`
+
+_query tool._ Where an object is: its origin and box center (world mm), its orientation (local axes and one rotation axis/angle in degrees), whether it can be moved now (and why not) and how a move is recorded (a transform feature, or a component instance's placement). Use it before an absolute move or to pick a rotation pivot.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+
 ### `group`
 
-Put features/bodies into a named group in the design tree (organization only; geometry is not rebuilt). Omit `features` to group the current selection. Grouping features that are already in a group moves them; reusing an existing group name adds to that group (also how a group is renamed: regroup all its members under the new name).
+_edit tool._ Put features/bodies into a named group in the design tree (organization only; geometry is not rebuilt). Omit `features` to group the current selection. Grouping features that are already in a group moves them; reusing an existing group name adds to that group (also how a group is renamed: regroup all its members under the new name).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 | `name` | string | yes | Group name |
 
+### `linear_pattern`
+
+_edit tool._ Repeat a hole or extrude-cut feature `count` times in total, each copy offset by (dx,dy,dz) mm from the previous.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `count` | integer ≥ 2 ≤ 500 | yes | Total instances including the original |
+| `dx` | number |  | Spacing along X (mm) |
+| `dy` | number |  | Spacing along Y (mm) |
+| `dz` | number |  | Spacing along Z (mm) |
+| `source` | string | yes | Id of the hole/extrude feature to repeat |
+
+### `mirror`
+
+_edit tool._ Mirror a feature across a coordinate plane (XY, XZ or YZ, shifted by `offset` along its normal) and merge the copy with the original.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `offset` | number |  | Plane offset along its normal (mm) |
+| `plane` | XY \| XZ \| YZ | yes | Mirror plane (XY \| XZ \| YZ) |
+| `target` | string | yes | Feature to mirror |
+
+### `move_object`
+
+_edit tool._ Move one object in world coordinates, as one undoable change. Relative: dx/dy/dz ('move it 20 mm along X' → dx=20). Absolute: x/y/z place the object's origin there ('move it to X=100, Y=50' → x=100, y=50; omitted axes stay). Don't mix both on one axis. Values are in `unit` (default mm). snap=true applies the project's grid/translation snapping to the moved axes. A component instance's placement is updated; the component itself never changes. Omit object_id to move the selected object.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `dx` | number |  | Move along X |
+| `dy` | number |  | Move along Y |
+| `dz` | number |  | Move along Z |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+| `snap` | boolean |  | Apply the project's snapping settings (grid / translation increment, or the rotation increment); only when snapping is enabled |
+| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
+| `x` | number |  | Absolute X of the object's origin |
+| `y` | number |  | Absolute Y of the object's origin |
+| `z` | number |  | Absolute Z of the object's origin |
+
+### `resize_object`
+
+_edit tool._ Resize an object to the given width/depth/height in mm (local X/Y/Z); dimensions you omit keep their size. With a single dimension and Lock Proportions on, the other two follow proportionally. Non-parametric (a scale of the body).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `anchor` | center \| object_origin |  | Fixed point of the resize: center (default, the center of the object's box) or object_origin (the object's own origin, e.g. a box's placement corner) (center \| object_origin) |
+| `depth` | number > 0 |  | New depth in mm (local Y) |
+| `height` | number > 0 |  | New height in mm (local Z) |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+| `width` | number > 0 |  | New width in mm (local X) |
+
+### `rotate_object`
+
+_edit tool._ Rotate one object about a world axis, as one undoable change ('rotate it 45 degrees around Z' → angle=45, axis=z). `angle` is in angle_unit (default deg; positive = counter-clockwise looking down the axis). axis defaults to the normal of the workspace grid plane. pivot: origin (default, the object's own origin), center (its box center) or point (`point`, in `unit`). snap=true snaps the angle to the rotation increment. A component instance's placement is updated; the component itself never changes. Omit object_id to rotate the selected object.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `angle` | number | yes | Rotation angle |
+| `angle_unit` | deg \| rad |  | Unit of the angles given in this call; default deg (deg \| rad) |
+| `axis` | x \| y \| z |  | World axis to rotate about; default: the grid plane's normal (x \| y \| z) |
+| `axis_vector` | array of number |  | A point or vector [x, y, z] |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+| `pivot` | origin \| center \| point |  | Fixed point of the rotation (origin \| center \| point) |
+| `point` | array of number |  | A point or vector [x, y, z] |
+| `snap` | boolean |  | Apply the project's snapping settings (grid / translation increment, or the rotation increment); only when snapping is enabled |
+| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
+
+### `scale`
+
+_edit tool._ Scale a body. Give `factor` for uniform scaling (2 = twice as big, 0.5 = half) or per-axis sx/sy/sz (each defaults to `factor`, else 1). `about` is the fixed point: center (default, the bounding-box center), base (center of the bottom face, keeps a part on the print bed), origin, or point (ox,oy,oz). Passing ox/oy/oz is enough — it means about=point. With about=center/base/origin they are not used, because those compute the fixed point from the body. Non-uniform scaling turns cylinders and other analytic faces into free-form surfaces.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `about` | center \| base \| origin \| point |  | Fixed point of the scaling; defaults to point when ox/oy/oz are given, else center. It wins over ox/oy/oz (center \| base \| origin \| point) |
+| `factor` | number > 0 |  | Uniform scale factor |
+| `ox` | number |  | Fixed point X; giving it implies about=point. Omit it unless you want that anchor |
+| `oy` | number |  | Fixed point Y; giving it implies about=point. Omit it unless you want that anchor |
+| `oz` | number |  | Fixed point Z; giving it implies about=point. Omit it unless you want that anchor |
+| `sx` | number > 0 |  | Scale factor along X |
+| `sy` | number > 0 |  | Scale factor along Y |
+| `sz` | number > 0 |  | Scale factor along Z |
+| `target` | string | yes | Visible body to scale |
+
+### `set_object_dimension`
+
+_edit tool._ Set one dimension of an object (e.g. 'make it 150 mm wide'). Only that dimension changes, unless the object has proportional scaling locked (then the other two follow; `proportional` overrides the lock for this call). Non-parametric: the body is scaled along its local axis, so a cylinder resized across its axis becomes elliptical, and holes or wall thicknesses scale with it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `anchor` | center \| object_origin |  | Fixed point of the resize: center (default, the center of the object's box) or object_origin (the object's own origin, e.g. a box's placement corner) (center \| object_origin) |
+| `axis` | width \| depth \| height \| x \| y \| z | yes | Which dimension: width (local X), depth (local Y) or height (local Z); x/y/z are accepted (width \| depth \| height \| x \| y \| z) |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+| `proportional` | boolean |  | Scale the other two dimensions proportionally; defaults to the object's Lock Proportions setting |
+| `value` | number > 0 | yes | New size in mm |
+
+### `set_object_proportional_scaling`
+
+_edit tool._ Turn Lock Proportions on or off for an object: when on, changing one of its dimensions scales the other two by the same factor. An editing preference stored with the object; it never changes geometry.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Lock proportions |
+| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
+
+### `transform`
+
+_edit tool._ Move and/or rotate a feature: rotation by angle_deg about the axis (ax,ay,az) through (ox,oy,oz) is applied first, then translation by (dx,dy,dz).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `angle_deg` | number |  | Rotation angle (deg) |
+| `ax` | number |  | Rotation axis X, default 0 |
+| `ay` | number |  | Rotation axis Y, default 0 |
+| `az` | number |  | Rotation axis Z, default 1 |
+| `dx` | number |  | Translate X (mm) |
+| `dy` | number |  | Translate Y (mm) |
+| `dz` | number |  | Translate Z (mm) |
+| `ox` | number |  | Rotation origin X |
+| `oy` | number |  | Rotation origin Y |
+| `oz` | number |  | Rotation origin Z |
+| `target` | string | yes | Feature to transform |
+
+### `ungroup`
+
+_edit tool._ Remove features from their group (organization only). Give `group` to dissolve a whole group, or `features`; omit both to ungroup the current selection.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+| `group` | string |  | Name of a group to dissolve |
+
+
+## parametric
+
+### `modify_parameter`
+
+_edit tool._ Change one parameter of an existing feature (e.g. plate dz from 4 to 5 mm). If the parameter was driven by an expression, the expression is replaced by the literal value.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `feature` | string | yes | Feature id |
+| `intent` | string |  | Why, in natural language |
+| `parameter` | string | yes | Parameter name, e.g. dz, diameter, count |
+| `value` | any | yes | New value (number, string, or boolean) |
+
+### `set_expression`
+
+_edit tool._ Drive a numeric parameter by an expression over other features' parameters, e.g. depth = 'plate.dz * 0.5'. Syntax: numbers, + - * / ^, parentheses, pi, sin cos tan sqrt abs min max round, and feature.parameter references. Omit `expression` to clear it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `expression` | string |  | Expression, or omit to clear |
+| `feature` | string | yes | Feature id |
+| `parameter` | string | yes | Parameter name |
+
+
+## components
+
+### `create_component`
+
+_edit tool._ Turn the selected features (or the ones named in `features`) into a reusable component: they move into a new reusable project and are replaced in place by a single instance that references it. The selection must be self-contained — nothing outside it may depend on it, and it may not depend on anything outside.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `description` | string |  | what the component is for |
+| `features` | array of string |  | feature ids to move into the component (default: the selection) |
+| `name` | string | yes | the component's name |
+| `tags` | array of string |  | tags to find the component by |
+
+### `detach_component`
+
+_edit tool._ Replace a component instance with its own local copy of the geometry. After detaching, changes to the component no longer affect it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `instance` | string | yes | the component instance's feature id |
+
 ### `insert_component`
 
-Place an instance of a library component in the current project. Call it once per instance.
+_edit tool._ Place an instance of a library component in the current project. Call it once per instance.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -361,162 +526,99 @@ Place an instance of a library component in the current project. Call it once pe
 | `sy` | number > 0 |  | scale along Y (default 1) |
 | `sz` | number > 0 |  | scale along Z (default 1) |
 
-### `linear_pattern`
+### `list_components`
 
-Repeat a hole or extrude-cut feature `count` times in total, each copy offset by (dx,dy,dz) mm from the previous.
+_query tool._ List the reusable components in the library. A component is a project saved as reusable; insert_component places a reference to one in the current project.
 
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `count` | integer ≥ 2 ≤ 500 | yes | Total instances including the original |
-| `dx` | number |  | Spacing along X (mm) |
-| `dy` | number |  | Spacing along Y (mm) |
-| `dz` | number |  | Spacing along Z (mm) |
-| `source` | string | yes | Id of the hole/extrude feature to repeat |
+_No arguments._
 
-### `mirror`
+### `open_component`
 
-Mirror a feature across a coordinate plane (XY, XZ or YZ, shifted by `offset` along its normal) and merge the copy with the original.
+_query tool._ Look up one component and return its details and project path. It does not switch projects: opening a component for editing is something the user does in the Components panel.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `offset` | number |  | Plane offset along its normal (mm) |
-| `plane` | XY \| XZ \| YZ | yes | Mirror plane (XY \| XZ \| YZ) |
-| `target` | string | yes | Feature to mirror |
+| `component` | string | yes | the component's project id or name |
 
-### `modify_parameter`
+### `search_components`
 
-Change one parameter of an existing feature (e.g. plate dz from 4 to 5 mm). If the parameter was driven by an expression, the expression is replaced by the literal value.
+_query tool._ Search the component library by name, description or tag.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `feature` | string | yes | Feature id |
-| `intent` | string |  | Why, in natural language |
-| `parameter` | string | yes | Parameter name, e.g. dz, diameter, count |
-| `value` | any | yes | New value (number, string, or boolean) |
+| `query` | string | yes | text to look for |
 
-### `move_object`
+### `sync_component`
 
-Move one object in world coordinates, as one undoable change. Relative: dx/dy/dz ('move it 20 mm along X' → dx=20). Absolute: x/y/z place the object's origin there ('move it to X=100, Y=50' → x=100, y=50; omitted axes stay). Don't mix both on one axis. Values are in `unit` (default mm). snap=true applies the project's grid/translation snapping to the moved axes. A component instance's placement is updated; the component itself never changes. Omit object_id to move the selected object.
+_edit tool._ Re-pin component instances to the current state of their component, after the component was edited. With no arguments it syncs every instance that has fallen behind.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `dx` | number |  | Move along X |
-| `dy` | number |  | Move along Y |
-| `dz` | number |  | Move along Z |
-| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
-| `snap` | boolean |  | Apply the project's snapping settings (grid / translation increment, or the rotation increment); only when snapping is enabled |
-| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
-| `x` | number |  | Absolute X of the object's origin |
-| `y` | number |  | Absolute Y of the object's origin |
-| `z` | number |  | Absolute Z of the object's origin |
+| `instances` | array of string |  | instance feature ids to sync (default: all out-of-date instances) |
 
-### `remove_feature`
 
-Delete a feature. Fails if other features depend on it; remove or re-point those first.
+## appearance
+
+### `get_appearance`
+
+_query tool._ Read the appearance (color, opacity, visible) of features. Omit `features` to list all overridden ones.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `feature` | string | yes | Feature id |
+| `features` | array of string |  | Feature ids to change; omit to use the current selection |
+
+### `get_material`
+
+_query tool._ Read one library material's properties (color, metalness, roughness, opacity, tags, license).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `material_id` | string | yes | Material id |
+
+### `list_materials`
+
+_query tool._ List the visual materials in the library (built-in plus project materials), optionally for one category (Metals, Plastics, Rubber, Carbon Fiber, Glass, Electronics, Wood, Generic).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `category` | string |  | Category filter, optional |
 
 ### `remove_material`
 
-Remove the visual material from features/bodies (color/opacity overrides stay). Defaults to the current selection.
+_edit tool._ Remove the visual material from features/bodies (color/opacity overrides stay). Defaults to the current selection.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
-
-### `rename_feature`
-
-Change a feature's human-readable name (its id does not change).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `feature` | string | yes | Feature id |
-| `name` | string | yes | New name |
 
 ### `reset_appearance`
 
-Reset color, opacity and visibility of features/bodies to their defaults. Defaults to the current selection.
+_edit tool._ Reset color, opacity and visibility of features/bodies to their defaults. Defaults to the current selection.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 
-### `resize_object`
+### `search_materials`
 
-Resize an object to the given width/depth/height in mm (local X/Y/Z); dimensions you omit keep their size. With a single dimension and Lock Proportions on, the other two follow proportionally. Non-parametric (a scale of the body).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `anchor` | center \| object_origin |  | Fixed point of the resize: center (default, the center of the object's box) or object_origin (the object's own origin, e.g. a box's placement corner) (center \| object_origin) |
-| `depth` | number > 0 |  | New depth in mm (local Y) |
-| `height` | number > 0 |  | New height in mm (local Z) |
-| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
-| `width` | number > 0 |  | New width in mm (local X) |
-
-### `restore_checkpoint`
-
-Return the model to an earlier semantic checkpoint, given by id (cp_002), number, 'previous', or part of its label (e.g. 'before we reinforced the shoulder' means the checkpoint preceding the one labelled 'Reinforced shoulder'). Use get_model_summary to list checkpoints.
+_query tool._ Search materials by free text (e.g. 'metallic', 'black plastic', 'brushed aluminum'). Returns up to 5 ranked candidates; when `ambiguous` is true, show the options to the user instead of choosing one.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `checkpoint` | string | yes | Checkpoint id, number, 'previous', or label text |
-
-### `rotate_object`
-
-Rotate one object about a world axis, as one undoable change ('rotate it 45 degrees around Z' → angle=45, axis=z). `angle` is in angle_unit (default deg; positive = counter-clockwise looking down the axis). axis defaults to the normal of the workspace grid plane. pivot: origin (default, the object's own origin), center (its box center) or point (`point`, in `unit`). snap=true snaps the angle to the rotation increment. A component instance's placement is updated; the component itself never changes. Omit object_id to rotate the selected object.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `angle` | number | yes | Rotation angle |
-| `angle_unit` | deg \| rad |  | Unit of the angles given in this call; default deg (deg \| rad) |
-| `axis` | x \| y \| z |  | World axis to rotate about; default: the grid plane's normal (x \| y \| z) |
-| `axis_vector` | array of number |  | A point or vector [x, y, z] |
-| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
-| `pivot` | origin \| center \| point |  | Fixed point of the rotation (origin \| center \| point) |
-| `point` | array of number |  | A point or vector [x, y, z] |
-| `snap` | boolean |  | Apply the project's snapping settings (grid / translation increment, or the rotation increment); only when snapping is enabled |
-| `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
-
-### `scale`
-
-Scale a body. Give `factor` for uniform scaling (2 = twice as big, 0.5 = half) or per-axis sx/sy/sz (each defaults to `factor`, else 1). `about` is the fixed point: center (default, the bounding-box center), base (center of the bottom face, keeps a part on the print bed), origin, or point (ox,oy,oz). Passing ox/oy/oz is enough — it means about=point. With about=center/base/origin they are not used, because those compute the fixed point from the body. Non-uniform scaling turns cylinders and other analytic faces into free-form surfaces.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `about` | center \| base \| origin \| point |  | Fixed point of the scaling; defaults to point when ox/oy/oz are given, else center. It wins over ox/oy/oz (center \| base \| origin \| point) |
-| `factor` | number > 0 |  | Uniform scale factor |
-| `ox` | number |  | Fixed point X; giving it implies about=point. Omit it unless you want that anchor |
-| `oy` | number |  | Fixed point Y; giving it implies about=point. Omit it unless you want that anchor |
-| `oz` | number |  | Fixed point Z; giving it implies about=point. Omit it unless you want that anchor |
-| `sx` | number > 0 |  | Scale factor along X |
-| `sy` | number > 0 |  | Scale factor along Y |
-| `sz` | number > 0 |  | Scale factor along Z |
-| `target` | string | yes | Visible body to scale |
+| `query` | string | yes | What the material should look like or be called |
 
 ### `set_color`
 
-Set the display color of one or more features/bodies (e.g. 'make the bracket red'). Presentation only; does not change geometry. Defaults to the current selection when `features` is omitted.
+_edit tool._ Set the display color of one or more features/bodies (e.g. 'make the bracket red'). Presentation only; does not change geometry. Defaults to the current selection when `features` is omitted.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `color` | string | yes | Color as #RRGGBB hex |
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 
-### `set_expression`
-
-Drive a numeric parameter by an expression over other features' parameters, e.g. depth = 'plate.dz * 0.5'. Syntax: numbers, + - * / ^, parentheses, pi, sin cos tan sqrt abs min max round, and feature.parameter references. Omit `expression` to clear it.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `expression` | string |  | Expression, or omit to clear |
-| `feature` | string | yes | Feature id |
-| `parameter` | string | yes | Parameter name |
-
 ### `set_material`
 
-Assign a visual material (e.g. brushed_aluminum, black_abs, stainless_steel, carbon_fiber, clear_glass) to features/bodies. Presentation only; does not change geometry or engineering properties. Defaults to the current selection. If the user's wording could match several materials, call search_materials first and offer the options instead of guessing.
+_edit tool._ Assign a visual material (e.g. brushed_aluminum, black_abs, stainless_steel, carbon_fiber, clear_glass) to features/bodies. Presentation only; does not change geometry or engineering properties. Defaults to the current selection. If the user's wording could match several materials, call search_materials first and offer the options instead of guessing.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -526,153 +628,37 @@ Assign a visual material (e.g. brushed_aluminum, black_abs, stainless_steel, car
 
 ### `set_material_scale`
 
-Set the texture scale multiplier (>0; 1 = the material's natural scale) of features/bodies. Presentation only.
+_edit tool._ Set the texture scale multiplier (>0; 1 = the material's natural scale) of features/bodies. Presentation only.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 | `scale` | number | yes | Texture scale multiplier, > 0 |
 
-### `set_object_dimension`
-
-Set one dimension of an object (e.g. 'make it 150 mm wide'). Only that dimension changes, unless the object has proportional scaling locked (then the other two follow; `proportional` overrides the lock for this call). Non-parametric: the body is scaled along its local axis, so a cylinder resized across its axis becomes elliptical, and holes or wall thicknesses scale with it.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `anchor` | center \| object_origin |  | Fixed point of the resize: center (default, the center of the object's box) or object_origin (the object's own origin, e.g. a box's placement corner) (center \| object_origin) |
-| `axis` | width \| depth \| height \| x \| y \| z | yes | Which dimension: width (local X), depth (local Y) or height (local Z); x/y/z are accepted (width \| depth \| height \| x \| y \| z) |
-| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
-| `proportional` | boolean |  | Scale the other two dimensions proportionally; defaults to the object's Lock Proportions setting |
-| `value` | number > 0 | yes | New size in mm |
-
-### `set_object_proportional_scaling`
-
-Turn Lock Proportions on or off for an object: when on, changing one of its dimensions scales the other two by the same factor. An editing preference stored with the object; it never changes geometry.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `enabled` | boolean | yes | Lock proportions |
-| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
-
 ### `set_opacity`
 
-Set display opacity (0 = invisible, 1 = opaque; ~0.5 for 'semi-transparent') of features/bodies. Presentation only. Defaults to the current selection.
+_edit tool._ Set display opacity (0 = invisible, 1 = opaque; ~0.5 for 'semi-transparent') of features/bodies. Presentation only. Defaults to the current selection.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 | `opacity` | number | yes | Opacity 0..1 |
 
-### `set_parameter`
-
-Change one design parameter (name, or set.name when several sets have it); every feature bound to it regenerates. This is the preferred way to correct proportions during visual refinement (e.g. roof_height 1020, windshield_angle 26).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | Parameter name or set.name |
-| `value` | number | yes | New value |
-
 ### `set_visibility`
 
-Show or hide features/bodies in the viewport (e.g. 'hide the reference servo'). Hidden objects still exist and are still exported. Defaults to the current selection.
+_edit tool._ Show or hide features/bodies in the viewport (e.g. 'hide the reference servo'). Hidden objects still exist and are still exported. Defaults to the current selection.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `features` | array of string |  | Feature ids to change; omit to use the current selection |
 | `visible` | boolean | yes | true to show, false to hide |
 
-### `suppress_feature`
 
-Suppress or unsuppress a feature. A suppressed modifying feature (hole, fillet, ...) passes its target through unchanged.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `feature` | string | yes | Feature id |
-| `suppressed` | boolean | yes | true to suppress, false to restore |
-
-### `sync_component`
-
-Re-pin component instances to the current state of their component, after the component was edited. With no arguments it syncs every instance that has fallen behind.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `instances` | array of string |  | instance feature ids to sync (default: all out-of-date instances) |
-
-### `transform`
-
-Move and/or rotate a feature: rotation by angle_deg about the axis (ax,ay,az) through (ox,oy,oz) is applied first, then translation by (dx,dy,dz).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `angle_deg` | number |  | Rotation angle (deg) |
-| `ax` | number |  | Rotation axis X, default 0 |
-| `ay` | number |  | Rotation axis Y, default 0 |
-| `az` | number |  | Rotation axis Z, default 1 |
-| `dx` | number |  | Translate X (mm) |
-| `dy` | number |  | Translate Y (mm) |
-| `dz` | number |  | Translate Z (mm) |
-| `ox` | number |  | Rotation origin X |
-| `oy` | number |  | Rotation origin Y |
-| `oz` | number |  | Rotation origin Z |
-| `target` | string | yes | Feature to transform |
-
-### `ungroup`
-
-Remove features from their group (organization only). Give `group` to dissolve a whole group, or `features`; omit both to ungroup the current selection.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `features` | array of string |  | Feature ids to change; omit to use the current selection |
-| `group` | string |  | Name of a group to dissolve |
-
-
-## Query tools (no model change)
-
-### `analyze_image`
-
-Record what you see in an attached image as a structured sketch proposal (this does NOT change the model). Use image pixel coordinates (x right, y DOWN). Group primitives into closed `profiles` (outer loop + holes). Put every dimension you can read in `dimensions` with its value in mm and a confidence; add dimensions you still need as source=missing (overall width/height, thickness as kind=depth). Never invent a value or infer real size from pixels. The result says what is missing; ask the user only for that.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `confidence` | number ≥ 0 | yes | Overall confidence 0..1 |
-| `description` | string |  | One short sentence describing what you see (display only; not geometry) |
-| `dimensions` | array of object |  | Dimensions: ones written on the drawing (with value in mm) and ones that are still missing (no value, source=missing) |
-| `entities` | array of object | yes | Detected primitives in image pixels (x right, y DOWN) |
-| `image_id` | string | yes | Id of the attached image |
-| `image_size` | array of number > 0 | yes | [width,height] of the image in pixels |
-| `operations` | array of object |  | How profiles combine into solids, in order (optional; default: extrude every profile by the depth dimension) |
-| `placement` | object |  |  |
-| `profiles` | array of object | yes | Closed regions: an outer loop of entity ids plus inner loops (holes/cutouts) |
-| `relationships` | array of object |  | Detected relations |
-
-### `calibrate_reference_image`
-
-Read or manually set the camera of a reference image (azimuth 0=front, 90=left side, 180=rear, 270=right; elevation 90=top; projection orthographic|perspective; scale). With only image_id it returns the current calibration; giving values stores a manual calibration that automatic analysis will not overwrite.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `azimuth` | number |  | Degrees |
-| `elevation` | number |  | Degrees |
-| `focal_length_mm` | number |  | 35 mm-equivalent focal length (perspective) |
-| `image_id` | string | yes | Reference image id |
-| `mirrored` | boolean |  | The object faces the other way |
-| `projection` | orthographic \| perspective |  | Projection (orthographic \| perspective) |
-| `scale` | number |  | Relative scale, default 1 |
-| `view` | left \| right \| front \| rear \| top \| front_3q \| rear_3q \| other |  | View label (left \| right \| front \| rear \| top \| front_3q \| rear_3q \| other) |
-
-### `check_delete`
-
-Dry run of delete_objects: reports which features would be deleted, which selected faces/edges/vertices resolve to which owning feature, and which other features depend on the targets. Changes nothing.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `cascade` | boolean |  | true also deletes every feature that depends on the targets; without it the call fails when dependents exist |
-| `features` | array of string |  | Feature ids to delete; omit to delete the current selection |
-| `resolve_owner` | boolean |  | When faces/edges/vertices are selected: true deletes the feature that owns them. Topology itself is never edited; without this they are rejected with an explanation. |
+## workspace
 
 ### `configure_grid`
 
-Configure the viewport reference grid: show or hide it (visible), enable or disable it as a spatial reference (enabled), its plane (XY, XZ, YZ), spacing between lines, major line interval (in cells), extent (side of the square grid) and origin. 'Set the grid spacing to 5 millimeters' → spacing=5, unit=mm; 'hide the grid' → visible=false. The grid is a visual reference, never geometry. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
+_query tool._ Configure the viewport reference grid: show or hide it (visible), enable or disable it as a spatial reference (enabled), its plane (XY, XZ, YZ), spacing between lines, major line interval (in cells), extent (side of the square grid) and origin. 'Set the grid spacing to 5 millimeters' → spacing=5, unit=mm; 'hide the grid' → visible=false. The grid is a visual reference, never geometry. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -687,7 +673,7 @@ Configure the viewport reference grid: show or hide it (visible), enable or disa
 
 ### `configure_snapping`
 
-Configure snapping (the settings future interactive moves and rotations will use). enabled is the master switch; grid, translation and rotation say which kinds of snapping are available. 'Enable snapping every 10 millimeters' → enabled=true, translation=true, translation_increment=10, unit=mm. 'Set rotation snapping to 45 degrees' → enabled=true, rotation=true, rotation_increment=45. translation_increment_from_grid=true makes the translation increment follow the grid spacing again. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
+_query tool._ Configure snapping (the settings future interactive moves and rotations will use). enabled is the master switch; grid, translation and rotation say which kinds of snapping are available. 'Enable snapping every 10 millimeters' → enabled=true, translation=true, translation_increment=10, unit=mm. 'Set rotation snapping to 45 degrees' → enabled=true, rotation=true, rotation_increment=45. translation_increment_from_grid=true makes the translation increment follow the grid spacing again. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -701,19 +687,9 @@ Configure snapping (the settings future interactive moves and rotations will use
 | `translation_increment_from_grid` | boolean |  | true: the translation increment is the grid spacing |
 | `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
 
-### `confirm_detected_dimension`
-
-Record the user's answer about a dimension: confirm the detected value, or give the corrected value in mm (then it is trusted). Use this for 'it is 80 mm wide', 'yes that 12 is right', 'make this dimension 40 mm'.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `dimension` | string | yes | Dimension id |
-| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
-| `value` | number > 0 |  | Value in mm; omit to confirm the detected value |
-
 ### `convert_units`
 
-Convert a length (mm, cm, m, in, ft) or an angle (deg, rad) between units with the application's conversion table. Use it for user values in other units before passing them to tools, which take mm (lengths) and degrees (angles).
+_query tool._ Convert a length (mm, cm, m, in, ft) or an angle (deg, rad) between units with the application's conversion table. Use it for user values in other units before passing them to tools, which take mm (lengths) and degrees (angles).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -721,188 +697,32 @@ Convert a length (mm, cm, m, in, ft) or an angle (deg, rad) between units with t
 | `to` | mm \| cm \| m \| in \| ft \| deg \| rad | yes | Target unit (mm \| cm \| m \| in \| ft \| deg \| rad) |
 | `value` | number | yes | Value to convert |
 
-### `define_region`
-
-Declare which CAD objects and design parameters shape a visual region (e.g. 'roof' → objects [roof, cabin], parameters [vehicle.roof_height]). The vision critic reports errors per region, so regions make its corrections actionable. Redefining a region keeps its lock.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | Region name, e.g. roof, front_hood, wheels |
-| `objects` | array of string |  | Feature ids |
-| `parameters` | array of string |  | Design parameters (set.name) |
-
-### `export_step`
-
-Export the current model to a STEP file at `path` (does not change the model).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `path` | string | yes | Output file path, e.g. out/plate.step |
-
-### `export_stl`
-
-Export the current model to a binary STL file at `path` for 3D printing (does not change the model).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `deflection_mm` | number > 0 |  | Mesh deflection in mm (default 0.05) |
-| `path` | string | yes | Output file path, e.g. out/plate.stl |
-
-### `get_appearance`
-
-Read the appearance (color, opacity, visible) of features. Omit `features` to list all overridden ones.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `features` | array of string |  | Feature ids to change; omit to use the current selection |
-
-### `get_material`
-
-Read one library material's properties (color, metalness, roughness, opacity, tags, license).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `material_id` | string | yes | Material id |
-
-### `get_model_summary`
-
-Describe the current model: every feature (id, type, key parameters, status), bounding boxes and volumes of the resulting bodies, and recent checkpoints. Call this before editing an unfamiliar model.
-
-_No arguments._
-
-### `get_object_dimensions`
-
-Measure an object: width, depth and height in mm along its local X, Y and Z axes (Z up; the axes follow the object's own rotation), its local axes, box, center, origin and whether proportional scaling is locked. Use it to check a resize.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
-
-### `get_object_transform`
-
-Where an object is: its origin and box center (world mm), its orientation (local axes and one rotation axis/angle in degrees), whether it can be moved now (and why not) and how a move is recorded (a transform feature, or a component instance's placement). Use it before an absolute move or to pick a rotation pivot.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `object_id` | string |  | Visible body (feature id). Omit it to use the selected object. |
-
-### `get_sketch_proposal`
-
-Read an interpretation's current proposal and its validation report (missing / unconfirmed dimensions, ambiguities, errors).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
-
-### `get_visual_state`
-
-Describe the visual refinement state: references (view, calibration, landmarks), reference proportions, regions and locks, design parameters, current stage and the latest scores.
-
-_No arguments._
-
 ### `get_workspace_settings`
 
-Read the project's workspace settings: display units (linear mm/cm/m/in/ft, angular deg/rad, decimal precision), the reference grid (visibility, plane, spacing, major line interval, extent, origin) and snapping (enabled, grid/translation/rotation, increments). Also returns the global defaults new projects start with. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
+_query tool._ Read the project's workspace settings: display units (linear mm/cm/m/in/ft, angular deg/rad, decimal precision), the reference grid (visibility, plane, spacing, major line interval, extent, origin) and snapping (enabled, grid/translation/rotation, increments). Also returns the global defaults new projects start with. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
 
 _No arguments._
-
-### `list_components`
-
-List the reusable components in the library. A component is a project saved as reusable; insert_component places a reference to one in the current project.
-
-_No arguments._
-
-### `list_materials`
-
-List the visual materials in the library (built-in plus project materials), optionally for one category (Metals, Plastics, Rubber, Carbon Fiber, Glass, Electronics, Wood, Generic).
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `category` | string |  | Category filter, optional |
-
-### `lock_region`
-
-Lock a region whose geometry is already correct: its objects and parameters cannot be modified (appearance still can) until unlock_region.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | Region name |
-
-### `measure_distance`
-
-Measure between two things. Each of `from`/`to` is a selector like face(feature=plate,side=+Z) / body(feature=plate) or a bare feature id (= its body). For two parallel faces the result is the perpendicular gap; otherwise the distance between centroids. Also returns the minimum gap between the bounding boxes.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `from` | string | yes | Selector or feature id |
-| `to` | string | yes | Selector or feature id |
-
-### `open_component`
-
-Look up one component and return its details and project path. It does not switch projects: opening a component for editing is something the user does in the Components panel.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `component` | string | yes | the component's project id or name |
-
-### `render_model`
-
-Render the current model offscreen from fixed cameras (left, right, front, rear, top orthographic; front_3q, rear_3q perspective). mode=shaded for appearance, silhouette for a binary mask (object white, background black). Returns render ids; when references exist, each matching view also gets its silhouette score. Never assume the model looks right without rendering it.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `mode` | shaded \| silhouette |  | Render mode (default shaded) (shaded \| silhouette) |
-| `resolution` | array of integer ≥ 64 ≤ 2048 |  | [width, height], default [1024, 1024] |
-| `views` | array of left \| right \| front \| rear \| top \| front_3q \| rear_3q |  | Default: left, front, top, front_3q |
 
 ### `restore_workspace_defaults`
 
-Restore the project's workspace settings (all, or one section: units, grid, snap) to the user's global defaults (source=global, the default) or to the factory defaults (source=factory: mm, degrees, 10 mm XY grid, snapping off). Geometry is unchanged.
+_query tool._ Restore the project's workspace settings (all, or one section: units, grid, snap) to the user's global defaults (source=global, the default) or to the factory defaults (source=factory: mm, degrees, 10 mm XY grid, snapping off). Geometry is unchanged.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `section` | all \| units \| grid \| snap |  | What to restore; default all (all \| units \| grid \| snap) |
 | `source` | global \| factory |  | Which defaults; default global (global \| factory) |
 
-### `search_components`
-
-Search the component library by name, description or tag.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `query` | string | yes | text to look for |
-
-### `search_materials`
-
-Search materials by free text (e.g. 'metallic', 'black plastic', 'brushed aluminum'). Returns up to 5 ranked candidates; when `ambiguous` is true, show the options to the user instead of choosing one.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `query` | string | yes | What the material should look like or be called |
-
 ### `set_mesh_detail`
 
-Simplify or refine the displayed triangle mesh (not the geometry). Use level=coarse or normal when the mesh looks over-tessellated or heavy (e.g. many segments on small cylinders, "simplify the mesh"), and fine to restore smooth curves. Display only: geometry, selection and exports are unchanged. Returns the triangle count.
+_query tool._ Simplify or refine the displayed triangle mesh (not the geometry). Use level=coarse or normal when the mesh looks over-tessellated or heavy (e.g. many segments on small cylinders, "simplify the mesh"), and fine to restore smooth curves. Display only: geometry, selection and exports are unchanged. Returns the triangle count.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `level` | fine \| normal \| coarse | yes | Mesh detail: fine (default, smooth) \| normal \| coarse (fewest triangles) (fine \| normal \| coarse) |
 
-### `set_sketch_scale`
-
-Set the real scale of the drawing explicitly, either as mm_per_px, or as a length measured in the image (`pixels`) that equals `mm`. Prefer confirm_detected_dimension when a dimension exists. clear=true removes an explicit scale.
-
-| Argument | Type | Required | Description |
-|---|---|---|---|
-| `clear` | boolean |  | Remove the explicit scale |
-| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
-| `mm` | number > 0 |  | The real length of that distance (mm) |
-| `mm_per_px` | number > 0 |  | Millimetres per image pixel |
-| `pixels` | number > 0 |  | A length measured in the image (px) |
-
 ### `set_units`
 
-Change the project's display units and precision ('switch the project to inches', 'show angles in radians', 'show 3 decimals'). Display only: it changes how lengths and angles are shown and typed in the UI, never the geometry, positions or sizes (stored in mm).
+_query tool._ Change the project's display units and precision ('switch the project to inches', 'show angles in radians', 'show 3 decimals'). Display only: it changes how lengths and angles are shown and typed in the UI, never the geometry, positions or sizes (stored in mm).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -913,7 +733,7 @@ Change the project's display units and precision ('switch the project to inches'
 
 ### `snap_calculate`
 
-Compute a snapping or grid calculation with the project's settings, without changing anything: position (nearest grid intersection in the grid plane), translation (displacement rounded to the translation increment), angle (rounded to the rotation increment), world_to_grid and grid_to_world (grid coordinates: u, v in the plane, w along its normal, from the grid origin). Snapping only applies when enabled; force=true answers as if that kind of snapping were on. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
+_query tool._ Compute a snapping or grid calculation with the project's settings, without changing anything: position (nearest grid intersection in the grid plane), translation (displacement rounded to the translation increment), angle (rounded to the rotation increment), world_to_grid and grid_to_world (grid coordinates: u, v in the plane, w along its normal, from the grid origin). Snapping only applies when enabled; force=true answers as if that kind of snapping were on. Lengths are stored in mm and angles in degrees whatever the display units; the result reports both.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -924,19 +744,228 @@ Compute a snapping or grid calculation with the project's settings, without chan
 | `point` | array of number |  | A point or vector [x, y, z] |
 | `unit` | mm \| cm \| m \| in \| ft |  | Unit of the lengths given in this call; default mm (mm \| cm \| m \| in \| ft) |
 
-### `unlock_region`
 
-Unlock a region. Only do this when the user explicitly asks.
+## project
+
+### `export_step`
+
+_query tool._ Export the current model to a STEP file at `path` (does not change the model).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Region name |
+| `path` | string | yes | Output file path, e.g. out/plate.step |
+
+### `export_stl`
+
+_query tool._ Export the current model to a binary STL file at `path` for 3D printing (does not change the model).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `deflection_mm` | number > 0 |  | Mesh deflection in mm (default 0.05) |
+| `path` | string | yes | Output file path, e.g. out/plate.stl |
+
+### `get_model_summary`
+
+_query tool._ Describe the current model: every feature (id, type, key parameters, status), bounding boxes and volumes of the resulting bodies, and recent checkpoints. Call this before editing an unfamiliar model.
+
+_No arguments._
+
+### `measure_distance`
+
+_query tool._ Measure between two things. Each of `from`/`to` is a selector like face(feature=plate,side=+Z) / body(feature=plate) or a bare feature id (= its body). For two parallel faces the result is the perpendicular gap; otherwise the distance between centroids. Also returns the minimum gap between the bounding boxes.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `from` | string | yes | Selector or feature id |
+| `to` | string | yes | Selector or feature id |
+
+### `restore_checkpoint`
+
+_edit tool._ Return the model to an earlier semantic checkpoint, given by id (cp_002), number, 'previous', or part of its label (e.g. 'before we reinforced the shoulder' means the checkpoint preceding the one labelled 'Reinforced shoulder'). Use get_model_summary to list checkpoints.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `checkpoint` | string | yes | Checkpoint id, number, 'previous', or label text |
+
+
+## image
+
+### `analyze_image`
+
+_query tool._ Record what you see in an attached image as a structured sketch proposal (this does NOT change the model). Use image pixel coordinates (x right, y DOWN). Group primitives into closed `profiles` (outer loop + holes). Put every dimension you can read in `dimensions` with its value in mm and a confidence; add dimensions you still need as source=missing (overall width/height, thickness as kind=depth). Never invent a value or infer real size from pixels. The result says what is missing; ask the user only for that.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `confidence` | number ≥ 0 | yes | Overall confidence 0..1 |
+| `description` | string |  | One short sentence describing what you see (display only; not geometry) |
+| `dimensions` | array of object |  | Dimensions: ones written on the drawing (with value in mm) and ones that are still missing (no value, source=missing) |
+| `entities` | array of object | yes | Detected primitives in image pixels (x right, y DOWN) |
+| `image_id` | string | yes | Id of the attached image |
+| `image_size` | array of number > 0 | yes | [width,height] of the image in pixels |
+| `operations` | array of object |  | How profiles combine into solids, in order (optional; default: extrude every profile by the depth dimension) |
+| `placement` | object |  |  |
+| `profiles` | array of object | yes | Closed regions: an outer loop of entity ids plus inner loops (holes/cutouts) |
+| `relationships` | array of object |  | Detected relations |
+
+### `confirm_detected_dimension`
+
+_query tool._ Record the user's answer about a dimension: confirm the detected value, or give the corrected value in mm (then it is trusted). Use this for 'it is 80 mm wide', 'yes that 12 is right', 'make this dimension 40 mm'.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `dimension` | string | yes | Dimension id |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `value` | number > 0 |  | Value in mm; omit to confirm the detected value |
+
+### `create_from_image`
+
+_edit tool._ Turn a ready interpretation into editable parametric geometry: a sketch, then extrude / cut / boolean features in order (normal CAD-IR features, no image object). Refuses and lists what is missing or unconfirmed until the interpretation is ready. `extrusion_depth` (mm) is the user's explicit thickness for operations that lack one. The ChangeSet is always left proposed for preview and commit.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
+| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `mode` | solid \| sketch |  | solid builds the geometry; sketch stops at the sketch (solid \| sketch) |
+| `offset` | number |  | Override the plane offset (mm) |
+| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
+
+### `create_sketch_from_image`
+
+_edit tool._ Create only the planar sketch (no solid) from a ready interpretation, as a normal editable sketch feature. The result stays proposed until the user commits it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
+| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `offset` | number |  | Override the plane offset (mm) |
+| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
+
+### `extrude_detected_profile`
+
+_edit tool._ Extrude / cut / combine the profiles of an interpretation whose sketch already exists (created by create_sketch_from_image). Same operations and rules as create_from_image, without creating the sketch again.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `extrusion_depth` | number > 0 |  | Thickness / depth in mm, as stated by the user |
+| `face` | string |  | Place the sketch on this planar face selector, or 'selection' for the selected face |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `offset` | number |  | Override the plane offset (mm) |
+| `plane` | XY \| XZ \| YZ |  | Override the sketch plane (XY \| XZ \| YZ) |
+
+### `get_sketch_proposal`
+
+_query tool._ Read an interpretation's current proposal and its validation report (missing / unconfirmed dimensions, ambiguities, errors).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+
+### `set_sketch_scale`
+
+_query tool._ Set the real scale of the drawing explicitly, either as mm_per_px, or as a length measured in the image (`pixels`) that equals `mm`. Prefer confirm_detected_dimension when a dimension exists. clear=true removes an explicit scale.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `clear` | boolean |  | Remove the explicit scale |
+| `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+| `mm` | number > 0 |  | The real length of that distance (mm) |
+| `mm_per_px` | number > 0 |  | Millimetres per image pixel |
+| `pixels` | number > 0 |  | A length measured in the image (px) |
 
 ### `update_sketch_proposal`
 
-Correct the proposal (not the model). Each edit: op + id + value. Ops: set_entity, remove_entity, set_profile, remove_profile, set_dimension, remove_dimension, set_operation, remove_operation, set_relationship (id = index or new), remove_relationship (id = index), set_placement. set_* merges `value` onto the item (a null field removes it) or creates it. Examples: 'that circle is a hole' = set_profile outer profile holes + remove_profile for the circle's own profile; 'left edge vertical' = set_relationship new {kind:vertical,entities:[...],confidence:1}.
+_query tool._ Correct the proposal (not the model). Each edit: op + id + value. Ops: set_entity, remove_entity, set_profile, remove_profile, set_dimension, remove_dimension, set_operation, remove_operation, set_relationship (id = index or new), remove_relationship (id = index), set_placement. set_* merges `value` onto the item (a null field removes it) or creates it. Examples: 'that circle is a hole' = set_profile outer profile holes + remove_profile for the circle's own profile; 'left edge vertical' = set_relationship new {kind:vertical,entities:[...],confidence:1}.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `edits` | array of object | yes | Corrections applied in order, all or nothing |
 | `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+
+
+## refine
+
+### `bind_parameters`
+
+_edit tool._ Drive several parameters of one feature by expressions over design parameters in ONE ChangeSet, e.g. feature='body', bindings={dx:'vehicle.length', dz:'vehicle.height - vehicle.ground_clearance'}.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `bindings` | object | yes | parameter → expression |
+| `feature` | string | yes | Feature id |
+
+### `calibrate_reference_image`
+
+_query tool._ Read or manually set the camera of a reference image (azimuth 0=front, 90=left side, 180=rear, 270=right; elevation 90=top; projection orthographic|perspective; scale). With only image_id it returns the current calibration; giving values stores a manual calibration that automatic analysis will not overwrite.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `azimuth` | number |  | Degrees |
+| `elevation` | number |  | Degrees |
+| `focal_length_mm` | number |  | 35 mm-equivalent focal length (perspective) |
+| `image_id` | string | yes | Reference image id |
+| `mirrored` | boolean |  | The object faces the other way |
+| `projection` | orthographic \| perspective |  | Projection (orthographic \| perspective) |
+| `scale` | number |  | Relative scale, default 1 |
+| `view` | left \| right \| front \| rear \| top \| front_3q \| rear_3q \| other |  | View label (left \| right \| front \| rear \| top \| front_3q \| rear_3q \| other) |
+
+### `define_parameters`
+
+_edit tool._ Create or extend a named set of design parameters (numbers in mm or degrees) that control major geometry, e.g. set='vehicle' with length, width, height, wheelbase, front_overhang, roof_height, windshield_angle. Then drive feature parameters from them with bind_parameters (dx = 'vehicle.length'), so later refinement edits one parameter (set_parameter) and every dependent feature regenerates. Prefer this over destructive edits.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `parameters` | object | yes | name → number |
+| `set` | string | yes | Parameter set id, lowercase (e.g. vehicle) |
+
+### `define_region`
+
+_query tool._ Declare which CAD objects and design parameters shape a visual region (e.g. 'roof' → objects [roof, cabin], parameters [vehicle.roof_height]). The vision critic reports errors per region, so regions make its corrections actionable. Redefining a region keeps its lock.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Region name, e.g. roof, front_hood, wheels |
+| `objects` | array of string |  | Feature ids |
+| `parameters` | array of string |  | Design parameters (set.name) |
+
+### `get_visual_state`
+
+_query tool._ Describe the visual refinement state: references (view, calibration, landmarks), reference proportions, regions and locks, design parameters, current stage and the latest scores.
+
+_No arguments._
+
+### `lock_region`
+
+_query tool._ Lock a region whose geometry is already correct: its objects and parameters cannot be modified (appearance still can) until unlock_region.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Region name |
+
+### `render_model`
+
+_query tool._ Render the current model offscreen from fixed cameras (left, right, front, rear, top orthographic; front_3q, rear_3q perspective). mode=shaded for appearance, silhouette for a binary mask (object white, background black). Returns render ids; when references exist, each matching view also gets its silhouette score. Never assume the model looks right without rendering it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `mode` | shaded \| silhouette |  | Render mode (default shaded) (shaded \| silhouette) |
+| `resolution` | array of integer ≥ 64 ≤ 2048 |  | [width, height], default [1024, 1024] |
+| `views` | array of left \| right \| front \| rear \| top \| front_3q \| rear_3q |  | Default: left, front, top, front_3q |
+
+### `set_parameter`
+
+_edit tool._ Change one design parameter (name, or set.name when several sets have it); every feature bound to it regenerates. This is the preferred way to correct proportions during visual refinement (e.g. roof_height 1020, windshield_angle 26).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Parameter name or set.name |
+| `value` | number | yes | New value |
+
+### `unlock_region`
+
+_query tool._ Unlock a region. Only do this when the user explicitly asks.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Region name |

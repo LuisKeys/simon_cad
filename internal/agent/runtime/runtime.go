@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/accelone/simoncad/internal/app"
@@ -76,6 +77,9 @@ type Runtime struct {
 	Interpreter ImageInterpreter
 	// Reference is user-attached document text (specifications) shown to the model every turn.
 	Reference string
+	// ToolLoading is ToolLoadingAll or ToolLoadingProgressive; empty reads SIMON_TOOL_LOADING
+	// (default all).
+	ToolLoading string
 	// OnStep, if set, observes each tool call (for CLI progress output).
 	OnStep func(name string, args json.RawMessage, o app.Outcome)
 	// MaxStructural bounds the structural (geometry-changing) tool calls of each Send; 0 is
@@ -160,6 +164,7 @@ type Conversation struct {
 	policy  app.Policy
 	allowed map[string]bool
 	defs    []ToolDef
+	loader  *toolLoader // tools held back until their category is loaded; nil when all are sent
 	system  string
 	context string  // capability context + attachments + references (no request)
 	opening []Block // image blocks for the first message
@@ -244,6 +249,16 @@ func (rt *Runtime) Begin(ctx context.Context, a *app.App, intent string, policy 
 	}
 	c.allowed, c.defs = rt.toolset(a)
 	c.system = rt.SystemPrompt()
+	mode := rt.ToolLoading
+	if mode == "" {
+		mode = os.Getenv(ToolLoadingEnv)
+	}
+	if mode == ToolLoadingProgressive {
+		if base, l := splitTools(a.Reg, c.defs); l != nil {
+			c.defs, c.loader = append(base, l.metaDef()), l
+			c.system += "\n\n" + l.index()
+		}
+	}
 	ctxText, err := rt.BuildContext(a)
 	if err != nil {
 		return c, err
@@ -314,10 +329,21 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 			return turn, nil
 		}
 		var results []Block
+		firstCall := len(turn.Calls)
 		for _, u := range uses {
+			if c.loader != nil && u.Name == loadCategoryTool {
+				content, ok := c.answerLoad(u.Input)
+				results = append(results, Block{Type: "tool_result", ToolUseID: u.ID, Content: content, IsError: !ok})
+				continue
+			}
 			var o app.Outcome
 			call := TurnCall{ID: u.ID, Name: u.Name, Args: u.Input}
-			if !c.allowed[u.Name] {
+			if cat := c.loader.unloaded(u.Name); cat != "" {
+				// the model named a tool it was not given: load its category so the retry works
+				c.answerLoad([]byte(fmt.Sprintf(`{"categories":[%q]}`, cat)))
+				o = app.Outcome{Tool: u.Name, Error: fmt.Sprintf("tool %q is in the %q category, which was not loaded; it is loaded now, call %s again", u.Name, cat, u.Name)}
+				call.Refused = true
+			} else if !c.allowed[u.Name] {
 				o = app.Outcome{Tool: u.Name, Error: fmt.Sprintf("tool %q is not available to this agent", u.Name)}
 				call.Refused = true
 			} else if rt.MaxStructural > 0 && structural >= rt.MaxStructural && c.app.Reg.Structural(u.Name) {
@@ -348,7 +374,7 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 			results = append(results, Block{Type: "tool_result", ToolUseID: u.ID, Content: content, IsError: !o.OK})
 		}
 		c.Msgs = append(c.Msgs, Message{Role: "user", Content: results})
-		if proposed(turn.Calls[len(turn.Calls)-len(uses):]) {
+		if proposed(turn.Calls[firstCall:]) {
 			// A fresh interpretation is the user's to review and approve: stop here instead of
 			// letting the agent build on values the user has not seen.
 			turn.Final, turn.AwaitingReview = reviewNotice, true

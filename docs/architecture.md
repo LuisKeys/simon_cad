@@ -396,7 +396,17 @@ The loop (`runtime.Run`): record the prompt → build context (units, model summ
 selection, recent checkpoints) → call the provider with the tool definitions → for each `tool_use`,
 refuse anything outside the capability's tool set, otherwise `app.ApplyTool` → return a
 `tool_result` (success data or an actionable error) → repeat until the model answers in text, or the
-step limit (12) is hit. Validation errors are fed back so the model can correct itself.
+step limit (20) is hit. Validation errors are fed back so the model can correct itself.
+
+**Tool definitions and prompt cache.** Tool definitions dominate a turn's input (about 25k tokens
+for all tools) and are resent on every step, so the Claude provider marks the last tool and the
+system prompt as prompt-cache breakpoints. Each tool also has a `Category` (domain, see
+`internal/tools/categories.go`; `docs/tools.md` is grouped by it). With `SIMON_TOOL_LOADING=progressive`
+(default `all`) only the core geometry tools are sent, plus the meta-tool `load_tool_category`;
+the system prompt carries an index of the held-back categories and their tool names. The runtime
+answers `load_tool_category` itself (it never reaches `App.ApplyTool`), and calling a held-back tool
+directly loads its category and asks the model to retry. Loaded categories only accumulate, so the
+tools already sent keep their position. The vision and visual capabilities are not held back.
 
 **Providers** (`SIMONCAD_PROVIDER`): `claude` (Anthropic Messages API), `openai` (Responses API) and
 `ollama` (Chat Completions wire format through its `/v1` endpoint). Image input (`Block{type:"image"}`)

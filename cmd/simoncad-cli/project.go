@@ -158,7 +158,7 @@ func runTools(args []string) error {
 	var sb strings.Builder
 	for _, n := range reg.Names() {
 		t, _ := reg.Get(n)
-		list = append(list, map[string]any{"name": t.Name, "capability": t.Capability, "mutating": t.Mutating(), "description": t.Description, "schema": t.Schema})
+		list = append(list, map[string]any{"name": t.Name, "capability": t.Capability, "category": t.Category, "mutating": t.Mutating(), "description": t.Description, "schema": t.Schema})
 		kind := "query"
 		if t.Mutating() {
 			kind = "edit "
@@ -167,7 +167,7 @@ func runTools(args []string) error {
 		if i := strings.Index(first, ". "); i > 0 {
 			first = first[:i+1]
 		}
-		fmt.Fprintf(&sb, "%-18s %s [%s] %s\n", t.Name, kind, t.Capability, first)
+		fmt.Fprintf(&sb, "%-18s %s [%s/%s] %s\n", t.Name, kind, t.Capability, t.Category, first)
 	}
 	emit(map[string]any{"tools": list}, sb.String())
 	return nil
