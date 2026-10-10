@@ -1,0 +1,20 @@
+{
+  "id": "gold_contacts",
+  "name": "Gold Contacts",
+  "category": "Electronics",
+  "tags": [
+    "electronics",
+    "gold",
+    "contacts",
+    "connector"
+  ],
+  "baseColor": "#D4AF37",
+  "metalness": 1.0,
+  "roughness": 0.25,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

@@ -5,7 +5,7 @@ import { h } from '../api.js';
 
 export const DND_TYPE = 'application/x-simon-material';
 
-const PICK = { open: false, query: '', category: '' }; // survives panel re-renders
+const PICK = { open: false, query: '', category: '', scroll: 0 }; // survives panel re-renders
 
 const recents = (() => {
   const KEY = 'simon.recentMaterials';
@@ -47,12 +47,15 @@ export function materialEditor(ctx, nodes) {
       : [h('div', { class: 'muted' }, 'No materials match.')]));
   };
   fill();
+  // The panel is rebuilt after every edit; keep the picker's scroll position across that.
+  grid.addEventListener('scroll', () => { PICK.scroll = grid.scrollTop; });
+  requestAnimationFrame(() => { grid.scrollTop = PICK.scroll; });
 
   const search = h('input', { type: 'search', placeholder: 'Search materials (e.g. steel, black, glass)', value: PICK.query, 'aria-label': 'Search materials',
-    oninput: (e) => { PICK.query = e.target.value; fill(); } });
+    oninput: (e) => { PICK.query = e.target.value; PICK.scroll = 0; grid.scrollTop = 0; fill(); } });
   const cats = h('div', { class: 'mat-cats', role: 'group', 'aria-label': 'Material categories' },
     ['', ...ctx.library.categories].map((c) => h('button', { type: 'button', class: `chip${PICK.category === c ? ' on' : ''}`, 'aria-pressed': String(PICK.category === c),
-      onclick: () => { PICK.category = c; ctx.rerender(); } }, c || 'All')));
+      onclick: () => { PICK.category = c; PICK.scroll = 0; ctx.rerender(); } }, c || 'All')));
 
   const sc = h('input', { type: 'number', min: '0.1', max: '100', step: '0.1', value: scale === undefined ? '' : String(scale),
     placeholder: scale === undefined ? 'mixed' : '1', 'aria-label': 'Texture scale', disabled: cur === '',

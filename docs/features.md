@@ -120,7 +120,7 @@ Primitivas:
 - **Color** (`set_color`), **opacidad** (`set_opacity`), **visibilidad** (`set_visibility`),
   consulta (`get_appearance`) y restablecer (`reset_appearance`). Solo presentación; no afecta
   geometría ni exportación.
-- **Biblioteca de materiales** (~30 materiales integrados: aluminio cepillado/pulido/anodizado,
+- **Biblioteca de materiales** (~75 materiales integrados: aluminio cepillado/pulido/anodizado,
   aceros, latón, cobre, titanio, ABS, PLA, PETG, nylon, gomas, fibra de carbono, vidrio, madera, PCB,
   etc.) más materiales de proyecto.
 - **Asignar / quitar material** (`set_material`, `remove_material`), escala de textura

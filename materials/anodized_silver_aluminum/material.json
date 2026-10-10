@@ -1,0 +1,20 @@
+{
+  "id": "anodized_silver_aluminum",
+  "name": "Silver Anodized Aluminum",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "aluminum",
+    "anodized",
+    "silver"
+  ],
+  "baseColor": "#B8BCC2",
+  "metalness": 0.9,
+  "roughness": 0.4,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

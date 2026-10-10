@@ -1,0 +1,22 @@
+{
+  "id": "red_petg",
+  "name": "Red PETG",
+  "category": "Plastics",
+  "tags": [
+    "plastic",
+    "petg",
+    "red",
+    "printed"
+  ],
+  "baseColor": "#C62828",
+  "metalness": 0.0,
+  "roughness": 0.3,
+  "clearcoat": 0.15,
+  "clearcoatRoughness": 0.35,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

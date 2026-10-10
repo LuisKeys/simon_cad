@@ -1,0 +1,21 @@
+{
+  "id": "white_rubber",
+  "name": "White Rubber",
+  "category": "Rubber",
+  "tags": [
+    "rubber",
+    "white",
+    "grip",
+    "seal"
+  ],
+  "baseColor": "#E8E8E6",
+  "metalness": 0.0,
+  "roughness": 0.85,
+  "sheen": 0.25,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

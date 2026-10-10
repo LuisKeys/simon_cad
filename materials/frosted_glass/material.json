@@ -1,0 +1,22 @@
+{
+  "id": "frosted_glass",
+  "name": "Frosted Glass",
+  "category": "Glass",
+  "tags": [
+    "glass",
+    "frosted",
+    "translucent"
+  ],
+  "baseColor": "#E8F0F2",
+  "metalness": 0.0,
+  "roughness": 0.5,
+  "transmission": 0.8,
+  "ior": 1.5,
+  "thickness": 2,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

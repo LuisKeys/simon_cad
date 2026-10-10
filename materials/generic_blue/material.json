@@ -1,0 +1,18 @@
+{
+  "id": "generic_blue",
+  "name": "Generic Blue",
+  "category": "Generic",
+  "tags": [
+    "generic",
+    "blue"
+  ],
+  "baseColor": "#1E5BC6",
+  "metalness": 0.25,
+  "roughness": 0.45,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

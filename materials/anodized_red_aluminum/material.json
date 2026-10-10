@@ -1,0 +1,20 @@
+{
+  "id": "anodized_red_aluminum",
+  "name": "Red Anodized Aluminum",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "aluminum",
+    "anodized",
+    "red"
+  ],
+  "baseColor": "#B3262E",
+  "metalness": 0.9,
+  "roughness": 0.4,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

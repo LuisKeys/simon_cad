@@ -1,0 +1,20 @@
+{
+  "id": "walnut_wood",
+  "name": "Walnut Wood",
+  "category": "Wood",
+  "tags": [
+    "wood",
+    "walnut",
+    "dark",
+    "brown"
+  ],
+  "baseColor": "#5C4033",
+  "metalness": 0.0,
+  "roughness": 0.6,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "maple_wood",
+  "name": "Maple Wood",
+  "category": "Wood",
+  "tags": [
+    "wood",
+    "maple",
+    "light"
+  ],
+  "baseColor": "#E3C79A",
+  "metalness": 0.0,
+  "roughness": 0.6,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

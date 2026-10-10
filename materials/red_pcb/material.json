@@ -1,0 +1,22 @@
+{
+  "id": "red_pcb",
+  "name": "Red PCB",
+  "category": "Electronics",
+  "tags": [
+    "electronics",
+    "pcb",
+    "red",
+    "board"
+  ],
+  "baseColor": "#A52A2A",
+  "metalness": 0.0,
+  "roughness": 0.4,
+  "clearcoat": 0.6,
+  "clearcoatRoughness": 0.2,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

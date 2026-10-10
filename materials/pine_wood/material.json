@@ -1,0 +1,19 @@
+{
+  "id": "pine_wood",
+  "name": "Pine Wood",
+  "category": "Wood",
+  "tags": [
+    "wood",
+    "pine",
+    "light"
+  ],
+  "baseColor": "#D9B87A",
+  "metalness": 0.0,
+  "roughness": 0.7,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

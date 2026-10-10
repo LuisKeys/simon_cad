@@ -1,0 +1,22 @@
+{
+  "id": "brown_pla",
+  "name": "Brown PLA",
+  "category": "Plastics",
+  "tags": [
+    "plastic",
+    "pla",
+    "brown",
+    "printed"
+  ],
+  "baseColor": "#6D4C33",
+  "metalness": 0.0,
+  "roughness": 0.6,
+  "clearcoat": 0.15,
+  "clearcoatRoughness": 0.35,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

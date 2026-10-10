@@ -1,0 +1,20 @@
+{
+  "id": "galvanized_steel",
+  "name": "Galvanized Steel",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "steel",
+    "galvanized",
+    "zinc"
+  ],
+  "baseColor": "#A9AEB3",
+  "metalness": 0.9,
+  "roughness": 0.5,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

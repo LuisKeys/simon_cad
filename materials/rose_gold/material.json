@@ -1,0 +1,19 @@
+{
+  "id": "rose_gold",
+  "name": "Rose Gold",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "gold",
+    "rose"
+  ],
+  "baseColor": "#C98F7E",
+  "metalness": 1.0,
+  "roughness": 0.25,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

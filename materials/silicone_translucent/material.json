@@ -1,0 +1,22 @@
+{
+  "id": "silicone_translucent",
+  "name": "Translucent Silicone",
+  "category": "Rubber",
+  "tags": [
+    "rubber",
+    "silicone",
+    "translucent"
+  ],
+  "baseColor": "#E6EEF0",
+  "metalness": 0.0,
+  "roughness": 0.45,
+  "transmission": 0.5,
+  "ior": 1.41,
+  "thickness": 2,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

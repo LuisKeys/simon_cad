@@ -1,0 +1,18 @@
+{
+  "id": "generic_red",
+  "name": "Generic Red",
+  "category": "Generic",
+  "tags": [
+    "generic",
+    "red"
+  ],
+  "baseColor": "#C62828",
+  "metalness": 0.25,
+  "roughness": 0.45,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "yellow_pla",
+  "name": "Yellow PLA",
+  "category": "Plastics",
+  "tags": [
+    "plastic",
+    "pla",
+    "yellow",
+    "printed"
+  ],
+  "baseColor": "#F9C80E",
+  "metalness": 0.0,
+  "roughness": 0.6,
+  "clearcoat": 0.15,
+  "clearcoatRoughness": 0.35,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}

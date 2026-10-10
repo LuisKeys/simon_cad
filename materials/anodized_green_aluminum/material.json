@@ -1,0 +1,20 @@
+{
+  "id": "anodized_green_aluminum",
+  "name": "Green Anodized Aluminum",
+  "category": "Metals",
+  "tags": [
+    "metal",
+    "aluminum",
+    "anodized",
+    "green"
+  ],
+  "baseColor": "#2E8B57",
+  "metalness": 0.9,
+  "roughness": 0.4,
+  "textureScale": 1,
+  "license": {
+    "source": "Simon CAD",
+    "license": "CC0-1.0",
+    "url": ""
+  }
+}
