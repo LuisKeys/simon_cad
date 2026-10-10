@@ -166,6 +166,12 @@ Primitivas:
 - **Modelo de fallback** con política de consentimiento (`ask` / `allow` / `deny`) y enrutamiento
   automático (adjuntos o peticiones específicas al modelo de respaldo).
 - **Control de esfuerzo y de coste** (consumo de tokens, caché de prompts).
+- **Caché de prompts de Anthropic** sobre las definiciones de herramientas y el prompt de sistema.
+- **Herramientas categorizadas** (11 categorías: primitivas, sketch, edición, transformación,
+  paramétrica, componentes, apariencia, workspace, proyecto, imagen, refinamiento) y **carga bajo
+  demanda** (`SIMON_TOOL_LOADING=progressive`): solo se envían las herramientas núcleo más la
+  meta-herramienta `load_tool_category`; las categorías cargadas se acumulan sin romper la caché.
+  Por defecto `all`.
 - **Grabación y reproducción** de conversaciones (recordings) para ejecutar sin API key.
 - **Evals** grabados y en vivo.
 - **Capacidades conectables:** `geometry`, `vision`, `visual`.
@@ -209,6 +215,7 @@ Primitivas:
 - **Soporte táctil:** controles de 40–44 px, pulsación larga = menú contextual.
 - **Ajustes** con navegación por secciones: Modelo primario, Modelo de fallback, Configuración de
   UI, Viewport, Rendering, Workspace / Units & Grid.
+- **Modo Print** (barra superior / paleta): simulación de impresión 3D, ver [§22](#22-simulación-de-impresión-3d).
 - **Concurrencia:** el turno del agente no bloquea la lectura de estado; las ediciones se rechazan
   mientras trabaja.
 
@@ -236,6 +243,7 @@ Primitivas:
 | Selección y edición | Clic · Shift+clic · Ctrl+clic · `B` caja · `G` mover · `R` rotar · Ctrl+D duplicar · Ctrl+G agrupar · Ctrl+Shift+G desagrupar · clic derecho menú |
 | Vista y cámara | `F` fit · rueda zoom · arrastre orbitar/pan · arrastre central/derecho pan · `M` medir · Ctrl+Alt+4 Single/Quad · doble clic maximizar |
 | Durante mover/rotar | Clic/Enter confirmar · Esc/clic derecho cancelar · `X`/`Y`/`Z` eje · Shift+`X`/`Y`/`Z` plano · Ctrl sin snapping · `P` pivote |
+| Simulación de impresión | Espacio reproducir/pausar · `[` capa anterior · `]` capa siguiente |
 | Simon Agent | Enter enviar · Shift+Enter nueva línea |
 | Árbol y menús | ↑ ↓ navegar · Enter · F2 renombrar · ← → plegar grupo |
 
@@ -276,7 +284,7 @@ Banderas del agente: `--preview`, `--commit`, `--label`, `--autonomous`.
 ## 19. Configuración y proveedores de modelo
 
 - Variables en `.env`: `SIMONCAD_PROVIDER`, claves y modelos de Claude / OpenAI / Ollama,
-  `OLLAMA_NUM_CTX`, `OLLAMA_VISION`, `SIMONCAD_AUTONOMOUS`, fallback
+  `OLLAMA_NUM_CTX`, `OLLAMA_VISION`, `SIMONCAD_AUTONOMOUS`, `SIMON_TOOL_LOADING`, `SIMONCAD_PRUSASLICER`, fallback
   (`SIMONCAD_FALLBACK_*`, `SIMONCAD_FALLBACK_CONSENT`).
 - Ajustes de UI: modelos, viewport, rendering y workspace, con previsualización en vivo y Cancel
   que revierte.
@@ -294,8 +302,9 @@ Banderas del agente: `--preview`, `--commit`, `--label`, `--autonomous`.
 ## 21. Ayuda integrada
 
 - **Microsite de ayuda** (`frontend/help.html`): guía de usuario con prompts de ejemplo por
-  función, ejemplos de extremo a extremo (soporte de servo, separadores paramétricos, brida con
-  círculo de pernos, carcasa), referencia de herramientas, atajos, configuración y solución de
+  función, sección de simulación de impresión, ejemplos de extremo a extremo (soporte de servo, separadores paramétricos, brida con
+  círculo de pernos, carcasa), referencia de herramientas, atajos, configuración (incluye `SIMONCAD_PRUSASLICER` y
+  `SIMON_TOOL_LOADING`) y solución de
   problemas.
 
 ## 22. Simulación de impresión 3D
@@ -308,6 +317,9 @@ Banderas del agente: `--preview`, `--commit`, `--label`, `--autonomous`.
   visualización (Realista, Técnico, Diagnóstico).
 - Perfil genérico etiquetado como *simulación, no hardware verificado*; resultados cacheados por revisión
   de geometría y ajustes; cancelación; el modelo CAD nunca se modifica. Detalle en `docs/printsim.md`.
+- Atajos: `Espacio` reproducir/pausar, `[` / `]` capa anterior/siguiente.
+- Slicer `auto` por defecto: PrusaSlicer si está disponible (`SIMONCAD_PRUSASLICER`), si no el preview interno
+  (sin soportes ni puentes).
 - Pendiente de esta línea: análisis de imprimibilidad, herramientas del agente/Critic, modo cinemático.
 
 ## 23. Fuera de alcance / pendiente

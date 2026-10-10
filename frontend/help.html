@@ -455,6 +455,24 @@ a size or a position. Grid changes show in the viewport at once. New projects st
 </section>
 
 <section>
+<h2 id="printsim" data-group="Using the viewport">Print simulation</h2>
+<p>Print mode slices the current model and plays the real toolpaths back in the same viewport: a build plate with millimetre marks, an animated nozzle and filament deposited layer by layer. The CAD model is never modified.</p>
+<div class="callout tip"><strong>Simulation, not manufacturing validation.</strong> It plays back toolpaths. It does not predict adhesion, warping or hardware faults, and the default machine is a generic simulation profile, not a verified printer.</div>
+<table>
+<tr><th>Action</th><th>How</th></tr>
+<tr><td>Enter / leave</td><td><b>Print</b> in the top bar, or <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> → <i>Print simulation</i>. Slicing starts at once in the background (a cached result returns instantly). Leaving restores the CAD scene, selection and undo history exactly.</td></tr>
+<tr><td>Playback</td><td>Bottom bar: play / pause / restart, speed 1x–500x, time slider and layer slider. <kbd>Space</kbd> plays or pauses, <kbd>[</kbd> and <kbd>]</kbd> step layers. Orbit, pan and zoom keep working.</td></tr>
+<tr><td>Layer inspection</td><td><i>All layers</i>, <i>Up to layer</i> or <i>Single layer</i>, with estimated time and filament.</td></tr>
+<tr><td>Settings</td><td>Layer height, walls, infill and pattern, supports, adhesion, temperatures, speeds and machine in the <b>Print</b> tab of the right panel. Press <b>Slice again</b> to apply.</td></tr>
+<tr><td>Display</td><td>Filters (travel, walls, infill, supports), a translucent overlay of the original model and three presets (Realistic, Technical, Diagnostics). These change instantly and never re-slice.</td></tr>
+<tr><td>Stale result</td><td>If you change the model while the simulation is open, the panel tells you the slice is out of date.</td></tr>
+</table>
+<h3>Slicers</h3>
+<p>With <b>auto</b> (default) Simon uses PrusaSlicer when it is installed (<code>PATH</code>, the macOS app bundle or <code>SIMONCAD_PRUSASLICER</code>) and otherwise a built-in preview slicer, with a visible note. The preview slicer has no supports and no bridges. Details in <code>docs/printsim.md</code>.</p>
+<p class="muted">Not yet: printability analysis, agent tools for printing and a kinematic printer model.</p>
+</section>
+
+<section>
 <h2 id="projects" data-group="Using the viewport">Projects and export</h2>
 <table>
 <tr><th>Action</th><th>Details</th></tr>
@@ -543,6 +561,8 @@ a size or a position. Grid changes show in the viewport at once. New projects st
 <tr><td><code>SIMONCAD_FALLBACK_ENABLED</code>, <code>SIMONCAD_FALLBACK_PROVIDER</code>, <code>SIMONCAD_FALLBACK_CONSENT</code></td><td>The fallback model (OpenAI or Anthropic) and whether a local model’s request may be sent to it (<code>ask</code>, <code>allow</code>, <code>deny</code>). Its own model, key and prices use the provider variables with the <code>SIMONCAD_FALLBACK_</code> prefix. Also editable in <b>Settings → Fallback Model</b>.</td></tr>
 <tr><td><code>SIMONCAD_COMPONENT_LIBRARY</code></td><td>A folder of shared components, searched on top of the ones next to the open project. Must be an absolute path. Also editable in <b>Settings → Component library</b>.</td></tr>
 <tr><td><code>ANTHROPIC_INPUT_PRICE</code>, <code>ANTHROPIC_CACHED_INPUT_PRICE</code>, <code>ANTHROPIC_OUTPUT_PRICE</code> (and the <code>OPENAI_*</code> set)</td><td>Optional cost per million tokens. Also editable per model in <b>Settings → Primary Model / Fallback Model → Token Prices</b>.</td></tr>
+<tr><td><code>SIMONCAD_PRUSASLICER</code></td><td>Path to the PrusaSlicer binary used by <a href="#printsim">Print simulation</a>. Optional: it is also found on <code>PATH</code> or in the macOS app bundle. Read once at startup.</td></tr>
+<tr><td><code>SIMON_TOOL_LOADING</code></td><td><code>all</code> (default) sends every tool definition each step. <code>progressive</code> sends only the everyday tools plus a <code>load_tool_category</code> request the model uses to pull in the rest, which cuts input tokens.</td></tr>
 <tr><td><code>SIMONCAD_CURRENCY</code></td><td>Label for the amounts (default <code>USD</code>). It is a label only — no conversion is performed.</td></tr>
 </table>
 
@@ -609,6 +629,7 @@ turn. Attach an image and they come back automatically.</p>
 <tr><td>“component project … not found”</td><td>Its folder moved or was deleted. Put it back next to this project, or set <b>Settings → Component library</b> to where it now lives.</td></tr>
 <tr><td>Instances show a <b>Component</b> badge in amber</td><td>Their component changed since they were placed. Use <b>Update</b> in the Components panel or the row’s menu.</td></tr>
 <tr><td>“save the project first” when creating a component</td><td>A component is written next to the project it came from, so the project needs a location. Save it, or set a component library folder in Settings.</td></tr>
+<tr><td>Print simulation says the slicer is missing</td><td>Install PrusaSlicer or set <code>SIMONCAD_PRUSASLICER</code>. Meanwhile the preview slicer still works (no supports or bridges).</td></tr>
 <tr><td>The mesh looks faceted or heavy</td><td>Ask for <i>fine</i> or <i>coarse</i> mesh detail. It is display-only.</td></tr>
 <tr><td>Image dimensions look wrong</td><td>Confirm or correct them in the interpretation panel; give a known length for scale.</td></tr>
 </table>
