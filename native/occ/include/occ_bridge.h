@@ -65,9 +65,10 @@ occ_status occ_extrude_polygon(const double* xy, int32_t n, double height, occ_h
  *   kind 0 line   a = x1,y1,x2,y2
  *   kind 1 arc    a = x1,y1, xm,ym (a point on the arc), x2,y2
  *   kind 2 circle a = cx,cy,r      (a full circle is a loop on its own)
+ *   kind 3 bezier a = x1,y1, c1x,c1y, c2x,c2y, x2,y2 (cubic with control points c1, c2)
  * Loop 0 is the outer boundary, the following loops are holes; segments of a loop must chain
  * end to start. The face is returned in the XY plane with a +Z normal. */
-typedef struct { int32_t kind; double a[6]; } occ_seg2d;
+typedef struct { int32_t kind; double a[8]; } occ_seg2d;
 occ_status occ_make_face(const occ_seg2d* segs, const int32_t* loop_sizes, int32_t n_loops, occ_handle* out);
 /* Sweeps any shape along the vector (dx,dy,dz); a face becomes a solid. */
 occ_status occ_prism(occ_handle s, double dx, double dy, double dz, occ_handle* out);
@@ -76,6 +77,31 @@ occ_status occ_place(occ_handle s, const double o[3], const double z[3], const d
 /* Placement frame of a planar face (index as in occ_tessellate): out = origin(3), outward
  * normal(3), x direction(3) = longest straight edge, sign-normalised. */
 occ_status occ_face_frame(occ_handle s, int32_t face_index, double out[9]);
+
+/* Sweep: a profile transported through a sequence of sections placed by the caller (Go computes
+ * parallel-transport frames, width/height/twist per section).
+ * A section is a frame (origin o, in-plane axes x and y; its normal x*y is the path tangent) and
+ * scale factors sx, sy applied to the profile before placement.
+ * A contour is the profile's cross-section loop: kind 0 polygon of n points taken in order from
+ * `xy` (x,y pairs, consecutive contours consume consecutive pairs), kind 1 ellipse with radii
+ * rx, ry (analytic, so round profiles stay exact), kind 2 polygon with its own n points for every
+ * section (n_secs * n pairs; used by mitered polyline sweeps). hole != 0 marks an inner loop; the first
+ * non-hole contour is the outer boundary and holes are cut out of it.
+ * closed != 0: the sections form a ring (the last joins the first, no caps).
+ * apex_start / apex_end (3 doubles, may be NULL) end the sweep at a point instead of a flat cap.
+ * cap_start_n / cap_end_n (open sweeps) say how many leading / trailing sections are cap rings
+ * (they run toward the apex): the body and each cap are lofted separately, sharing the boundary
+ * section, and sewn into one solid, so a cap never needs a boolean. cap_*_ruled joins a cap with
+ * straight bands (a cone) instead of a smooth surface. With cap_*_n = 0 an apex still ends the
+ * single loft (one section is then enough).
+ * ruled != 0 joins the body sections with straight bands instead of a smooth surface.
+ * The result is a solid. */
+typedef struct { double o[3]; double x[3]; double y[3]; double sx, sy; } occ_section;
+typedef struct { int32_t kind; int32_t hole; int32_t n; double rx, ry; } occ_contour;
+occ_status occ_sweep(const occ_section* secs, int32_t n_secs, const occ_contour* contours, int32_t n_contours,
+                     const double* xy, int32_t closed, const double* apex_start, const double* apex_end,
+                     int32_t ruled, int32_t cap_start_n, int32_t cap_end_n, int32_t cap_start_ruled,
+                     int32_t cap_end_ruled, occ_handle* out);
 
 /* Booleans (inputs are not consumed) */
 occ_status occ_boolean_union(occ_handle a, occ_handle b, occ_handle* out);

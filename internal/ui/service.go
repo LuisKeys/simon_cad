@@ -400,6 +400,7 @@ func (s *Service) Scene(known map[string]string) (*rendering.Delta, error) {
 			d.Appearance[id] = n.Appearance
 		}
 	}
+	d.Paths = rendering.PathsOf(g, m)
 	return d, nil
 }
 
@@ -1137,9 +1138,21 @@ func (s *Service) history() []runtime.Message {
 type Outcome struct {
 	OK        bool           `json:"ok"`
 	Error     string         `json:"error,omitempty"`
+	Code      string         `json:"code,omitempty"` // machine-readable error code, e.g. SWEEP_SELF_INTERSECTION
 	Data      any            `json:"data,omitempty"`
 	ChangeSet *ChangeSetCard `json:"changeset,omitempty"`
 	Committed bool           `json:"committed"`
+}
+
+// QueryTool runs a read-only tool for a live preview (the trace panel's sliders). It records
+// nothing and cannot edit the model: a mutating tool is refused.
+func (s *Service) QueryTool(name string, args json.RawMessage) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return nil, err
+	}
+	return s.app.Query(name, args)
 }
 
 // CallTool runs one registered tool directly (palette, inline parameter edits). It is the
@@ -1216,7 +1229,7 @@ func (s *Service) keepObjectSelected(before map[string]bool, objects []string) {
 }
 
 func (s *Service) finishTool(name string, o app.Outcome) Outcome {
-	out := Outcome{OK: o.OK, Error: o.Error, Data: o.Data, Committed: o.Committed}
+	out := Outcome{OK: o.OK, Error: o.Error, Code: o.Code(), Data: o.Data, Committed: o.Committed}
 	if o.ChangeSet != nil {
 		c := app.CardOf(o.ChangeSet)
 		out.ChangeSet = &c
@@ -1484,7 +1497,7 @@ func (s *Service) PlaybackFrame(i int, known map[string]string) (*Frame, error) 
 	if err != nil {
 		return nil, err
 	}
-	d := &rendering.Delta{Order: []string{}, Keys: map[string]string{}, Changed: []*rendering.BodyMesh{}, Removed: []string{}, Sketches: []*rendering.SketchLines{}}
+	d := &rendering.Delta{Order: []string{}, Keys: map[string]string{}, Changed: []*rendering.BodyMesh{}, Removed: []string{}, Sketches: []*rendering.SketchLines{}, Paths: []*rendering.PathLines{}}
 	if len(m.Leaves) > 0 || len(m.Sketches) > 0 {
 		if d, err = s.rend.Scene(m, known); err != nil {
 			return nil, err

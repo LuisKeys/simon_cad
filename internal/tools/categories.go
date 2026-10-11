@@ -20,7 +20,8 @@ var categories = []Category{
 	{"appearance", "Colors, opacity, visibility and materials."},
 	{"workspace", "Units, grid, snapping and mesh detail."},
 	{"project", "Model summary, distance measurement, STEP/STL export and checkpoints."},
-	{"image", "Turn an attached image into a sketch proposal and then into geometry."},
+	{"paths", "Editable 3D paths and 2D profiles, sweeping them into solids (tubes, wires, ribbons), raised and engraved reliefs, and geometry validation."},
+	{"image", "Turn an attached image into a sketch proposal and then into geometry; trace images and SVG into sketches and paths."},
 	{"refine", "Visual refinement against reference images: regions, design parameters, renders."},
 }
 
@@ -45,8 +46,12 @@ func init() {
 		"workspace": {"set_units", "convert_units", "configure_grid", "configure_snapping", "snap_calculate",
 			"get_workspace_settings", "restore_workspace_defaults", "set_mesh_detail"},
 		"project": {"get_model_summary", "measure_distance", "export_step", "export_stl", "restore_checkpoint"},
+		"paths": {"create_path", "update_path", "delete_path", "evaluate_path", "create_profile", "update_profile",
+			"create_sweep", "update_sweep", "create_tube", "create_wire", "create_ribbon", "validate_geometry",
+			"create_relief", "engrave_surface", "create_stamp", "apply_recipe", "update_recipe", "get_recipe", "validate_printability", "stamp_impression", "create_text_geometry", "project_path_to_surface"},
 		"image": {"analyze_image", "create_from_image", "create_sketch_from_image", "extrude_detected_profile",
-			"confirm_detected_dimension", "get_sketch_proposal", "update_sketch_proposal", "set_sketch_scale"},
+			"confirm_detected_dimension", "get_sketch_proposal", "update_sketch_proposal", "set_sketch_scale",
+			"vectorize_image", "image_to_paths", "sketch_to_solid", "check_solid_vs_trace"},
 		"refine": {"define_region", "lock_region", "unlock_region", "render_model", "calibrate_reference_image",
 			"get_visual_state", "define_parameters", "set_parameter", "bind_parameters"},
 	} {

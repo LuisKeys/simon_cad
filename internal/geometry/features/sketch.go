@@ -89,8 +89,12 @@ func sketchPt(p Params, v any) ([2]float64, error) {
 	return [2]float64{u, w}, nil
 }
 
+func bezierSeg(a, c1, c2, b [2]float64) api.Seg2D {
+	return api.Seg2D{Kind: 3, A: [8]float64{a[0], a[1], c1[0], c1[1], c2[0], c2[1], b[0], b[1]}}
+}
+
 func lineSeg(a, b [2]float64) api.Seg2D {
-	return api.Seg2D{Kind: 0, A: [6]float64{a[0], a[1], b[0], b[1]}}
+	return api.Seg2D{Kind: 0, A: [8]float64{a[0], a[1], b[0], b[1]}}
 }
 
 func entityOf(p Params, m map[string]any) (sketchEntity, error) {
@@ -148,7 +152,7 @@ func entityOf(p Params, m map[string]any) (sketchEntity, error) {
 		if err != nil {
 			return sketchEntity{}, err
 		}
-		return sketchEntity{segs: []api.Seg2D{{Kind: 1, A: [6]float64{a[0], a[1], mid[0], mid[1], b[0], b[1]}}}}, nil
+		return sketchEntity{segs: []api.Seg2D{{Kind: 1, A: [8]float64{a[0], a[1], mid[0], mid[1], b[0], b[1]}}}}, nil
 	case "circle":
 		v, err := nums("cx", "cy", "r")
 		if err != nil {
@@ -157,7 +161,7 @@ func entityOf(p Params, m map[string]any) (sketchEntity, error) {
 		if !(v[2] > 0) {
 			return sketchEntity{}, fmt.Errorf("circle r must be > 0")
 		}
-		return sketchEntity{segs: []api.Seg2D{{Kind: 2, A: [6]float64{v[0], v[1], v[2]}}}, closed: true}, nil
+		return sketchEntity{segs: []api.Seg2D{{Kind: 2, A: [8]float64{v[0], v[1], v[2]}}}, closed: true}, nil
 	case "rectangle":
 		v, err := nums("x", "y", "w", "h")
 		if err != nil {
@@ -191,6 +195,56 @@ func entityOf(p Params, m map[string]any) (sketchEntity, error) {
 			segs[i] = lineSeg(pts[i], pts[(i+1)%len(pts)])
 		}
 		return sketchEntity{segs: segs, closed: true}, nil
+	case "bezier":
+		a, err := pt("p1")
+		if err != nil {
+			return sketchEntity{}, err
+		}
+		c1, err := pt("c1")
+		if err != nil {
+			return sketchEntity{}, err
+		}
+		c2, err := pt("c2")
+		if err != nil {
+			return sketchEntity{}, err
+		}
+		b, err := pt("p2")
+		if err != nil {
+			return sketchEntity{}, err
+		}
+		if math.Hypot(a[0]-b[0], a[1]-b[1]) < sketchTol && math.Hypot(a[0]-c1[0], a[1]-c1[1]) < sketchTol {
+			return sketchEntity{}, fmt.Errorf("bezier endpoints coincide")
+		}
+		return sketchEntity{segs: []api.Seg2D{bezierSeg(a, c1, c2, b)}}, nil
+	case "curve":
+		// a closed loop of cubic bezier segments: segments: [[p1,c1,c2,p2], ...] where every
+		// segment starts where the previous one ended (the last one ends at the first start)
+		raw, ok := m["segments"].([]any)
+		if !ok || len(raw) < 1 {
+			return sketchEntity{}, fmt.Errorf("curve needs segments: [[p1,c1,c2,p2], ...]")
+		}
+		segs := make([]api.Seg2D, len(raw))
+		for i, it := range raw {
+			quad, ok := it.([]any)
+			if !ok || len(quad) != 4 {
+				return sketchEntity{}, fmt.Errorf("segments[%d] must be [p1, c1, c2, p2]", i)
+			}
+			var q [4][2]float64
+			for k := range quad {
+				r, err := sketchPt(p, quad[k])
+				if err != nil {
+					return sketchEntity{}, fmt.Errorf("segments[%d][%d]: %w", i, k, err)
+				}
+				q[k] = r
+			}
+			segs[i] = bezierSeg(q[0], q[1], q[2], q[3])
+		}
+		for i := range segs {
+			if !near(segEnd(segs[i]), segStart(segs[(i+1)%len(segs)])) {
+				return sketchEntity{}, fmt.Errorf("curve segment %d does not end where segment %d starts", i, (i+1)%len(segs))
+			}
+		}
+		return sketchEntity{segs: segs, closed: true}, nil
 	case "slot":
 		v, err := nums("x1", "y1", "x2", "y2", "width")
 		if err != nil {
@@ -215,12 +269,12 @@ func entityOf(p Params, m map[string]any) (sketchEntity, error) {
 		cap1 := [2]float64{v[0] - ux*r, v[1] - uy*r}
 		return sketchEntity{segs: []api.Seg2D{
 			lineSeg(a1, a2),
-			{Kind: 1, A: [6]float64{a2[0], a2[1], cap2[0], cap2[1], b2[0], b2[1]}},
+			{Kind: 1, A: [8]float64{a2[0], a2[1], cap2[0], cap2[1], b2[0], b2[1]}},
 			lineSeg(b2, b1),
-			{Kind: 1, A: [6]float64{b1[0], b1[1], cap1[0], cap1[1], a1[0], a1[1]}},
+			{Kind: 1, A: [8]float64{b1[0], b1[1], cap1[0], cap1[1], a1[0], a1[1]}},
 		}, closed: true}, nil
 	}
-	return sketchEntity{}, fmt.Errorf("entity kind must be line, arc, circle, rectangle, polygon or slot (got %q)", kind)
+	return sketchEntity{}, fmt.Errorf("entity kind must be line, arc, bezier, curve, circle, rectangle, polygon or slot (got %q)", kind)
 }
 
 // sketchSpec is a sketch node's parameters resolved into segments and regions.
@@ -295,8 +349,11 @@ func parseSketch(p Params) (*sketchSpec, error) {
 func segStart(s api.Seg2D) [2]float64 { return [2]float64{s.A[0], s.A[1]} }
 
 func segEnd(s api.Seg2D) [2]float64 {
-	if s.Kind == 1 {
+	switch s.Kind {
+	case 1:
 		return [2]float64{s.A[4], s.A[5]}
+	case 3:
+		return [2]float64{s.A[6], s.A[7]}
 	}
 	return [2]float64{s.A[2], s.A[3]}
 }
@@ -304,9 +361,11 @@ func segEnd(s api.Seg2D) [2]float64 {
 func segFlip(s api.Seg2D) api.Seg2D {
 	switch s.Kind {
 	case 0:
-		return api.Seg2D{Kind: 0, A: [6]float64{s.A[2], s.A[3], s.A[0], s.A[1]}}
+		return api.Seg2D{Kind: 0, A: [8]float64{s.A[2], s.A[3], s.A[0], s.A[1]}}
 	case 1:
-		return api.Seg2D{Kind: 1, A: [6]float64{s.A[4], s.A[5], s.A[2], s.A[3], s.A[0], s.A[1]}}
+		return api.Seg2D{Kind: 1, A: [8]float64{s.A[4], s.A[5], s.A[2], s.A[3], s.A[0], s.A[1]}}
+	case 3:
+		return api.Seg2D{Kind: 3, A: [8]float64{s.A[6], s.A[7], s.A[4], s.A[5], s.A[2], s.A[3], s.A[0], s.A[1]}}
 	}
 	return s
 }

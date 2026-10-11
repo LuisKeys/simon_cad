@@ -10,11 +10,15 @@ import (
 
 var entitySchema = object(props{
 	"id":   text("Entity id, unique in the sketch (e1, e2, ...)"),
-	"kind": enum("Entity kind", "line", "arc", "circle", "rectangle", "polygon", "slot"),
+	"kind": enum("Entity kind", "line", "arc", "bezier", "curve", "circle", "rectangle", "polygon", "slot"),
 	"p1":   array("line/arc start [u,v]", number("coordinate"), 2, 2),
 	"p2":   array("line/arc end [u,v]", number("coordinate"), 2, 2),
 	"mid":  array("arc: any point on the arc between p1 and p2 [u,v]", number("coordinate"), 2, 2),
-	"cx":   number("circle center u"), "cy": number("circle center v"), "r": positive("circle radius"),
+	"c1":   array("bezier: first control point [u,v]", number("coordinate"), 2, 2),
+	"c2":   array("bezier: second control point [u,v]", number("coordinate"), 2, 2),
+	"segments": array("curve: closed loop of cubic bezier segments [[p1,c1,c2,p2],...]; each starts where the previous ends",
+		array("[p1,c1,c2,p2]", array("[u,v]", number("coordinate"), 2, 2), 4, 4), 1, 2000),
+	"cx": number("circle center u"), "cy": number("circle center v"), "r": positive("circle radius"),
 	"x": number("rectangle min-corner u"), "y": number("rectangle min-corner v"),
 	"w": positive("rectangle size along u"), "h": positive("rectangle size along v"),
 	"points": array("polygon vertices [[u,v],...]", array("[u,v]", number("coordinate"), 2, 2), 3, 500),
@@ -32,7 +36,7 @@ func sketchTools() []*Tool {
 	return []*Tool{
 		{
 			Name: "create_sketch",
-			Description: "Create a planar 2D sketch (no solid yet). Entities (mm, plane coordinates u,v): line{p1,p2}, arc{p1,mid,p2}, circle{cx,cy,r}, rectangle{x,y,w,h}, polygon{points}, slot{x1,y1,x2,y2,width}. " +
+			Description: "Create a planar 2D sketch (no solid yet). Entities (mm, plane coordinates u,v): line{p1,p2}, arc{p1,mid,p2}, bezier{p1,c1,c2,p2}, curve{segments: closed bezier loop}, circle{cx,cy,r}, rectangle{x,y,w,h}, polygon{points}, slot{x1,y1,x2,y2,width}. " +
 				"`regions` group closed loops into faces (outer loop + holes); if omitted every closed entity (circle/rectangle/polygon/slot) is its own region. " +
 				"Place it on plane XY (normal +Z, u=X,v=Y), YZ (normal +X, u=Y,v=Z) or XZ (normal +Y, u=Z,v=X) with `offset`, or on a planar `face` (origin at the face centroid, u along its longest straight edge). " +
 				"Turn regions into material with extrude_sketch.",

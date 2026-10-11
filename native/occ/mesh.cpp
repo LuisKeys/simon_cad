@@ -69,7 +69,11 @@ static void add_face(occ_mesh& m, const TopoDS_Face& f) {
   switch (surf.GetType()) {
     case GeomAbs_Plane: {
       fi.surface = OCC_SURF_PLANE;
-      gp_Dir n = surf.Plane().Axis().Direction();
+      const gp_Pln pl = surf.Plane();
+      gp_Dir n = pl.Axis().Direction();
+      // A mirrored plane has a left-handed frame: its surface normal (U x V) is opposite to the
+      // axis, so only a direct frame's axis can be used as is.
+      if (!pl.Position().Direct()) n.Reverse();
       if (reversed) n.Reverse();
       fi.nx = n.X(); fi.ny = n.Y(); fi.nz = n.Z();
       break;

@@ -294,6 +294,40 @@ carry `created_by: agent`, `capability: vision`, `source_image_id`, `interpretat
 ChangeSet ids. Geometry rebuilds from the CAD-IR alone; `geometry`/`cadir` never import `vision` or
 `agent` (tested). Source images are saved under `assets/images/` only when explicitly retained.
 
+### Paths, sweeps and creative geometry
+
+Pure-data nodes (`Feature.Kind = KindData`: `path`, `profile`) build no geometry; the rebuild stores their
+resolved parameters and keys dependents on them, so editing a path regenerates every sweep, relief and
+engraving that uses it through the ordinary content-key cache, undo/redo and persistence (no new
+mechanism). Pure-Go engines sit under the features:
+
+- `geometry/curve` (linear / Bézier / Catmull-Rom / B-spline, arc length, resample, Douglas-Peucker,
+  smoothing, rotation-minimising frames) and `geometry/profile` (presets, custom contours, orientation).
+  `testdata/curve_cases.json` pins values that `frontend/path-model.js` must reproduce.
+- `geometry/sweep` plans a sweep (frames, miter for polylines, caps, analytic expected volume); the
+  `sweep` feature lofts the sections in runs of 10 through `native/occ/sweep.cpp` (shared boundary wires,
+  sewing) and compares the kernel volume with the analytic one, so an unstable loft fails as `SWEEP_FAILED`
+  instead of passing as a wrong solid. A cubic Bézier is `Seg2D.Kind = 3` in sketches.
+- `vectorize` (Otsu/adaptive threshold, marching squares, Schneider Bézier fit, Zhang-Suen skeleton, SVG
+  reader), deterministic and independent of `vision`/`agent` (tested).
+- `geometry/text` (golang.org/x/image/font/sfnt: kerning, spacing, alignment, mirror; counters by
+  winding/nesting) produces regions of cubic Béziers that tools turn into an ordinary `sketch`.
+- `geometry/project` + `meshgeo` (BVH over the tessellation) project points to a surface (planar, nearest,
+  conform with adaptive refinement). `project_path_to_surface` writes the result as a new `path` node: a
+  snapshot, re-run when the body changes.
+- `meshcheck` (watertight / non-manifold / components) backs `validate_geometry`, `validate_printability`
+  and the STL checks.
+- `relief` is a solid feature composing a sketch prism or a sweep with a union/subtract on a target body.
+- `recipe` is a declarative JSON description (`stamp`) expanded deterministically into a node group; the
+  recipe is stored on the group, `update_recipe` diffs and regenerates it in one ChangeSet.
+
+Failures that an agent can act on carry a machine-readable code and a hint
+(`features.CodedError`: `PATH_SELF_INTERSECTION`, `EXCESSIVE_CURVATURE`, `SWEEP_FAILED`,
+`SURFACE_PROJECTION_FAILED`, `RELIEF_DISCONNECTED`, `SCALE_REQUIRED`, …); `Outcome.Code()` exposes them.
+Nothing is invented: real sizes, depths, stroke widths and shrinkage are required inputs and every default
+that was assumed is listed in the answer. `Shape.Props` is memoised and the kernel integrates mass
+properties adaptively (see [performance.md](performance.md)).
+
 ### 6c. Transformations: moving and rotating objects
 
 One pipeline serves the viewport and the agent:

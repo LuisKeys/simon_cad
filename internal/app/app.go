@@ -19,6 +19,7 @@ import (
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/export"
 	"github.com/accelone/simoncad/internal/geometry/api"
+	"github.com/accelone/simoncad/internal/geometry/features"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
@@ -594,11 +595,34 @@ type Outcome struct {
 	Message    string
 }
 
+// Code is the machine-readable error code of a failed call ("" when none applies): either named
+// in the error itself or in an error-severity validation of its ChangeSet (a rebuild failure).
+func (o Outcome) Code() string {
+	if o.Error != "" {
+		if c := features.CodeOf(o.Error); c != "" {
+			return c
+		}
+	}
+	if o.ChangeSet != nil {
+		for _, v := range o.ChangeSet.Validation {
+			if v.Severity == "error" {
+				if c := features.CodeOf(v.Message); c != "" {
+					return c
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // JSON renders the outcome as the structured tool result returned to an agent.
 func (o Outcome) JSON() string {
 	m := map[string]any{"tool_call_id": o.ToolCallID, "ok": o.OK}
 	if o.Error != "" {
 		m["error"] = o.Error
+	}
+	if c := o.Code(); c != "" {
+		m["code"] = c
 	}
 	if o.Data != nil {
 		m["result"] = o.Data
@@ -650,6 +674,23 @@ func compactJSON(b []byte) []byte {
 	}
 	out, _ := json.Marshal(v)
 	return out
+}
+
+// Query runs a read-only tool (one that never edits the model) without recording a tool call:
+// for UI previews that run on every slider move. A tool that edits the model is refused.
+func (a *App) Query(name string, args []byte) (any, error) {
+	t, ok := a.Reg.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("unknown tool %q", name)
+	}
+	if t.Mutating() {
+		return nil, fmt.Errorf("%s edits the model and cannot be used as a query", name)
+	}
+	res, err := a.Reg.Invoke(toolEnv{a}, name, args)
+	if err != nil {
+		return nil, err
+	}
+	return res.Data, nil
 }
 
 // ApplyTool is THE mutation entry point: schema validation → semantic validation →

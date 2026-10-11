@@ -35,6 +35,8 @@ var knownParams = map[string][]string{
 	"face_extrude":     {"distance"},
 	"face_inset":       {"inset", "depth"},
 	"face_offset":      {"distance"},
+	"relief":           {"depth", "offset", "mirror", "reverse"},
+	"sweep":            {"cap_length", "twist", "tolerance", "max_sections"},
 	// A component instance exposes only its placement. The reference itself (component,
 	// version, content_hash) identifies what is being instantiated and is changed through
 	// insert_component / sync_component, which validate it, not by editing a field.

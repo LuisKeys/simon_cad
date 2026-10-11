@@ -20,6 +20,11 @@ type Props = bridge.Props
 type Shape struct {
 	k *Kernel
 	h bridge.Handle
+
+	// A shape is immutable, so its mass properties are computed once (they cost milliseconds on
+	// swept or traced surfaces and the rebuild, the features' own checks and the tools all ask).
+	pmu   sync.Mutex
+	props *Props
 }
 
 // Kernel serialises every OCCT call onto one locked OS thread (OCCT is not
@@ -246,11 +251,19 @@ func (s *Shape) Props() (Props, error) {
 	if s.h == 0 {
 		return Props{}, ErrReleased
 	}
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	if s.props != nil {
+		return *s.props, nil
+	}
 	var (
 		p   Props
 		err error
 	)
 	s.k.run(func() { p, err = bridge.MassProps(s.h) })
+	if err == nil {
+		s.props = &p
+	}
 	return p, err
 }
 
@@ -332,7 +345,9 @@ const (
 // Tessellate meshes the shape at the given linear deflection (mm). Faces, edges and
 // vertices are numbered deterministically, so an index identifies the same entity on
 // every rebuild of the same shape.
-func (s *Shape) Tessellate(deflection float64) (*Mesh, error) { return s.TessellateAngular(deflection, 0.5) }
+func (s *Shape) Tessellate(deflection float64) (*Mesh, error) {
+	return s.TessellateAngular(deflection, 0.5)
+}
 
 // TessellateAngular is Tessellate with an explicit angular deflection (radians): the widest
 // angle one segment of a curve may span. Larger values give fewer, longer segments.
@@ -353,4 +368,19 @@ func (k *Kernel) LiveMeshes() int64 {
 	var n int64
 	k.run(func() { n = bridge.LiveMeshes() })
 	return n
+}
+
+// Sweep types are defined by the bridge; callers build them from path frames and a profile.
+type (
+	SweepSection = bridge.SweepSection
+	SweepContour = bridge.SweepContour
+	SweepSpec    = bridge.SweepSpec
+)
+
+// Sweep lofts a profile through caller-placed sections into a solid.
+func (k *Kernel) Sweep(sp SweepSpec) (*Shape, error) {
+	cp := sp
+	cp.Sections = append([]SweepSection(nil), sp.Sections...)
+	cp.Contours = append([]SweepContour(nil), sp.Contours...)
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Sweep(cp) })
 }

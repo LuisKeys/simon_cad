@@ -336,3 +336,41 @@ func TestSketchBooleanChain(t *testing.T) {
 		t.Fatalf("subtract volume %v", got)
 	}
 }
+
+// A closed loop of cubic Bezier segments is a region like any other: four arcs make a near
+// circle (kappa handles), and a bezier hole cuts out of a bezier outline.
+func TestSketchBezierCurveRegions(t *testing.T) {
+	_, e := setup(t)
+	k := 0.5522847498307936
+	circle := func(cx, cy, r float64) []any {
+		pt := func(x, y float64) []any { return []any{cx + x*r, cy + y*r} }
+		seg := func(a, b, c, d []any) []any { return []any{a, b, c, d} }
+		return []any{
+			seg(pt(1, 0), pt(1, k), pt(k, 1), pt(0, 1)), seg(pt(0, 1), pt(-k, 1), pt(-1, k), pt(-1, 0)),
+			seg(pt(-1, 0), pt(-1, -k), pt(-k, -1), pt(0, -1)), seg(pt(0, -1), pt(k, -1), pt(1, -k), pt(1, 0))}
+	}
+	g := cadir.NewGraph()
+	g.Nodes = []*cadir.Node{
+		sketchNode("sk", map[string]any{"plane": "XY",
+			"entities": []any{ent("curve", "id", "outer", "segments", circle(0, 0, 10)), ent("curve", "id", "hole", "segments", circle(0, 0, 4))},
+			"regions":  []any{map[string]any{"id": "r1", "outer": []any{"outer"}, "holes": []any{[]any{"hole"}}}}}, nil),
+		extrudeSketch("disc", "sk", "", 3, nil),
+	}
+	m := rebuildOK(t, e, g)
+	want := math.Pi * (100 - 16) * 3
+	if got := m.Volume(); math.Abs(got-want)/want > 1e-3 {
+		t.Fatalf("volume %v want %v", got, want)
+	}
+	// a curve whose segments do not chain is rejected with a clear message
+	bad := circle(0, 0, 10)
+	bad[1].([]any)[0] = []any{5.0, 5.0}
+	g.Nodes[0].Parameters["entities"] = []any{ent("curve", "id", "outer", "segments", bad)}
+	g.Nodes[0].Parameters["regions"] = []any{map[string]any{"id": "r1", "outer": []any{"outer"}}}
+	m, err := e.Rebuild(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Failed()) == 0 {
+		t.Fatal("a broken curve loop must fail")
+	}
+}

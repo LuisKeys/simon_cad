@@ -194,6 +194,128 @@ int main() {
     CHECK(occ_live_handle_count() == 0);
   }
 
+  // Sweep: straight tubes (solid, hollow, polygon), a ring (torus) and a pointed end.
+  {
+    auto straight = [](int n, double len) {
+      std::vector<occ_section> v(n);
+      for (int i = 0; i < n; i++) {
+        v[i] = {{0, 0, len * i / (n - 1)}, {1, 0, 0}, {0, 1, 0}, 1, 1};
+      }
+      return v;
+    };
+    occ_props q;
+    int32_t valid = 0;
+    occ_handle h = 0;
+    auto sec5 = straight(5, 10);
+    occ_contour round2 = {1, 0, 0, 2, 2};
+    CHECK(occ_sweep(sec5.data(), 5, &round2, 1, nullptr, 0, nullptr, nullptr, 0, 0, 0, 0, 0, &h) == OCC_OK);
+    CHECK(occ_mass_props(h, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - M_PI * 4 * 10) / (M_PI * 40) < 1e-6);
+    CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1);
+    occ_release(h);
+
+    occ_contour hollow[2] = {{1, 0, 0, 3, 3}, {1, 1, 0, 2, 2}};
+    CHECK(occ_sweep(sec5.data(), 5, hollow, 2, nullptr, 0, nullptr, nullptr, 0, 0, 0, 0, 0, &h) == OCC_OK);
+    CHECK(occ_mass_props(h, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - M_PI * 5 * 10) / (M_PI * 50) < 1e-4);
+    CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1 && q.solid_count == 1);
+    occ_release(h);
+
+    double rect[8] = {-2, -1, 2, -1, 2, 1, -2, 1};
+    occ_contour poly = {0, 0, 4, 0, 0};
+    CHECK(occ_sweep(sec5.data(), 5, &poly, 1, rect, 0, nullptr, nullptr, 0, 0, 0, 0, 0, &h) == OCC_OK);
+    CHECK(occ_mass_props(h, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - 80) / 80 < 1e-6);
+    occ_release(h);
+
+    // flipped scale ratio (w<h) must not twist the loft: volume = pi*2*4*10 * the scale product
+    auto sc = straight(5, 10);
+    for (int i = 0; i < 5; i++) { sc[i].sx = 1.5 - 0.25 * i; sc[i].sy = 0.5 + 0.25 * i; }
+    CHECK(occ_sweep(sc.data(), 5, &round2, 1, nullptr, 0, nullptr, nullptr, 0, 0, 0, 0, 0, &h) == OCC_OK);
+    CHECK(occ_mass_props(h, &q) == OCC_OK);
+    CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1 && q.volume > 0);
+    occ_release(h);
+
+    // pointed cap: a ruled sweep from the end section to an apex is a cone
+    double apex[3] = {0, 0, 14};
+    occ_section last = sec5.back();
+    CHECK(occ_sweep(&last, 1, &round2, 1, nullptr, 0, nullptr, apex, 1, 0, 0, 0, 0, &h) == OCC_OK);
+    CHECK(occ_mass_props(h, &q) == OCC_OK);
+    double cone = M_PI * 4 * 4 / 3.0;
+    CHECK(std::fabs(q.volume - cone) / cone < 1e-3);
+    CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1);
+    occ_release(h);
+
+    // ring: torus R=10, r=2
+    const int n = 32;
+    std::vector<occ_section> ring(n);
+    for (int i = 0; i < n; i++) {
+      double a = 2 * M_PI * i / n;
+      ring[i] = {{10 * std::cos(a), 10 * std::sin(a), 0}, {std::cos(a), std::sin(a), 0}, {0, 0, -1}, 1, 1};
+    }
+    CHECK(occ_sweep(ring.data(), n, &round2, 1, nullptr, 1, nullptr, nullptr, 0, 0, 0, 0, 0, &h) == OCC_OK);
+    CHECK(occ_mass_props(h, &q) == OCC_OK);
+    double torus = 2 * M_PI * M_PI * 10 * 4;
+    CHECK(std::fabs(q.volume - torus) / torus < 5e-3);
+    CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1);
+    occ_release(h);
+
+    // errors
+    CHECK(occ_sweep(sec5.data(), 1, &round2, 1, nullptr, 0, nullptr, nullptr, 0, 0, 0, 0, 0, &h) == OCC_ERR_INVALID_ARG);
+    CHECK(occ_sweep(sec5.data(), 5, hollow, 2, nullptr, 0, nullptr, apex, 0, 0, 0, 0, 0, &h) == OCC_ERR_INVALID_ARG);
+    occ_contour holeFirst = {1, 1, 0, 2, 2};
+    CHECK(occ_sweep(sec5.data(), 5, &holeFirst, 1, nullptr, 0, nullptr, nullptr, 0, 0, 0, 0, 0, &h) == OCC_ERR_INVALID_ARG);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
+  // Bezier sketch segments: four cubic arcs make a near-circle; a face and a prism of it.
+  {
+    const double r = 10, k = 0.5522847498307936 * r;
+    occ_seg2d loop[4] = {
+      {3, {r, 0, r, k, k, r, 0, r}}, {3, {0, r, -k, r, -r, k, -r, 0}},
+      {3, {-r, 0, -r, -k, -k, -r, 0, -r}}, {3, {0, -r, k, -r, r, -k, r, 0}}};
+    int32_t sizes[1] = {4};
+    occ_handle face = 0, solid = 0;
+    CHECK(occ_make_face(loop, sizes, 1, &face) == OCC_OK);
+    CHECK(occ_prism(face, 0, 0, 2, &solid) == OCC_OK);
+    occ_props q;
+    CHECK(occ_mass_props(solid, &q) == OCC_OK);
+    CHECK(std::fabs(q.volume - M_PI * r * r * 2) / (M_PI * r * r * 2) < 5e-4);
+    // a loop that does not chain, and a degenerate segment, are rejected
+    occ_seg2d broken[2] = {{3, {0, 0, 1, 0, 2, 0, 3, 0}}, {3, {9, 9, 8, 8, 7, 7, 6, 6}}};
+    int32_t two[1] = {2};
+    occ_handle bad = 0;
+    CHECK(occ_make_face(broken, two, 1, &bad) != OCC_OK);
+    occ_seg2d dot[1] = {{3, {1, 1, 1, 1, 1, 1, 1, 1}}};
+    int32_t one[1] = {1};
+    CHECK(occ_make_face(dot, one, 1, &bad) == OCC_ERR_INVALID_ARG);
+    occ_release(face); occ_release(solid);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
+  // A mirrored solid keeps outward face normals (a mirrored plane has a left-handed frame).
+  {
+    occ_handle box = 0, mir = 0;
+    CHECK(occ_box(4, 6, 2, &box) == OCC_OK);
+    CHECK(occ_mirror(box, 0, 0, 0, 1, 0, 0, &mir) == OCC_OK);  // x -> -x: the box now spans x in [-4, 0]
+    occ_mesh* m = nullptr;
+    CHECK(occ_tessellate(mir, 0.1, &m) == OCC_OK);
+    occ_mesh_counts counts;
+    CHECK(occ_mesh_get_counts(m, &counts) == OCC_OK);
+    std::vector<occ_face_info> faces(counts.faces);
+    CHECK(occ_mesh_copy(m, nullptr, nullptr, nullptr, faces.data(), nullptr, nullptr, nullptr) == OCC_OK);
+    int outward = 0;
+    for (const auto& f : faces) {
+      // the face centroid minus the solid's centre must point the same way as the normal
+      const double cx = f.cx + 2, cy = f.cy - 3, cz = f.cz - 1;
+      if (f.nx * cx + f.ny * cy + f.nz * cz > 0) outward++;
+    }
+    CHECK(outward == (int)faces.size());
+    occ_mesh_free(m);
+    occ_release(box); occ_release(mir);
+    CHECK(occ_live_handle_count() == 0);
+  }
+
   // Churn: handles must return to zero.
   for (int i = 0; i < 2000; ++i) {
     occ_handle a = 0, b = 0, c = 0;

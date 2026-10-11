@@ -205,6 +205,8 @@ func (c *SetParameter) Apply(g *cadir.Graph) (Command, error) {
 	return &SetParameter{ID: c.ID, Name: c.Name, Value: old}, nil
 }
 
+// jsonScalarOrList accepts JSON values: scalars, lists and string-keyed objects of them
+// (path points and profile contours are nested data).
 func jsonScalarOrList(v any) bool {
 	switch x := v.(type) {
 	case float64, string, bool:
@@ -212,6 +214,13 @@ func jsonScalarOrList(v any) bool {
 	case int:
 		return true
 	case []any:
+		for _, e := range x {
+			if !jsonScalarOrList(e) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
 		for _, e := range x {
 			if !jsonScalarOrList(e) {
 				return false

@@ -26,7 +26,7 @@ Invoke directly with: `simoncad-cli tool <project> <tool> '<json>'`.
 
 
 CATEGORY_ORDER = ["primitives", "sketch", "edit", "transform", "parametric", "components", "appearance",
-                  "workspace", "project", "image", "refine"]
+                  "workspace", "project", "paths", "image", "refine"]
 
 
 def typ(p):

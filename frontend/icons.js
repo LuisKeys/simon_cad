@@ -28,6 +28,14 @@ const ICONS = {
   cone: [P('M4 18 12 3l8 15'), P('M4 18a8 3 0 0 0 16 0')],
   sphere: [C(12, 12, 9), P('M3 12a9 3.5 0 0 0 18 0')],
   torus: [E(12, 12, 10, 6), E(12, 12, 4, 2.2)],
+  path: [P('M4 18 9 8l6 7 5-10'), C(4, 18, 1.6), C(9, 8, 1.6), C(15, 15, 1.6), C(20, 5, 1.6)],
+  text: [P('M5 6V4h14v2'), L(12, 4, 12, 20), L(9, 20, 15, 20)],
+  curve: [P('M3 18C8 18 8 6 13 6s5 12 8 12'), C(3, 18, 1.5), C(21, 18, 1.5)],
+  tube: [P('M5 7c4-3 10 3 14 0'), P('M5 17c4-3 10 3 14 0'), E(5, 12, 2, 5), P('M19 7v10')],
+  ribbon: [P('M3 8c5-4 6 4 11 0s5 0 7-2v6c-2 2-2 6-7 2s-6 4-11 0z')],
+  wire: [P('M3 16c4-8 6 6 9-2s6-6 9-6'), C(3, 16, 1.4), C(21, 8, 1.4)],
+  sweep: [P('M4 19c4-1 6-5 8-9s5-6 8-6'), R(2, 17, 6, 4, 1), R(17, 2, 5, 4, 1)],
+  profile: [C(12, 12, 8), C(12, 12, 3.5)],
   sketch: [P('M12 20h9'), P('M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z')],
   pencil: [P('M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z')],
   move: [P('m5 9-3 3 3 3'), P('m9 5 3-3 3 3'), P('m15 19-3 3-3-3'), P('m19 9 3 3-3 3'), L(2, 12, 22, 12), L(12, 2, 12, 22)],
@@ -96,7 +104,7 @@ export function icon(name) {
 export function featureIcon(type = '') {
   const t = type.toLowerCase();
   const exact = { copy: 'duplicate', scale: 'scale', face_extrude: 'extrude', face_inset: 'inset', face_offset: 'offset',
-    component_instance: 'component' };
+    component_instance: 'component', path: 'path', profile: 'profile', sweep: 'sweep' };
   if (exact[t]) return exact[t];
   for (const k of ['cylinder', 'cone', 'sphere', 'torus', 'hole', 'mirror', 'fillet', 'chamfer', 'sketch', 'union', 'subtract', 'intersect']) if (t.includes(k)) return k;
   if (t.includes('pattern')) return 'pattern';

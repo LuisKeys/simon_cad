@@ -227,9 +227,16 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 	}
 	res.Params = params
 	resolved[n.ID] = params
-	if feat.Kind == features.KindParams { // design parameters: values only, no geometry
+	if feat.Kind == features.KindParams || feat.Kind == features.KindData {
+		// values only, no geometry; the key follows the parameters so dependents regenerate
+		if feat.Check != nil {
+			if err := feat.Check(params); err != nil {
+				fail("%v", err)
+				return
+			}
+		}
 		pj, _ := json.Marshal(params)
-		res.Status, res.Key = cadir.StatusOK, hashKey("parameters", string(pj))
+		res.Status, res.Key = cadir.StatusOK, hashKey(feat.Type, string(pj))
 		return
 	}
 

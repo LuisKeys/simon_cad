@@ -349,6 +349,22 @@ func (s *Server) routes() {
 		o, err := s.Svc.CallTool(in.Name, in.Args)
 		reply(w, o, err)
 	})
+	m.HandleFunc("/api/query", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string          `json:"name"`
+			Args json.RawMessage `json:"args"`
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		data, err := s.Svc.QueryTool(in.Name, in.Args)
+		if err != nil {
+			reply(w, map[string]any{"ok": false, "error": err.Error()}, nil)
+			return
+		}
+		reply(w, map[string]any{"ok": true, "data": data}, nil)
+	})
 	m.HandleFunc("/api/delete", func(w http.ResponseWriter, r *http.Request) {
 		var in DeleteRequest
 		if err := decode(r, &in); err != nil {

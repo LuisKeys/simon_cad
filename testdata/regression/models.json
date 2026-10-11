@@ -1,0 +1,445 @@
+[
+ {
+  "name": "helix_tube",
+  "script": [
+   {
+    "tool": "create_tube",
+    "args": {
+     "id": "m",
+     "points": [
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       3
+      ],
+      [
+       -10,
+       0,
+       6
+      ],
+      [
+       0,
+       -10,
+       9
+      ],
+      [
+       10,
+       0,
+       12
+      ],
+      [
+       0,
+       10,
+       15
+      ],
+      [
+       -10,
+       0,
+       18
+      ]
+     ],
+     "outer_diameter": 3
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 637.4986,
+   "min": [
+    -11.5017,
+    -11.4996,
+    -1.4673
+   ],
+   "max": [
+    11.5003,
+    11.5001,
+    19.4673
+   ],
+   "solids": 1,
+   "faces": 12
+  }
+ },
+ {
+  "name": "torus_ring",
+  "script": [
+   {
+    "tool": "create_tube",
+    "args": {
+     "id": "m",
+     "points": [
+      [
+       20,
+       0,
+       0
+      ],
+      [
+       0,
+       20,
+       0
+      ],
+      [
+       -20,
+       0,
+       0
+      ],
+      [
+       0,
+       -20,
+       0
+      ]
+     ],
+     "closed": true,
+     "outer_diameter": 4
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 1494.1445,
+   "min": [
+    -22.0018,
+    -22.0011,
+    -2
+   ],
+   "max": [
+    22,
+    21.9999,
+    2
+   ],
+   "solids": 1,
+   "faces": 9
+  }
+ },
+ {
+  "name": "hollow_pipe",
+  "script": [
+   {
+    "tool": "create_tube",
+    "args": {
+     "id": "m",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       30,
+       0,
+       0
+      ],
+      [
+       60,
+       15,
+       0
+      ]
+     ],
+     "outer_diameter": 8,
+     "inner_diameter": 5
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 1950.659,
+   "min": [
+    -0,
+    -5.108,
+    -4
+   ],
+   "max": [
+    61.7889,
+    18.5777,
+    4
+   ],
+   "solids": 1,
+   "faces": 5
+  }
+ },
+ {
+  "name": "flat_ribbon",
+  "script": [
+   {
+    "tool": "create_ribbon",
+    "args": {
+     "id": "m",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       30,
+       10,
+       0
+      ],
+      [
+       60,
+       0,
+       0
+      ]
+     ],
+     "width": 10,
+     "thickness": 1.5
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 951.9149,
+   "min": [
+    -1.5811,
+    -4.7434,
+    -0.75
+   ],
+   "max": [
+    61.5811,
+    14.9752,
+    0.75
+   ],
+   "solids": 1,
+   "faces": 10
+  }
+ },
+ {
+  "name": "extruded_text",
+  "script": [
+   {
+    "tool": "create_text_geometry",
+    "args": {
+     "id": "m",
+     "text": "Simon",
+     "size": 12,
+     "mode": "extrude",
+     "depth": 3
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 278.5246,
+   "min": [
+    0.7031,
+    -0.2168,
+    -0
+   ],
+   "max": [
+    33.4748,
+    8.8886,
+    3
+   ],
+   "solids": 6,
+   "faces": 86
+  }
+ },
+ {
+  "name": "embossed_label",
+  "script": [
+   {
+    "tool": "create_box",
+    "args": {
+     "id": "plate",
+     "dx": 60,
+     "dy": 30,
+     "dz": 4,
+     "x": -30,
+     "y": -15
+    }
+   },
+   {
+    "tool": "create_text_geometry",
+    "args": {
+     "id": "m",
+     "text": "CAD",
+     "size": 10,
+     "mode": "emboss",
+     "depth": 1.5,
+     "target": "plate",
+     "offset": 4,
+     "center": true
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 7274.3751,
+   "min": [
+    -30,
+    -15,
+    0
+   ],
+   "max": [
+    30,
+    15,
+    5.5
+   ],
+   "solids": 1,
+   "faces": 50
+  }
+ },
+ {
+  "name": "engraved_groove",
+  "script": [
+   {
+    "tool": "create_box",
+    "args": {
+     "id": "plate",
+     "dx": 50,
+     "dy": 50,
+     "dz": 6,
+     "x": -25,
+     "y": -25
+    }
+   },
+   {
+    "tool": "engrave_surface",
+    "args": {
+     "id": "m",
+     "target": "plate",
+     "points": [
+      [
+       -20,
+       -10,
+       6
+      ],
+      [
+       0,
+       10,
+       6
+      ],
+      [
+       20,
+       -10,
+       6
+      ]
+     ],
+     "width": 2,
+     "style": "round"
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 14909.5199,
+   "min": [
+    -25,
+    -25,
+    0
+   ],
+   "max": [
+    25,
+    25,
+    6
+   ],
+   "solids": 1,
+   "faces": 80
+  }
+ },
+ {
+  "name": "glyph_stamp",
+  "script": [
+   {
+    "tool": "create_stamp",
+    "args": {
+     "id": "m",
+     "path": "glyph.png",
+     "width": 50,
+     "height": 50,
+     "relief_height": 1.5,
+     "handle_enabled": true
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 14230.1484,
+   "min": [
+    -25,
+    -25,
+    -12
+   ],
+   "max": [
+    25,
+    25,
+    5.5
+   ],
+   "solids": 1,
+   "faces": 19
+  }
+ },
+ {
+  "name": "projected_groove",
+  "script": [
+   {
+    "tool": "create_cylinder",
+    "args": {
+     "id": "drum",
+     "radius": 20,
+     "height": 60
+    }
+   },
+   {
+    "tool": "create_path",
+    "args": {
+     "id": "line",
+     "points": [
+      [
+       60,
+       -8,
+       30
+      ],
+      [
+       60,
+       8,
+       30
+      ]
+     ],
+     "type": "linear"
+    }
+   },
+   {
+    "tool": "project_path_to_surface",
+    "args": {
+     "id": "on",
+     "path": "line",
+     "target": "drum",
+     "mode": "conform",
+     "dir": [
+      -1,
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "tool": "engrave_surface",
+    "args": {
+     "id": "m",
+     "path": "on",
+     "target": "drum",
+     "width": 2,
+     "depth": 1,
+     "style": "flat",
+     "surface_normal": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  ],
+  "expect": {
+   "volume_mm3": 75365.7689,
+   "min": [
+    -20,
+    -20,
+    -0
+   ],
+   "max": [
+    20,
+    20,
+    60
+   ],
+   "solids": 1,
+   "faces": 8
+  }
+ }
+]

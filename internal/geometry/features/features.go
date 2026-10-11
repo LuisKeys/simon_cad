@@ -176,6 +176,8 @@ type Feature struct {
 	// Kind is "" for solid-producing features and KindSketch for planar, non-solid ones.
 	Kind  string
 	Build func(*Ctx) (*api.Shape, error)
+	// Check validates the parameters of a KindData feature (no geometry is built for it).
+	Check func(Params) error
 	// Tool is set for features that apply a tool shape to a target (hole, extrude). Patterns
 	// reuse it. subtract=false means union.
 	Tool func(*Ctx) (tool *api.Shape, subtract bool, err error)

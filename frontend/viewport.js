@@ -14,7 +14,7 @@ import { rectFrom, boundsOf, rectHit } from './boxselect-model.js';
 import { renderParams } from './render-model.js';
 import { PLANE_AXES, gridShown } from './grid-model.js';
 
-const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a };
+const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a, path: 0x5bc0f8, pathHot: 0xff8a1f };
 const PICK_PX = 7;
 const MAX_VERTEX_PICK = 4000;
 const CUBE_MARGIN = 8;
@@ -165,6 +165,7 @@ export class Viewport {
     for (const d of delta.changed ?? []) { this._dropBody(d.id); this._addBody(d); }
     this.known = { ...(delta.keys ?? {}) };
     this._setSketches(delta.sketches ?? []);
+    this._setPaths(delta.paths ?? []);
     // Appearance comes straight from the CAD-IR and is applied to existing meshes:
     // it never needs new geometry, so an appearance-only change arrives with no bodies.
     this.appearance = delta.appearance ?? {};
@@ -172,7 +173,7 @@ export class Viewport {
     this.stats = { bodies: this.bodies.size, triangles: delta.stats?.triangles ?? 0 };
     this._shadowsChanged();
     this._updateSectionRange();
-    if (!hadBodies && (this.bodies.size > 0 || (delta.sketches ?? []).length > 0)) this.fitAll({ auto: true });
+    if (!hadBodies && (this.bodies.size > 0 || (delta.sketches ?? []).length > 0 || (delta.paths ?? []).length > 0)) this.fitAll({ auto: true });
     this.dirty();
   }
 
@@ -260,6 +261,53 @@ export class Viewport {
     for (const s of list) this.sketches.add(this._lineSet(s.lines, COLORS.sketch));
   }
 
+  /** Path curves: editable 3D spines (no geometry). They stay visible so they can be picked and
+   *  edited; the editor hides the one it is working on and draws its own live copy. */
+  _setPaths(list) {
+    if (!this.pathsGroup) { this.pathsGroup = new THREE.Group(); this.scene.add(this.pathsGroup); }
+    this._clearGroup(this.pathsGroup);
+    this.pathData = new Map();
+    for (const pth of list) {
+      this.pathData.set(pth.id, pth);
+      const l = this._lineSet(pth.lines, pth.id === this.pathHidden ? COLORS.pathHot : COLORS.path);
+      l.userData.pathId = pth.id;
+      l.visible = pth.id !== this.pathHidden;
+      this.pathsGroup.add(l);
+    }
+    this.hooks.onPaths?.(list);
+    this.dirty();
+  }
+
+  /** Hides (or shows again with null) the committed curve of the path being edited. */
+  setPathHidden(id) {
+    this.pathHidden = id ?? null;
+    for (const c of this.pathsGroup?.children ?? []) c.visible = c.userData.pathId !== this.pathHidden;
+    this.dirty();
+  }
+
+  /** The path curve under the pointer (screen-space distance, like edge picking), or null. */
+  pickPath(ev, px = 8) {
+    if (!this.pathData?.size) return null;
+    const pane = this.layout.paneAt(ev.clientX, ev.clientY);
+    const cam = pane.camera, n = this._ndc(ev, pane);
+    const a = new THREE.Vector3(), b = new THREE.Vector3();
+    let best = null;
+    for (const [id, pth] of this.pathData) {
+      if (id === this.pathHidden) continue;
+      const L = pth.lines;
+      for (let i = 0; i + 5 < L.length; i += 6) {
+        a.set(L[i], L[i + 1], L[i + 2]); b.set(L[i + 3], L[i + 4], L[i + 5]);
+        const sa = this._toScreen(a, n, cam), sb = this._toScreen(b, n, cam);
+        if (sa.z > 1 && sb.z > 1) continue;
+        const dx = sb.x - sa.x, dy = sb.y - sa.y, l2 = dx * dx + dy * dy;
+        const t = l2 > 0 ? Math.min(1, Math.max(0, ((n.px - sa.x) * dx + (n.py - sa.y) * dy) / l2)) : 0;
+        const d = Math.hypot(n.px - (sa.x + t * dx), n.py - (sa.y + t * dy));
+        if (d < px && (!best || d < best.distance)) best = { pathId: id, distance: d };
+      }
+    }
+    return best;
+  }
+
   _clearGroup(group) {
     for (const c of [...group.children]) {
       group.remove(c);
@@ -317,6 +365,7 @@ export class Viewport {
     const box = new THREE.Box3();
     for (const b of this.bodies.values()) if (b.group.visible) box.expandByObject(b.group);
     if (this.sketches && this.sketches.children.length) box.expandByObject(this.sketches);
+    if (this.pathsGroup && this.pathsGroup.children.length) box.expandByObject(this.pathsGroup);
     return box;
   }
 
@@ -637,6 +686,13 @@ export class Viewport {
       if (moved > 4 || e.button !== 0) return; // a drag is orbit/pan, not a pick
       const p = this.pick(e);
       if (this.measure.on) { if (p?.point) this._measureClick(p.point); return; }
+      if (!this.boxMode) {
+        // A click on a path curve opens it in the path editor. A swept solid hides its path
+        // inside it, so Alt+click on the solid opens the path it follows instead.
+        const pp = !p ? this.pickPath(e) : null;
+        if (pp && this.hooks.onPathPick?.(pp)) return;
+        if (p && e.altKey && this.hooks.onBodyPathPick?.(p.body)) return;
+      }
       this.hooks.onPick?.(p, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
     });
     c.addEventListener('pointermove', (e) => {

@@ -31,7 +31,8 @@ ensamblajes) no están iniciadas. Ver el [README](../README.md#status).
 20. [Calidad, seguridad y pruebas](#20-calidad-seguridad-y-pruebas)
 21. [Ayuda integrada](#21-ayuda-integrada)
 22. [Simulación de impresión 3D](#22-simulación-de-impresión-3d)
-23. [Fuera de alcance / pendiente](#23-fuera-de-alcance--pendiente)
+23. [Paths, sweeps, vectorización, relieves, sellos y texto](#23-paths-sweeps-vectorización-relieves-sellos-y-texto)
+24. [Fuera de alcance / pendiente](#24-fuera-de-alcance--pendiente)
 
 ---
 
@@ -322,11 +323,42 @@ Banderas del agente: `--preview`, `--commit`, `--label`, `--autonomous`.
   (sin soportes ni puentes).
 - Pendiente de esta línea: análisis de imprimibilidad, herramientas del agente/Critic, modo cinemático.
 
-## 23. Fuera de alcance / pendiente
+## 23. Paths, sweeps, vectorización, relieves, sellos y texto
+
+- **Paths 3D** (`create_path`, `update_path`, `evaluate_path`): lineales, Bézier, Catmull-Rom y B-spline, con ancho, alto y
+  twist por punto; longitud de arco, remuestreo, simplificación y suavizado. Editor interactivo en el viewport
+  (puntos, handles, inserción, cierre) con preview en vivo.
+- **Perfiles y sweeps** (`create_profile`, `create_sweep`, `create_tube`, `create_wire`, `create_ribbon`): sólidos B-Rep
+  exactos (OCCT) con marcos de transporte paralelo, tapas planas/redondas/punta, tubos huecos y paths cerrados.
+  Errores con código (`PATH_SELF_INTERSECTION`, `EXCESSIVE_CURVATURE`, `SWEEP_FAILED`, …) y pista de corrección.
+- **Vectorización** (`vectorize_image`, `image_to_paths`): PNG/JPEG/SVG a regiones rellenas con agujeros, contornos Bézier
+  o líneas centrales con ancho de trazo. Determinista; la escala real es obligatoria (`SCALE_REQUIRED`).
+- **Relieves** (`create_relief`, `engrave_surface`): emboss/deboss/engrave de sketches, texto o paths sobre un cuerpo,
+  todo editable (`RELIEF_DISCONNECTED`, `RELIEF_NO_EFFECT`).
+- **Sellos** (`create_stamp`, `apply_recipe`, `update_recipe`, `stamp_impression`, `validate_printability`): placa, diseño
+  en relieve espejado, mango, bordes redondeados y compensación de contracción (nunca se asume: la da el usuario).
+- **Texto 3D** (`create_text_geometry`): tipografía TrueType/OpenType (fuente integrada Go Regular o un `.ttf/.otf`),
+  kerning, espaciado, alineación, saltos de línea y espejo; los contadores de la "o", "A", "B" se conservan.
+  Modos: sketch, extrude, emboss, engrave; el texto puede seguir un path. Un sketch de texto sirve como diseño de un
+  sello (`create_stamp` con `sketch`).
+- **Proyección sobre superficies** (`project_path_to_surface`): proyecta un path sobre un cuerpo (BVH sobre su teselado) en modo
+  `planar` (según una dirección), `normal` (punto más cercano) o `conform` (puntos extra donde la cuerda se separa de la
+  superficie más que la tolerancia), con `offset` a lo largo de la normal. Crea un path nuevo (instantánea: se vuelve a
+  ejecutar si el cuerpo cambia); alimenta `engrave_surface` y los sweeps. Los puntos que no alcanzan la superficie se
+  informan por índice (`SURFACE_PROJECTION_FAILED`). El texto sobre piezas curvas se hace con letras de tope plano que
+  nacen dentro de la superficie (offset de plano bajo la superficie); no se deforma cada letra sobre la curvatura.
+- **Dibujo a sólido** (`sketch_to_solid`, `check_solid_vs_trace`): un dibujo o silueta (PNG/JPEG/SVG) pasa a sólido extruido en un
+  paso (traza → sketch → extrude, agrupado y editable). El tamaño real y la altura son obligatorios (nada se inventa), el estilo
+  `strokes` engrosa el trazo de un dibujo de líneas, y el cambio se propone para aprobación del usuario con la lista de
+  supuestos. El crítico determinista compara el sólido con lo que prometía el trazo (volumen = área × altura, huella,
+  cuerpo único); la comparación visual multivista con la imagen original usa `render_model` y el bucle de refinamiento existente.
+- Detalle de las herramientas en `docs/tools.md`.
+
+## 24. Fuera de alcance / pendiente
 
 - Fases 3–7: catálogo y macros de robótica, análisis, diseño generativo, ensamblajes, juntas y
   cinemática.
-- Loft, sweep, shell, restricciones avanzadas de sketch, splines.
+- Loft, shell, restricciones avanzadas de sketch.
 - Agujeros desde caras no alineadas a ejes.
 - Selector semántico `kind=external` para aristas.
 - Shell de escritorio Wails (hoy servidor loopback + navegador).

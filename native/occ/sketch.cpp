@@ -15,7 +15,9 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GC_MakeCircle.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <Geom_Circle.hxx>
+#include <TColgp_Array1OfPnt.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <ShapeFix_Face.hxx>
@@ -66,6 +68,14 @@ TopoDS_Wire make_loop(const occ_seg2d* segs, int32_t n) {
       case 2: {
         if (!(a[2] > 0)) throw BridgeError{OCC_ERR_INVALID_ARG, "circle radius must be positive"};
         e = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp_Pnt(a[0], a[1], 0), gp_Dir(0, 0, 1)), a[2]));
+        break;
+      }
+      case 3: {
+        TColgp_Array1OfPnt poles(1, 4);
+        for (int k = 0; k < 4; k++) poles.SetValue(k + 1, gp_Pnt(a[2 * k], a[2 * k + 1], 0));
+        if (poles(1).Distance(poles(4)) < 1e-9 && poles(1).Distance(poles(2)) < 1e-9)
+          throw BridgeError{OCC_ERR_INVALID_ARG, "degenerate bezier segment"};
+        e = BRepBuilderAPI_MakeEdge(new Geom_BezierCurve(poles));
         break;
       }
       default: throw BridgeError{OCC_ERR_INVALID_ARG, "unknown segment kind"};

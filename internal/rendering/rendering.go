@@ -86,6 +86,9 @@ type Delta struct {
 	// Sketches are the outlines of sketch nodes no feature consumes yet. They are tiny, so
 	// they are always sent whole rather than keyed.
 	Sketches []*SketchLines `json:"sketches"`
+	// Paths are the path nodes of the model (curves with control points; no geometry). Filled
+	// by the caller from the CAD-IR, like Appearance.
+	Paths []*PathLines `json:"paths"`
 }
 
 // SketchLines is one sketch drawn as line segments (xyz pairs, 6 floats per segment).
@@ -274,7 +277,7 @@ func (r *Renderer) Sketches(m *rebuild.Model) ([]*SketchLines, error) {
 // Scene meshes every visible body of the model (its leaves) and reports only what the
 // client, which holds `known` (id → key), is missing.
 func (r *Renderer) Scene(m *rebuild.Model, known map[string]string) (*Delta, error) {
-	d := &Delta{Keys: map[string]string{}, Order: []string{}, Changed: []*BodyMesh{}, Removed: []string{}, Sketches: []*SketchLines{}}
+	d := &Delta{Keys: map[string]string{}, Order: []string{}, Changed: []*BodyMesh{}, Removed: []string{}, Sketches: []*SketchLines{}, Paths: []*PathLines{}}
 	for _, id := range m.Leaves {
 		bm, hit, err := r.Body(id, m.Nodes[id])
 		if err != nil {

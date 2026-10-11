@@ -89,7 +89,7 @@ _edit tool._ Create a torus (ring, O-ring seat, donut). Centered at (x,y,z); `ma
 
 ### `create_sketch`
 
-_edit tool._ Create a planar 2D sketch (no solid yet). Entities (mm, plane coordinates u,v): line{p1,p2}, arc{p1,mid,p2}, circle{cx,cy,r}, rectangle{x,y,w,h}, polygon{points}, slot{x1,y1,x2,y2,width}. `regions` group closed loops into faces (outer loop + holes); if omitted every closed entity (circle/rectangle/polygon/slot) is its own region. Place it on plane XY (normal +Z, u=X,v=Y), YZ (normal +X, u=Y,v=Z) or XZ (normal +Y, u=Z,v=X) with `offset`, or on a planar `face` (origin at the face centroid, u along its longest straight edge). Turn regions into material with extrude_sketch.
+_edit tool._ Create a planar 2D sketch (no solid yet). Entities (mm, plane coordinates u,v): line{p1,p2}, arc{p1,mid,p2}, bezier{p1,c1,c2,p2}, curve{segments: closed bezier loop}, circle{cx,cy,r}, rectangle{x,y,w,h}, polygon{points}, slot{x1,y1,x2,y2,width}. `regions` group closed loops into faces (outer loop + holes); if omitted every closed entity (circle/rectangle/polygon/slot) is its own region. Place it on plane XY (normal +Z, u=X,v=Y), YZ (normal +X, u=Y,v=Z) or XZ (normal +Y, u=Z,v=X) with `offset`, or on a planar `face` (origin at the face centroid, u along its longest straight edge). Turn regions into material with extrude_sketch.
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
@@ -788,6 +788,336 @@ _edit tool._ Return the model to an earlier semantic checkpoint, given by id (cp
 | `checkpoint` | string | yes | Checkpoint id, number, 'previous', or label text |
 
 
+## paths
+
+### `apply_recipe`
+
+_edit tool._ Create geometry from a declarative recipe (JSON). Supported type: stamp {base:{shape,width,height|diameter,thickness,rounded_edges,edge_radius}, design:{source:{image_id|path|svg|sketch},mode,relief_height,stroke_width,margin,width_mm,trace}, mirror, handle:{enabled,height,diameter}, shrinkage_percent}. Deterministic: the same recipe gives the same nodes. The recipe is stored as a node (get_recipe / update_recipe) so it can be edited and reused.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `recipe` | object | yes | The recipe object |
+
+### `create_path`
+
+_edit tool._ Create an editable 3D path (a curve, no solid). `points` are [x,y,z] or {p, in, out, w, h, twist}. type: linear (polyline), bezier (cubic, handles in/out), catmull_rom (smooth curve through the points), bspline (smooth curve pulled toward the points). A path is the spine for create_sweep / create_tube / create_ribbon / create_wire and the source for engraving; per-point w/h scale the swept profile and twist rotates it. Edit later with update_path.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `closed` | boolean |  | Closed loop |
+| `points` | array of any | yes | Control points |
+| `type` | linear \| bezier \| catmull_rom \| bspline |  | Interpolation (default linear) (linear \| bezier \| catmull_rom \| bspline) |
+
+### `create_profile`
+
+_edit tool._ Create a reusable 2D cross-section for sweeps (centred on the origin of the section plane). shape: circle{radius}, ellipse{radius_x,radius_y}, square{side}, rectangle{width,height}, triangle{width,height}, semicircle{radius,orientation}, polygon{vertices}, hollow_circle{outer_radius,inner_radius}, custom{contours with optional holes}. One profile can be swept along many paths.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `contours` | array of object |  | custom: closed loops [{points:[[x,y],...], hole:false}]; holes must lie inside an outer loop |
+| `height` | number > 0 |  | rectangle / triangle height (mm) |
+| `inner_radius` | number > 0 |  | hollow_circle inner radius (mm) |
+| `orientation` | number |  | semicircle: rotation of the round side in degrees (0 = round side toward +Y) |
+| `outer_radius` | number > 0 |  | hollow_circle outer radius (mm) |
+| `radius` | number > 0 |  | circle / semicircle radius (mm) |
+| `radius_x` | number > 0 |  | ellipse X radius (mm) |
+| `radius_y` | number > 0 |  | ellipse Y radius (mm) |
+| `segments` | integer ≥ 3 ≤ 4096 |  | Segments of round profiles (default 48) |
+| `shape` | circle \| custom \| ellipse \| hollow_circle \| polygon \| rectangle \| semicircle \| square \| triangle | yes | Profile shape (circle \| custom \| ellipse \| hollow_circle \| polygon \| rectangle \| semicircle \| square \| triangle) |
+| `side` | number > 0 |  | square side (mm) |
+| `vertices` | array of array |  | polygon vertices [[x,y],...] in the profile plane |
+| `width` | number > 0 |  | rectangle / triangle width (mm) |
+
+### `create_relief`
+
+_edit tool._ Raise (emboss) or recess (deboss / engrave) a shape on an existing body, keeping both editable. `source` is a sketch (its regions are extruded from the sketch plane: emboss grows along the sketch normal, deboss/engrave cuts into the material on the other side; `reverse` flips that) or a solid such as a sweep. `depth` is the height of a raised relief or the depth of a cut; `offset` slides the start along the sketch normal. `mirror` flips a sketch about its vertical axis (for stamps: the relief must be mirrored so the impression reads correctly). The sketch must lie on the target's surface (draw it on a face, or on a plane at the surface height). Fails with RELIEF_DISCONNECTED when a raised shape floats off the target and RELIEF_NO_EFFECT when nothing changes.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `depth` | number > 0 |  | Relief height or cut depth in mm (sketch sources) |
+| `mirror` | boolean |  | Mirror the sketch about its vertical axis (sketch sources) |
+| `offset` | number |  | Start offset along the sketch normal (mm) |
+| `op` | emboss \| deboss \| engrave | yes | emboss adds material; deboss and engrave remove it (emboss \| deboss \| engrave) |
+| `region` | string |  | Only this sketch region (default: all) |
+| `reverse` | boolean |  | Flip the direction relative to the sketch normal |
+| `source` | string | yes | Sketch or solid feature id to emboss / cut |
+| `target` | string | yes | Body to add to / cut into |
+
+### `create_ribbon`
+
+_edit tool._ Flat strip with thickness along a path. `width` is across the strip, `thickness` through it. orientation: flat (width horizontal, default) or upright (width vertical); `twist` rotates the strip along the path (degrees).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `closed` | boolean |  | Inline points form a closed loop |
+| `max_sections` | integer ≥ 2 ≤ 5000 |  | Upper bound of sections along the path (default 600) |
+| `orientation` | flat \| upright |  | Initial orientation of the width (flat \| upright) |
+| `path` | string |  | Existing path feature id to sweep along (or give `points`) |
+| `path_type` | linear \| bezier \| catmull_rom \| bspline |  | Interpolation of inline points (default catmull_rom: smooth through the points) (linear \| bezier \| catmull_rom \| bspline) |
+| `points` | array of any |  | Inline spine points [x,y,z] (creates a path), or [x,y,z] or {p:[x,y,z], in:[x,y,z], out:[x,y,z], w, h, twist}: in/out are absolute Bezier handle positions; w/h scale the swept profile at this point (default 1); twist is extra degrees of rotation about the path |
+| `thickness` | number > 0 | yes | Ribbon thickness (mm) |
+| `tolerance` | number > 0 |  | Chord deviation of the tessellated sweep in mm (default 0.05) |
+| `twist` | number |  | Total twist along the path (degrees) |
+| `width` | number > 0 | yes | Ribbon width (mm) |
+
+### `create_stamp`
+
+_edit tool._ Make a printable stamp from an image, SVG or sketch: a plate (rectangle or circle) with the design raised on top, optional handle, rounded edges and shrinkage compensation, all as editable nodes grouped under one id (the final body has that id). The size of the stamp is required (width+height, or diameter); the design is scaled to fit the plate minus `margin`. `mirror` (default true) mirrors the relief so the IMPRESSION reads correctly: for lettering keep it on. `shrinkage_percent` is the expected shrinkage of the clay/porcelain (ask the user; none is assumed): the model is scaled up by 1/(1-s). Check the result with stamp_impression (what the stamp prints) and validate_printability. Defaults that were assumed (thickness, relief height, margin) are listed in the answer.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `adaptive` | boolean |  | Adaptive threshold for uneven lighting |
+| `base_thickness` | number > 0 |  | Plate thickness in mm (default 4) |
+| `design_width_mm` | number > 0 |  | Real width of the design in mm (default: fit the plate) |
+| `diameter` | number > 0 |  | Plate diameter in mm (circle) |
+| `edge_radius` | number > 0 |  | Edge radius in mm (default ~1) |
+| `handle_diameter` | number > 0 |  | Handle diameter in mm (default 40% of the plate) |
+| `handle_enabled` | boolean |  | Add a cylindrical handle on the back |
+| `handle_height` | number > 0 |  | Handle height in mm (default 12) |
+| `height` | number > 0 |  | Plate height in mm (rectangle) |
+| `image_id` | string |  | Design from an attached image (PNG/JPEG) |
+| `invert` | boolean |  | The design is light on a dark background |
+| `margin` | number |  | Free border between the design and the plate edge in mm (default 3) |
+| `min_area` | integer ≥ 1 ≤ 100000 |  | Ignore specks below this many pixels |
+| `mirror` | boolean |  | Mirror the relief so the impression reads correctly (default true) |
+| `mode` | filled_regions \| centerline |  | filled_regions raises the drawn areas (logos, silhouettes, lettering); centerline raises ridges of stroke_width along the strokes (line drawings) (filled_regions \| centerline) |
+| `path` | string |  | Design from a PNG/JPEG/SVG file on disk |
+| `relief_height` | number > 0 |  | Height of the raised design in mm (default 1.5) |
+| `rounded_edges` | boolean |  | Round the plate edges |
+| `shape` | rectangle \| circle |  | Plate shape (default rectangle) (rectangle \| circle) |
+| `shrinkage_percent` | number |  | Expected material shrinkage in % (0-40). The stamp is scaled up to compensate. Ask the user: no value is assumed. |
+| `sketch` | string |  | Design from an existing sketch (its regions are raised as they are; it must lie on the stamp's top face) |
+| `smooth` | number |  | Smoothing in pixels, 0..1.5 |
+| `stroke_width` | number > 0 |  | Ridge width in mm for centerline designs (default 1.5) |
+| `svg` | string |  | Design from inline SVG markup |
+| `threshold` | integer ≥ 1 ≤ 255 |  | Ink level 1..255 separating the design (default automatic) |
+| `tolerance` | number |  | Curve fitting tolerance in pixels |
+| `width` | number > 0 |  | Plate width in mm (rectangle) |
+
+### `create_sweep`
+
+_edit tool._ Sweep a profile along a path into a solid. The path and profile stay editable: update_path / update_profile / update_sweep regenerate it. Per-point w/h/twist on the path vary the section. Smooth paths (bezier, catmull_rom, bspline) give smooth surfaces; a linear path gives straight runs with mitered corners. cap_start/cap_end: flat (default), round or point; hollow profiles take flat caps only. `twist` adds degrees of rotation spread along the path. `up` seeds the initial profile orientation (the profile's local X direction).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `cap_end` | flat \| round \| point |  | End cap (open paths) (flat \| round \| point) |
+| `cap_length` | number > 0 |  | Height of a pointed cap (default: the profile radius) |
+| `cap_start` | flat \| round \| point |  | Start cap (open paths) (flat \| round \| point) |
+| `max_sections` | integer ≥ 2 ≤ 5000 |  | Upper bound of sections along the path (default 600) |
+| `path` | string | yes | Path feature id |
+| `profile` | string | yes | Profile feature id |
+| `tolerance` | number > 0 |  | Chord deviation of the tessellated sweep in mm (default 0.05) |
+| `twist` | number |  | Extra twist along the path (degrees; whole turns for a closed path) |
+| `up` | array of number |  | Initial direction of the profile's X axis [x,y,z] |
+
+### `create_text_geometry`
+
+_edit tool._ Create 3D lettering. Builds a sketch of the text (letters with their counters: the hole of an 'o', 'A', 'B' is kept) from a TrueType/OpenType font, then optionally extrudes it, embosses it onto a body or engraves it into one. mode=sketch (default) only creates the sketch; extrude makes a free solid of height `depth`; emboss raises it on `target`; engrave cuts it into `target`. `size` is the em height in mm (capitals are about 70% of it) and is required: do not guess a size, ask. `mirror` flips the lettering left-right (for stamps: the impression then reads correctly). The text sits on `plane` (XY default, with `offset`) or on a planar `face` (e.g. "body.face[top]"), starting at (x, y) on the baseline, or centred there with center=true. With `path` (an existing path feature lying in that plane) the baseline follows the path from `start` mm along it. `font` is a .ttf/.otf file path (default: the built-in sans). Reports characters the font lacks.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `align` | left \| center \| right |  | Line alignment (default left) (left \| center \| right) |
+| `center` | boolean |  | Centre the text's bounding box on (x, y) |
+| `depth` | number > 0 |  | Height (extrude, emboss) or cut depth (engrave) in mm |
+| `face` | string |  | Planar face selector to put the text on, instead of a plane |
+| `font` | string |  | Path to a .ttf/.otf file (default: built-in) |
+| `kerning` | boolean |  | Apply the font's kerning (default true) |
+| `line_spacing` | number > 0 |  | Line height as a multiple of size (default 1.2) |
+| `mirror` | boolean |  | Mirror left-right (lettering for stamps) |
+| `mode` | sketch \| extrude \| emboss \| engrave |  | sketch (default), extrude, emboss or engrave (sketch \| extrude \| emboss \| engrave) |
+| `offset` | number |  | Plane offset along its normal (mm) |
+| `path` | string |  | Path feature the baseline follows |
+| `plane` | XY \| XZ \| YZ |  | Sketch plane (default XY) (XY \| XZ \| YZ) |
+| `size` | number > 0 | yes | Em height in mm |
+| `spacing` | number |  | Extra space between letters in mm |
+| `start` | number |  | Distance along the path where the text starts (mm, default 0) |
+| `target` | string |  | Body to emboss onto / engrave into |
+| `text` | string | yes | The text; \n starts a new line |
+| `x` | number |  | Text origin u (mm, default 0) |
+| `y` | number |  | Text origin v (mm, default 0) |
+
+### `create_tube`
+
+_edit tool._ Pipe, cable or duct along a path: hollow when inner_diameter or wall_thickness is given, solid otherwise. Builds the profile and sweep for you (and the path from `points`). cap_mode: flat (default, open ends of a hollow tube), round or point (solid tubes only).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `cap_mode` | flat \| round \| point |  | End caps (flat \| round \| point) |
+| `closed` | boolean |  | Inline points form a closed loop |
+| `inner_diameter` | number > 0 |  | Inner diameter (mm); hollow tube |
+| `max_sections` | integer ≥ 2 ≤ 5000 |  | Upper bound of sections along the path (default 600) |
+| `outer_diameter` | number > 0 | yes | Outer diameter (mm) |
+| `path` | string |  | Existing path feature id to sweep along (or give `points`) |
+| `path_type` | linear \| bezier \| catmull_rom \| bspline |  | Interpolation of inline points (default catmull_rom: smooth through the points) (linear \| bezier \| catmull_rom \| bspline) |
+| `points` | array of any |  | Inline spine points [x,y,z] (creates a path), or [x,y,z] or {p:[x,y,z], in:[x,y,z], out:[x,y,z], w, h, twist}: in/out are absolute Bezier handle positions; w/h scale the swept profile at this point (default 1); twist is extra degrees of rotation about the path |
+| `tolerance` | number > 0 |  | Chord deviation of the tessellated sweep in mm (default 0.05) |
+| `wall_thickness` | number > 0 |  | Wall thickness (mm); alternative to inner_diameter |
+
+### `create_wire`
+
+_edit tool._ Solid round wire of the given diameter along a path (wires, organic or decorative curves). end_style: round (default), flat or point.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `closed` | boolean |  | Inline points form a closed loop |
+| `diameter` | number > 0 | yes | Wire diameter (mm) |
+| `end_style` | flat \| round \| point |  | Ends (flat \| round \| point) |
+| `max_sections` | integer ≥ 2 ≤ 5000 |  | Upper bound of sections along the path (default 600) |
+| `path` | string |  | Existing path feature id to sweep along (or give `points`) |
+| `path_type` | linear \| bezier \| catmull_rom \| bspline |  | Interpolation of inline points (default catmull_rom: smooth through the points) (linear \| bezier \| catmull_rom \| bspline) |
+| `points` | array of any |  | Inline spine points [x,y,z] (creates a path), or [x,y,z] or {p:[x,y,z], in:[x,y,z], out:[x,y,z], w, h, twist}: in/out are absolute Bezier handle positions; w/h scale the swept profile at this point (default 1); twist is extra degrees of rotation about the path |
+| `tolerance` | number > 0 |  | Chord deviation of the tessellated sweep in mm (default 0.05) |
+
+### `delete_path`
+
+_edit tool._ Delete a path. Fails if sweeps or other features still use it; remove those first.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Path feature id |
+
+### `engrave_surface`
+
+_edit tool._ Engrave a groove along a path into a body (or raise a bead along it with op=emboss). The path must lie on the surface: give `points` (inline) or an existing `path`. `width` is the groove width, `depth` its depth (default: half the width for round); style round (half-round groove), v (V groove) or flat (rectangular). `surface_normal` is the outward normal of the surface the path lies on (default [0,0,1], a top face). Creates the profile, the sweep and the relief in one step; all stay editable.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `closed` | boolean |  | Inline points form a closed loop |
+| `depth` | number > 0 |  | Groove depth (mm); default half the width |
+| `max_sections` | integer ≥ 2 ≤ 5000 |  | Upper bound of sections along the path (default 600) |
+| `op` | engrave \| emboss |  | engrave (default) cuts a groove; emboss raises a bead (engrave \| emboss) |
+| `path` | string |  | Existing path feature id to sweep along (or give `points`) |
+| `path_type` | linear \| bezier \| catmull_rom \| bspline |  | Interpolation of inline points (default catmull_rom: smooth through the points) (linear \| bezier \| catmull_rom \| bspline) |
+| `points` | array of any |  | Inline spine points [x,y,z] (creates a path), or [x,y,z] or {p:[x,y,z], in:[x,y,z], out:[x,y,z], w, h, twist}: in/out are absolute Bezier handle positions; w/h scale the swept profile at this point (default 1); twist is extra degrees of rotation about the path |
+| `style` | round \| v \| flat |  | Groove shape (default round) (round \| v \| flat) |
+| `surface_normal` | array of number |  | Outward normal of the surface the path lies on [x,y,z] (default [0,0,1]) |
+| `target` | string | yes | Body to engrave |
+| `tolerance` | number > 0 |  | Chord deviation of the tessellated sweep in mm (default 0.05) |
+| `width` | number > 0 | yes | Groove width (mm) |
+
+### `evaluate_path`
+
+_query tool._ Read a path: total length, point count, bounding box, minimum radius of curvature, self-intersections, and position + tangent at normalized arc-length parameters `t` (0..1).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Path feature id |
+| `t` | array of number |  | Parameters in [0,1] to evaluate |
+
+### `get_recipe`
+
+_query tool._ Read a stored recipe (canonical JSON) to reuse or edit it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `recipe` | string | yes | Recipe node id (<stamp id>_recipe) or the stamp id |
+
+### `project_path_to_surface`
+
+_edit tool._ Drop a path onto the surface of a body so it lies on it (the first step to engrave, emboss or run a bead along a curved part). `path` is an existing path (or give inline `points`); `target` the body. mode=planar casts each control point along `dir` (e.g. [-1,0,0] looks at the part from +X), keeping the point count; mode=normal moves each point to the nearest surface point (no `dir`); mode=conform is planar plus extra points wherever a straight chord would leave the surface by more than `tolerance` mm, so the result hugs a cylinder or sphere. `offset` lifts the result along the surface normal (negative sinks it). Creates a NEW path (the original is kept) that is a snapshot of the projection: re-run the tool if the body changes. The answer gives the mean surface_normal, to pass to engrave_surface. Fails with SURFACE_PROJECTION_FAILED listing the points that miss the surface.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `deflection` | number > 0 |  | Mesh deflection of the target used for the projection in mm (default 0.02) |
+| `dir` | array of number |  | Projection direction [x,y,z] (planar, conform) |
+| `mode` | planar \| normal \| conform |  | planar (default), normal or conform (planar \| normal \| conform) |
+| `offset` | number |  | Lift along the surface normal in mm (default 0) |
+| `path` | string |  | Existing path feature to project |
+| `path_type` | linear \| bezier \| catmull_rom \| bspline |  | Interpolation of an inline path (default catmull_rom) (linear \| bezier \| catmull_rom \| bspline) |
+| `points` | array of any |  | Inline control points [[x,y,z], ...] instead of `path` |
+| `target` | string | yes | Body to project onto |
+| `tolerance` | number > 0 |  | conform: largest chord-to-surface gap in mm (default 0.05) |
+
+### `stamp_impression`
+
+_query tool._ Preview what a stamp prints. Returns two SVG drawings: `relief_svg` is the stamp seen from its relief side (the physical stamp), `impression_svg` is the mark it leaves in clay (the relief mirrored left-right). With mirror=true the impression reads like the source drawing; with mirror=false it is reversed. The preview follows the stored recipe, so it is always in sync.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `stamp` | string | yes | Stamp id (or its recipe id) |
+
+### `update_path`
+
+_edit tool._ Edit a path in place; sweeps/reliefs built on it regenerate. Give any of: `points` (replace all), `type` (convert; bezier keeps the exact shape), `closed`, `ops` (add/insert/remove/move/set point edits applied in order; `set` changes w, h, twist or Bezier in/out handles of one point), `reverse`, `simplify` (tolerance mm, drops redundant points), `smooth` (iterations).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `closed` | boolean |  | Close or reopen the path |
+| `ops` | array of object |  | Point edits, applied in order |
+| `path` | string | yes | Path feature id |
+| `points` | array of any |  | Replace all control points |
+| `reverse` | boolean |  | Reverse the direction of travel |
+| `simplify` | number > 0 |  | Douglas-Peucker tolerance (mm) |
+| `smooth` | integer ≥ 1 ≤ 100 |  | Smoothing iterations |
+| `type` | linear \| bezier \| catmull_rom \| bspline |  | Convert interpolation (linear \| bezier \| catmull_rom \| bspline) |
+
+### `update_profile`
+
+_edit tool._ Change a profile's parameters (same arguments as create_profile); every sweep using it regenerates.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `contours` | array of object |  | custom: closed loops [{points:[[x,y],...], hole:false}]; holes must lie inside an outer loop |
+| `height` | number > 0 |  | rectangle / triangle height (mm) |
+| `inner_radius` | number > 0 |  | hollow_circle inner radius (mm) |
+| `orientation` | number |  | semicircle: rotation of the round side in degrees (0 = round side toward +Y) |
+| `outer_radius` | number > 0 |  | hollow_circle outer radius (mm) |
+| `profile` | string | yes | Profile feature id |
+| `radius` | number > 0 |  | circle / semicircle radius (mm) |
+| `radius_x` | number > 0 |  | ellipse X radius (mm) |
+| `radius_y` | number > 0 |  | ellipse Y radius (mm) |
+| `segments` | integer ≥ 3 ≤ 4096 |  | Segments of round profiles (default 48) |
+| `shape` | circle \| custom \| ellipse \| hollow_circle \| polygon \| rectangle \| semicircle \| square \| triangle |  | Profile shape (circle \| custom \| ellipse \| hollow_circle \| polygon \| rectangle \| semicircle \| square \| triangle) |
+| `side` | number > 0 |  | square side (mm) |
+| `vertices` | array of array |  | polygon vertices [[x,y],...] in the profile plane |
+| `width` | number > 0 |  | rectangle / triangle width (mm) |
+
+### `update_recipe`
+
+_edit tool._ Edit a stored recipe with a JSON merge patch (`changes`: objects merge, null removes a field) and regenerate its geometry: nodes whose settings changed are edited in place, structural changes (handle on/off, rounded edges, a new design) add or remove nodes. One undo step. Example: {"design":{"relief_height":2},"mirror":false}.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `changes` | object | yes | JSON merge patch applied to the recipe |
+| `recipe` | string | yes | Recipe node id (<stamp id>_recipe) or the stamp id |
+
+### `update_sweep`
+
+_edit tool._ Change the options of a sweep (caps, twist, tolerance, orientation). To use another path or profile edit those, or create a new sweep.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `cap_end` | flat \| round \| point |  | End cap (flat \| round \| point) |
+| `cap_length` | number > 0 |  | Height of a pointed cap |
+| `cap_start` | flat \| round \| point |  | Start cap (flat \| round \| point) |
+| `max_sections` | integer ≥ 2 ≤ 5000 |  | Upper bound of sections along the path (default 600) |
+| `sweep` | string | yes | Sweep feature id |
+| `tolerance` | number > 0 |  | Chord deviation of the tessellated sweep in mm (default 0.05) |
+| `twist` | number |  | Extra twist along the path (degrees) |
+| `up` | array of number |  | Initial direction of the profile's X axis [x,y,z] |
+
+### `validate_geometry`
+
+_query tool._ Check a body the way a slicer would: valid B-Rep, volume and area, bounding box, watertight / non-manifold mesh, degenerate triangles, disconnected components. `object` is a feature id; default every visible body.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `deflection` | number > 0 |  | Mesh deflection in mm (default 0.05) |
+| `object` | string |  | Feature id (default: all visible bodies) |
+
+### `validate_printability`
+
+_query tool._ Check that a body can be 3D printed: closed (watertight) manifold mesh, one connected piece, no features thinner than the nozzle (wall / ridge thickness measured by casting rays through the walls), optional fit on the print bed, and for stamps the ridge width and relief aspect. Returns printable=true/false and a list of issues with codes (NON_MANIFOLD_MESH, DISCONNECTED, THIN_FEATURE, NOT_PRINTABLE, TOO_LARGE, FRAGILE_RELIEF). `nozzle_mm` (default 0.4) and `min_wall_mm` (default 2 nozzle widths) set the limits; pass `bed` [x,y,z] mm to check the fit.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `bed` | array of number > 0 |  | Print bed size [x,y,z] in mm |
+| `deflection` | number > 0 |  | Mesh deflection in mm (default 0.05) |
+| `min_wall_mm` | number > 0 |  | Thinnest wall or ridge to accept as printable without a warning (default 2 × nozzle) |
+| `nozzle_mm` | number > 0 |  | Nozzle diameter in mm (default 0.4) |
+| `object` | string |  | Feature id (default: every visible body) |
+
+
 ## image
 
 ### `analyze_image`
@@ -806,6 +1136,15 @@ _query tool._ Record what you see in an attached image as a structured sketch pr
 | `placement` | object |  |  |
 | `profiles` | array of object | yes | Closed regions: an outer loop of entity ids plus inner loops (holes/cutouts) |
 | `relationships` | array of object |  | Detected relations |
+
+### `check_solid_vs_trace`
+
+_query tool._ Critic for sketch_to_solid: compares the finished solid with what the trace promised (volume = traced area × depth, bounding box of the drawing, one connected piece, no invented features) and reports each check with the numbers. Run it after sketch_to_solid and after edits; a mismatch means the model was changed away from the drawing or the kernel altered it.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `solid` | string | yes | Id of the extrude created by sketch_to_solid |
+| `tolerance` | number > 0 |  | Allowed relative volume error (default 0.01 = 1%) |
 
 ### `confirm_detected_dimension`
 
@@ -862,6 +1201,36 @@ _query tool._ Read an interpretation's current proposal and its validation repor
 |---|---|---|---|
 | `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
 
+### `image_to_paths`
+
+_edit tool._ Trace an image or SVG and create editable geometry from it: filled_regions → one sketch with a region per shape (holes preserved; extrude it, emboss it, put it on a stamp); outline → closed Bezier path nodes; centerline → open/closed Bezier path nodes whose per-point `w` carries the stroke width (sweep a profile along them). The real size is required: pass width_mm, height_mm, px_per_mm or dpi (ask the user if it is unknown, never guess). Placed on `plane` (XY default) with its lower-left corner at (x, y) or centred (center). Nothing is invented: only what the trace found is created; use vectorize_image first to tune settings.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `adaptive` | boolean |  | Adaptive threshold: follows uneven lighting (photographed drawings) |
+| `center` | boolean |  | Centre the image on (x, y) instead of placing its lower-left corner there |
+| `close_gaps` | boolean |  | Centerline: close one-pixel gaps in strokes before thinning |
+| `corner_angle` | number |  | Turn in degrees that counts as a sharp corner (default 55) |
+| `dpi` | number > 0 |  | Image resolution in dots per inch (alternative to px_per_mm) |
+| `group` | string |  | Group name for the created nodes (default: the base id) |
+| `height_mm` | number > 0 |  | Real height of the whole image in mm (alternative to px_per_mm) |
+| `image_id` | string |  | Id of an attached image (PNG or JPEG) |
+| `invert` | boolean |  | The subject is light on a dark background |
+| `min_area` | integer ≥ 1 ≤ 100000 |  | Ignore specks smaller than this many pixels (default 12) |
+| `mode` | outline \| centerline \| filled_regions |  | outline: closed boundary curves. centerline: stroke centrelines with a width (for sweeping a profile along). filled_regions: solid regions with their holes (for extrusion / relief). Default filled_regions. (outline \| centerline \| filled_regions) |
+| `offset` | number |  | Offset of the plane along its normal (mm) |
+| `path` | string |  | Path of a PNG, JPEG or SVG file on disk (alternative to image_id) |
+| `plane` | XY \| XZ \| YZ |  | Plane to place the shapes on (default XY) (XY \| XZ \| YZ) |
+| `px_per_mm` | number > 0 |  | Pixels per millimetre of the real object (the scale) |
+| `smooth` | number |  | Blur in pixels before tracing, 0..1.5 (default 0.7): higher = smoother curves, fewer details |
+| `source` | auto \| luminance \| alpha |  | What is foreground: auto (alpha when the image is transparent, else darkness), luminance or alpha (auto \| luminance \| alpha) |
+| `svg` | string |  | SVG markup given inline (alternative to image_id / path) |
+| `threshold` | integer ≥ 1 ≤ 255 |  | Ink level 1..255 that separates foreground (default: automatic, Otsu) |
+| `tolerance` | number |  | Curve fitting tolerance in pixels (default 0.8): higher = fewer segments |
+| `width_mm` | number > 0 |  | Real width of the whole image in mm (alternative to px_per_mm) |
+| `x` | number |  | Placement of the image's lower-left corner along the plane's u axis (mm, default 0) |
+| `y` | number |  | Placement of the image's lower-left corner along the plane's v axis (mm, default 0) |
+
 ### `set_sketch_scale`
 
 _query tool._ Set the real scale of the drawing explicitly, either as mm_per_px, or as a length measured in the image (`pixels`) that equals `mm`. Prefer confirm_detected_dimension when a dimension exists. clear=true removes an explicit scale.
@@ -874,6 +1243,38 @@ _query tool._ Set the real scale of the drawing explicitly, either as mm_per_px,
 | `mm_per_px` | number > 0 |  | Millimetres per image pixel |
 | `pixels` | number > 0 |  | A length measured in the image (px) |
 
+### `sketch_to_solid`
+
+_edit tool._ Turn a drawing or silhouette (PNG/JPEG/SVG) into an extruded solid in one step: trace → sketch → extrude, all editable and grouped. style=silhouette (default) extrudes the filled shapes with their holes (a logo, a bracket outline, a cookie cutter); style=strokes thickens the line work of a drawing into ridges of `stroke_width` mm. The real size (width_mm, height_mm, px_per_mm or dpi) and `depth` are REQUIRED: ask the user, never guess a dimension. The image only defines the outline: heights, holes that are not drawn and other 3D details are NOT inferred. The answer lists the `assumed` defaults (threshold, placement). The change is proposed for the user's approval. Then check it: check_solid_vs_trace compares the solid with the trace, and render_model (top / iso views) lets you compare the result with the source image and fix what differs.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `adaptive` | boolean |  | Adaptive threshold: follows uneven lighting (photographed drawings) |
+| `center` | boolean |  | Centre the drawing on (x, y) |
+| `close_gaps` | boolean |  | Centerline: close one-pixel gaps in strokes before thinning |
+| `corner_angle` | number |  | Turn in degrees that counts as a sharp corner (default 55) |
+| `depth` | number > 0 | yes | Extrusion height in mm (required) |
+| `dpi` | number > 0 |  | Image resolution in dots per inch (alternative to px_per_mm) |
+| `height_mm` | number > 0 |  | Real height of the whole image in mm (alternative to px_per_mm) |
+| `image_id` | string |  | Id of an attached image (PNG or JPEG) |
+| `invert` | boolean |  | The subject is light on a dark background |
+| `min_area` | integer ≥ 1 ≤ 100000 |  | Ignore specks smaller than this many pixels (default 12) |
+| `offset` | number |  | Offset of the plane along its normal (mm) |
+| `path` | string |  | Path of a PNG, JPEG or SVG file on disk (alternative to image_id) |
+| `plane` | XY \| XZ \| YZ |  | Plane to place the drawing on (default XY) (XY \| XZ \| YZ) |
+| `px_per_mm` | number > 0 |  | Pixels per millimetre of the real object (the scale) |
+| `smooth` | number |  | Blur in pixels before tracing, 0..1.5 (default 0.7): higher = smoother curves, fewer details |
+| `source` | auto \| luminance \| alpha |  | What is foreground: auto (alpha when the image is transparent, else darkness), luminance or alpha (auto \| luminance \| alpha) |
+| `stroke_width` | number > 0 |  | Ridge width in mm (style=strokes, required then) |
+| `style` | silhouette \| strokes |  | silhouette (default): filled shapes. strokes: line work thickened to `stroke_width` (silhouette \| strokes) |
+| `svg` | string |  | SVG markup given inline (alternative to image_id / path) |
+| `symmetric` | boolean |  | Extrude half up and half down from the sketch plane |
+| `threshold` | integer ≥ 1 ≤ 255 |  | Ink level 1..255 that separates foreground (default: automatic, Otsu) |
+| `tolerance` | number |  | Curve fitting tolerance in pixels (default 0.8): higher = fewer segments |
+| `width_mm` | number > 0 |  | Real width of the whole image in mm (alternative to px_per_mm) |
+| `x` | number |  | Lower-left corner u (mm, default 0) |
+| `y` | number |  | Lower-left corner v (mm, default 0) |
+
 ### `update_sketch_proposal`
 
 _query tool._ Correct the proposal (not the model). Each edit: op + id + value. Ops: set_entity, remove_entity, set_profile, remove_profile, set_dimension, remove_dimension, set_operation, remove_operation, set_relationship (id = index or new), remove_relationship (id = index), set_placement. set_* merges `value` onto the item (a null field removes it) or creates it. Examples: 'that circle is a hole' = set_profile outer profile holes + remove_profile for the circle's own profile; 'left edge vertical' = set_relationship new {kind:vertical,entities:[...],confidence:1}.
@@ -882,6 +1283,31 @@ _query tool._ Correct the proposal (not the model). Each edit: op + id + value. 
 |---|---|---|---|
 | `edits` | array of object | yes | Corrections applied in order, all or nothing |
 | `interpretation_id` | string |  | Interpretation id (int_0001); default: the latest |
+
+### `vectorize_image`
+
+_query tool._ Trace a raster image (PNG/JPEG) or SVG into vector geometry WITHOUT changing the model, and report what was found (shapes, holes, strokes, lengths, stroke width, warnings). Deterministic: no AI. Use it to pick settings (threshold, mode, min_area, smooth) before image_to_paths. Modes stay distinct: filled_regions keeps solid areas with holes (logos, silhouettes), centerline gives stroke centrelines with width (handwriting, line drawings, a flower), outline gives boundary curves only. Give px_per_mm / width_mm / height_mm / dpi to get sizes in mm.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `adaptive` | boolean |  | Adaptive threshold: follows uneven lighting (photographed drawings) |
+| `close_gaps` | boolean |  | Centerline: close one-pixel gaps in strokes before thinning |
+| `corner_angle` | number |  | Turn in degrees that counts as a sharp corner (default 55) |
+| `dpi` | number > 0 |  | Image resolution in dots per inch (alternative to px_per_mm) |
+| `height_mm` | number > 0 |  | Real height of the whole image in mm (alternative to px_per_mm) |
+| `image_id` | string |  | Id of an attached image (PNG or JPEG) |
+| `invert` | boolean |  | The subject is light on a dark background |
+| `min_area` | integer ≥ 1 ≤ 100000 |  | Ignore specks smaller than this many pixels (default 12) |
+| `mode` | outline \| centerline \| filled_regions |  | outline: closed boundary curves. centerline: stroke centrelines with a width (for sweeping a profile along). filled_regions: solid regions with their holes (for extrusion / relief). Default filled_regions. (outline \| centerline \| filled_regions) |
+| `path` | string |  | Path of a PNG, JPEG or SVG file on disk (alternative to image_id) |
+| `preview` | boolean |  | Also return the traced result as SVG markup (preview_svg) |
+| `px_per_mm` | number > 0 |  | Pixels per millimetre of the real object (the scale) |
+| `smooth` | number |  | Blur in pixels before tracing, 0..1.5 (default 0.7): higher = smoother curves, fewer details |
+| `source` | auto \| luminance \| alpha |  | What is foreground: auto (alpha when the image is transparent, else darkness), luminance or alpha (auto \| luminance \| alpha) |
+| `svg` | string |  | SVG markup given inline (alternative to image_id / path) |
+| `threshold` | integer ≥ 1 ≤ 255 |  | Ink level 1..255 that separates foreground (default: automatic, Otsu) |
+| `tolerance` | number |  | Curve fitting tolerance in pixels (default 0.8): higher = fewer segments |
+| `width_mm` | number > 0 |  | Real width of the whole image in mm (alternative to px_per_mm) |
 
 
 ## refine

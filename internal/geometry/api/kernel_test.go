@@ -168,14 +168,14 @@ func TestBoxIntersectBoxVolume(t *testing.T) {
 
 func rectSegs(x, y, w, h float64) []Seg2D {
 	return []Seg2D{
-		{Kind: 0, A: [6]float64{x, y, x + w, y}},
-		{Kind: 0, A: [6]float64{x + w, y, x + w, y + h}},
-		{Kind: 0, A: [6]float64{x + w, y + h, x, y + h}},
-		{Kind: 0, A: [6]float64{x, y + h, x, y}},
+		{Kind: 0, A: [8]float64{x, y, x + w, y}},
+		{Kind: 0, A: [8]float64{x + w, y, x + w, y + h}},
+		{Kind: 0, A: [8]float64{x + w, y + h, x, y + h}},
+		{Kind: 0, A: [8]float64{x, y + h, x, y}},
 	}
 }
 
-func circSeg(cx, cy, r float64) Seg2D { return Seg2D{Kind: 2, A: [6]float64{cx, cy, r}} }
+func circSeg(cx, cy, r float64) Seg2D { return Seg2D{Kind: 2, A: [8]float64{cx, cy, r}} }
 
 func TestSketchFaceAndPrism(t *testing.T) {
 	k := New()
@@ -216,8 +216,8 @@ func TestSketchFaceAndPrism(t *testing.T) {
 
 	// half-disc: line + arc through the top point, area pi r^2 / 2
 	half := []Seg2D{
-		{Kind: 0, A: [6]float64{-10, 0, 10, 0}},
-		{Kind: 1, A: [6]float64{10, 0, 0, 10, -10, 0}},
+		{Kind: 0, A: [8]float64{-10, 0, 10, 0}},
+		{Kind: 1, A: [8]float64{10, 0, 0, 10, -10, 0}},
 	}
 	f, err = k.MakeFace(half, []int{2})
 	if err != nil {

@@ -593,3 +593,73 @@ body[data-printsim=on] #ctx-actions { visibility: hidden; }
 .printbar select { min-height: 32px; padding: 3px 8px; background: var(--panel-2); font-size: 12.5px; }
 .printbar .ibtn { width: 36px; min-height: 36px; }
 #btn-printsim.on { color: var(--sel); }
+
+/* ---- path editor -------------------------------------------------------------------------- */
+.path-hud { position: absolute; top: 12px; left: 12px; z-index: 7; width: 300px; max-width: calc(100% - 24px);
+  background: var(--panel); border: 1px solid var(--accent-line); border-radius: var(--radius-lg); padding: 10px 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .45); font-size: 12.5px; display: flex; flex-direction: column; gap: 8px; }
+.path-title { font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.path-count { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.path-row-line { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.path-row { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 11px; min-width: 0; }
+.path-row-line .path-row { flex-direction: row; align-items: center; gap: 6px; }
+.path-row input[type=number], .path-row select { width: 100%; min-height: 28px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 0 6px; color: var(--text); font-variant-numeric: tabular-nums; }
+.path-row-line select { min-width: 150px; }
+.path-xyz { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.path-sub { color: var(--muted); font-size: 11.5px; }
+.path-point { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.path-hint { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.path-error { color: var(--bad); font-size: 12px; }
+.path-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.path-actions button { min-height: 30px; font-size: 12.5px; }
+body.path-editing #ctx-actions { visibility: hidden; }
+@media (max-width: 720px) { .path-hud { width: calc(100% - 24px); } .path-hint { display: none; } }
+
+/* ---- trace image dialog ------------------------------------------------------------------- */
+.overlay#trace { padding-top: 4vh; }
+.dialog.trace-dialog { width: min(980px, calc(100vw - 24px)); max-height: 92vh; overflow: auto; }
+.trace-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.trace-x { min-height: 28px; padding: 0 10px; font-size: 18px; line-height: 1; }
+.trace-body { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, 1fr); gap: 14px; min-height: 360px; }
+.trace-view { position: relative; background: repeating-conic-gradient(#2a2a2a 0 25%, #222 0 50%) 0 0 / 16px 16px; border: 1px dashed var(--line);
+  border-radius: var(--radius-lg); min-height: 320px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.trace-view.drop { border-color: var(--accent); background-color: var(--accent-soft); }
+.trace-src, .trace-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.trace-overlay { mix-blend-mode: normal; opacity: .9; }
+.trace-hint { color: var(--muted); font-size: 13px; padding: 12px; text-align: center; }
+.trace-controls { display: flex; flex-direction: column; gap: 10px; min-width: 0; font-size: 12.5px; }
+.trace-controls fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; margin: 0; min-width: 0; }
+.trace-controls legend { color: var(--muted); font-size: 11.5px; padding: 0 4px; }
+.trace-src-row { display: flex; gap: 10px; align-items: center; }
+.trace-name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-mode { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; padding: 4px 6px; border-radius: var(--radius); cursor: pointer; align-items: baseline; }
+.trace-mode.on { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.trace-mode .lbl { font-weight: 600; }
+.trace-mode .tip { grid-column: 2; color: var(--muted); font-size: 11.5px; }
+.trace-row { display: grid; grid-template-columns: 1fr 1.2fr; gap: 8px; align-items: center; color: var(--muted); }
+.trace-row input[type=number], .trace-row select { width: 100%; min-height: 28px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text); padding: 0 6px; }
+.trace-range { display: flex; gap: 8px; align-items: center; }
+.trace-range input { flex: 1; min-width: 0; }
+.trace-range output { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
+.trace-check { display: flex; gap: 8px; align-items: center; }
+.trace-note { color: var(--muted); font-size: 11.5px; margin-top: -2px; }
+.trace-status { display: flex; flex-wrap: wrap; gap: 4px 14px; font-variant-numeric: tabular-nums; min-height: 20px; }
+.trace-status.busy { opacity: .55; }
+.trace-warn { margin: 0; padding-left: 18px; color: var(--warn); font-size: 12px; }
+.trace-error { color: var(--bad); font-size: 12.5px; }
+@media (max-width: 760px) { .trace-body { grid-template-columns: 1fr; } }
+
+.trace-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.trace-targets { display: flex; gap: 6px; }
+.trace-target { flex: 1; text-align: center; padding: 6px 8px; border-radius: var(--radius); background: var(--panel-2); cursor: pointer; font-weight: 600; }
+.trace-target input { position: absolute; opacity: 0; pointer-events: none; }
+.trace-target.on { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); color: var(--sel); }
+.trace-target:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.trace-plate-tabs { display: flex; gap: 4px; }
+.trace-plate-tabs button { min-height: 28px; font-size: 12px; }
+.trace-plate-tabs button.on { background: var(--accent-soft); color: var(--sel); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.trace-plate { position: relative; width: min(78%, 420px); max-height: 92%; background: #f4efe6; border: 2px solid #8a7f6c; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 18px rgba(0,0,0,.4); }
+.trace-plate.round { border-radius: 50%; }
+.trace-plate-design { object-fit: contain; mix-blend-mode: multiply; }

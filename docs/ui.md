@@ -373,6 +373,21 @@ the project". **Create & preview** calls `confirm_detected_dimension` / `set_ske
 preview with Commit / Reject. **Correct with the agent…** re-attaches the image to the composer.
 Nothing in the panel can change the model except through those tool calls.
 
+## Paths, tracing, stamps and text
+
+- **Draw path / Draw curve** (Create menu) start the path editor (`frontend/path-editor.js`, pure logic in
+  `path-editor-model.js`): click to add points, drag points and Bézier handles, insert on a segment, close or
+  open, change the interpolation; width, height and twist handles on the selected point. While dragging, a
+  low-resolution tube is built in the browser (`path-model.js`); on release one `update_path` call is sent and
+  the backend regenerates the real sweep. Stale responses are dropped by a generation counter.
+- **Trace image…** opens the vectorize panel (`vectorize-panel.js`): threshold, mode (filled regions /
+  centerline / outline), smoothing and the real size, with a live SVG overlay of the trace; *Create* calls
+  `image_to_paths`, *Create stamp* calls `create_stamp`. The scale is always asked, never guessed.
+- **Text…**, **Relief…**, **Engrave along path…** and **Project path to surface…** (Create menu) open the
+  generic tool dialog of `create_text_geometry`, `create_relief`, `engrave_surface` and
+  `project_path_to_surface`; everything they create stays editable in the design tree.
+- Stamps show the impression preview (`stamp_impression`): what the relief leaves in clay, mirrored.
+
 ## Appearance
 
 Expanding a feature in the design tree shows an **Appearance** group: color picker, hex / `rgb(r,g,b)`

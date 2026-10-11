@@ -17,6 +17,9 @@ import { DimensionRenderer } from './dimensions.js';
 import { ANCHORS, AXIS_LABEL, PANEL_ORDER } from './dimensions-model.js';
 import { units, setUnits } from './units.js';
 import { InteractiveTransformController } from './transform.js';
+import { PathEditorController, viewToPath } from './path-editor.js';
+import { sweepPreview } from './path-model.js';
+import { initTracePanel } from './vectorize-panel.js';
 import { initShortcuts } from './shortcuts.js';
 import { isToggleKey } from './shortcuts-model.js';
 import { initPrintSim } from './printsim-panel.js';
@@ -95,6 +98,10 @@ const vp = new Viewport($('gl'), {
     dimOverlay?.update();
   },
   onPaneMenu: (i, el) => showPaneMenu(i, el),
+  // A click on a path curve opens it in the path editor; the editor follows scene updates.
+  onPathPick: (pp) => { if (pathEditor.active || xform.active) return false; return startPathEdit(pp.pathId); },
+  onBodyPathPick: (body) => { const t = S.state?.tree?.find((n) => n.id === body); return t?.type === 'sweep' && !pathEditor.active && startPathEdit(t.params?.path); },
+  onPaths: (list) => pathEditor?.sync(list),
   onLayout: (st) => views.save(st),
 });
 window.simonViewport = vp;
@@ -128,6 +135,48 @@ const xform = new InteractiveTransformController(vp, {
   notify: (msg, kind) => toast(msg, kind),
 });
 window.simonTransform = xform;
+
+// Path editor: draw a path point by point, or edit one (points, Bezier handles, width / height /
+// twist). Every finished gesture is one create_path / update_path call (one undo step); while a
+// point is dragged only the viewport changes, including a reduced preview of the sweeps that use it.
+const pathEditor = new PathEditorController(vp, $('viewport'), {
+  workspace: () => S.state?.workspace,
+  preview: (id) => (id ? sweepPreview(S.state?.tree ?? [], id) : null),
+  notify: (msg, kind) => toast(msg, kind),
+  onModal: (on) => {
+    if (on && vp.boxMode) toggleBoxSelect();
+    if (on && vp.measure.on) toggleMeasure();
+    if (on) $('empty').hidden = true;
+    dimOverlay?.set(on ? [] : S.selection?.dimensions ?? []);
+    document.body.classList.toggle('path-editing', on);
+  },
+  commit: async ({ name, args }) => {
+    try {
+      const o = await api('tool', { name, args });
+      if (!o.ok) { toast(o.error, 'bad'); await refresh(); return false; }
+      if (!o.committed) toast('Path change proposed: review it in the conversation', 'ok');
+      await refresh();
+      return true;
+    } catch (e) { toast(e.message, 'bad'); await refresh(); return false; }
+  },
+});
+window.simonPathEditor = pathEditor;
+
+// Trace image: PNG / JPEG / SVG → sketches and paths with a live preview (vectorize-panel.js).
+const tracePanel = initTracePanel({ toast: (m, k) => toast(m, k), afterCreate: () => refresh() });
+window.simonTrace = tracePanel;
+
+function startPathDraw(type) {
+  if (xform.active) return;
+  S.playing || S.printsim ? toast('Leave playback / print simulation first', 'bad') : pathEditor.begin('draw', { type });
+}
+
+function startPathEdit(id) {
+  const view = vp.pathData?.get(id);
+  if (!view || xform.active || S.playing || S.printsim) return false;
+  pathEditor.begin('edit', { id, path: viewToPath(view) });
+  return true;
+}
 // The viewport has keyboard focus for G/R when it was the last thing clicked or is under the mouse.
 document.addEventListener('pointerdown', (e) => { S.vpFocus = $('viewport').contains(e.target); }, true);
 const viewportFocused = () => S.vpFocus || $('viewport').matches(':hover');
@@ -267,7 +316,7 @@ async function refreshScene() {
       const delta = await api('scene', { known: vp.known });
       vp.applyDelta(delta);
       xform.validate(); // an agent edit, undo or project switch may have replaced the target
-      $('empty').hidden = vp.bodies.size > 0 || (delta.sketches ?? []).length > 0;
+      $('empty').hidden = vp.bodies.size > 0 || (delta.sketches ?? []).length > 0 || (delta.paths ?? []).length > 0 || pathEditor.active;
       $('hud').textContent = hudStats();
     } while (S.sceneAgain);
   } catch (e) { toast(e.message, 'bad'); } finally { S.busyScene = false; }
@@ -562,6 +611,8 @@ function treeMenu(n, at) {
   const hiddenApp = n.appearance?.visible === false;
   const nodes = ids.map((id) => S.state.tree.find((t) => t.id === id)).filter(Boolean);
   showMenu(at, [
+    n.type === 'path' && { label: 'Edit path', icon: 'path', run: () => startPathEdit(n.id) },
+    n.type === 'sweep' && n.params?.path && { label: `Edit path ${n.params.path}`, icon: 'path', run: () => startPathEdit(n.params.path) },
     n.visible && { label: hiddenApp ? 'Show' : 'Hide', icon: hiddenApp ? 'eye' : 'eye-off', run: () => applyAppearance('set_visibility', ids, { visible: hiddenApp }) },
     { label: 'Rename', icon: 'pencil', key: 'F2', disabled: ids.length > 1, run: () => startRename(n) },
     { label: n.suppressed ? 'Unsuppress' : 'Suppress', icon: 'ban', run: async () => { for (const t of nodes) await callTool('suppress_feature', { feature: t.id, suppressed: !n.suppressed }); } },
@@ -1222,7 +1273,7 @@ function triggerAction(a, sel, anchor) {
     case 'pick-mode':
       return showMenu(at, FILTERS.map(([k, label]) => ({ label, checked: S.filter === k, data: { filter: k }, run: () => setFilter(k) })));
     case 'menu':
-      return showMenu(at, a.items.map(([tool, label, ic]) => ({ label, icon: ic, run: () => openToolForm(tool) })));
+      return showMenu(at, a.items.map(([tool, label, ic]) => ({ label, icon: ic, run: () => (tool.startsWith('@') ? actionEnv[tool.slice(1)]?.() : openToolForm(tool)) })));
     case 'section':
       return showMenu(at, [{ label: 'Off', checked: !vp.section?.axis, data: { axis: '' }, run: () => setSection('') },
         ...['X', 'Y', 'Z'].map((ax) => ({ label: `${ax} plane`, checked: vp.section?.axis === ax, data: { axis: ax }, run: () => setSection(ax) }))]);
@@ -1295,6 +1346,9 @@ function formDialog({ title, fields, ok = 'Apply' }) {
 
 const actionEnv = {
   fit: () => vp.fit(),
+  draw_path: () => startPathDraw('linear'),
+  draw_curve: () => startPathDraw('catmull_rom'),
+  trace_image: () => tracePanel.open(),
   createComponent: () => { const ids = selIds(); if (ids.length) createComponent(ids); },
   toggleMeasure,
   async transform(kind) {
@@ -1635,6 +1689,7 @@ document.addEventListener('keydown', (e) => {
   else if (mod && !typing && !overlay && e.key.toLowerCase() === 'g' && selIds().length) { e.preventDefault(); e.shiftKey ? actionEnv.ungroup() : actionEnv.group(); }
   else if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
   else if (e.ctrlKey && e.altKey && !e.shiftKey && (e.code === 'Digit4' || e.code === 'Numpad4') && !typing && !overlay) { e.preventDefault(); vp.layout.toggleMode(); renderCtxBar(); }
+  else if (pathEditor.active && !mod) { /* the path editor owns the plain keys */ }
   else if (!typing && !mod && !overlay && !e.altKey && (e.key === 'g' || e.key === 'r') && !S.playing && !S.printsim && viewportFocused()) {
     e.preventDefault();
     xform.begin(e.key === 'g' ? 'translate' : 'rotate');

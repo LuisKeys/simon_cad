@@ -17,6 +17,36 @@ func Default() *Registry {
 	for _, t := range sketchTools() {
 		r.Register(t)
 	}
+	for _, t := range pathTools() {
+		r.Register(t)
+	}
+	for _, t := range sweepTools() {
+		r.Register(t)
+	}
+	for _, t := range vectorizeTools() {
+		r.Register(t)
+	}
+	for _, t := range reliefTools() {
+		r.Register(t)
+	}
+	for _, t := range stampTools() {
+		r.Register(t)
+	}
+	for _, t := range sketchSolidTools() {
+		r.Register(t)
+	}
+	for _, t := range projectionTools() {
+		r.Register(t)
+	}
+	for _, t := range textTools() {
+		r.Register(t)
+	}
+	for _, t := range printabilityTools() {
+		r.Register(t)
+	}
+	for _, t := range impressionTools() {
+		r.Register(t)
+	}
 	for _, t := range visionTools() {
 		r.Register(t)
 	}

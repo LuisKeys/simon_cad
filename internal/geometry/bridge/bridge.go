@@ -201,10 +201,11 @@ func ExtrudePolygon(xy []float64, h float64) (Handle, error) {
 	return Handle(out), err
 }
 
-// Seg2D mirrors occ_seg2d: kind 0 line (x1,y1,x2,y2), 1 arc (x1,y1,xm,ym,x2,y2), 2 circle (cx,cy,r).
+// Seg2D mirrors occ_seg2d: kind 0 line (x1,y1,x2,y2), 1 arc (x1,y1,xm,ym,x2,y2), 2 circle (cx,cy,r),
+// 3 cubic bezier (x1,y1,c1x,c1y,c2x,c2y,x2,y2).
 type Seg2D struct {
 	Kind int32
-	A    [6]float64
+	A    [8]float64
 }
 
 // MakeFace builds a planar face (XY plane, +Z normal) from loops of segments; loop 0 is the outer boundary.
@@ -215,7 +216,7 @@ func MakeFace(segs []Seg2D, loopSizes []int32) (Handle, error) {
 	cs := make([]C.occ_seg2d, len(segs))
 	for i, sg := range segs {
 		cs[i].kind = C.int32_t(sg.Kind)
-		for j := 0; j < 6; j++ {
+		for j := 0; j < 8; j++ {
 			cs[i].a[j] = C.double(sg.A[j])
 		}
 	}
@@ -331,7 +332,9 @@ type Mesh struct {
 }
 
 // Tessellate meshes a shape and copies the result out, freeing the native mesh.
-func Tessellate(s Handle, deflection float64) (*Mesh, error) { return TessellateAngular(s, deflection, 0.5) }
+func Tessellate(s Handle, deflection float64) (*Mesh, error) {
+	return TessellateAngular(s, deflection, 0.5)
+}
 
 // TessellateAngular is Tessellate with an explicit angular deflection (radians).
 func TessellateAngular(s Handle, deflection, angular float64) (*Mesh, error) {
@@ -398,3 +401,108 @@ func TessellateAngular(s Handle, deflection, angular float64) (*Mesh, error) {
 
 // LiveMeshes returns native meshes not yet freed (leak detection).
 func LiveMeshes() int64 { return int64(C.occ_live_mesh_count()) }
+
+// SweepSection mirrors occ_section: a frame (origin, in-plane axes X and Y; the normal X×Y is the
+// path tangent) plus the profile scale applied before placement.
+type SweepSection struct {
+	Origin, X, Y [3]float64
+	SX, SY       float64
+}
+
+// SweepContour is one cross-section loop: an ellipse (RX, RY) or a polygon of Points.
+type SweepContour struct {
+	Ellipse bool
+	Hole    bool
+	RX, RY  float64
+	// Points is one polygon shared by every section; PerSection (one polygon per section, equal
+	// lengths) takes precedence and is used by mitered polyline sweeps.
+	Points     [][2]float64
+	PerSection [][][2]float64
+}
+
+// SweepSpec is the input of occ_sweep.
+type SweepSpec struct {
+	Sections           []SweepSection
+	Contours           []SweepContour
+	Closed             bool
+	ApexStart, ApexEnd *[3]float64
+	Ruled              bool
+	// Leading / trailing sections that are cap rings running to the apex, and whether each cap
+	// is joined with straight bands (a cone).
+	CapStartN, CapEndN         int
+	CapStartRuled, CapEndRuled bool
+}
+
+// Sweep lofts the contours through the sections.
+func Sweep(sp SweepSpec) (Handle, error) {
+	if len(sp.Sections) == 0 || len(sp.Contours) == 0 {
+		return 0, fmt.Errorf("%w: sweep needs sections and a contour", ErrKernel)
+	}
+	secs := make([]C.occ_section, len(sp.Sections))
+	for i, s := range sp.Sections {
+		for k := 0; k < 3; k++ {
+			secs[i].o[k], secs[i].x[k], secs[i].y[k] = C.double(s.Origin[k]), C.double(s.X[k]), C.double(s.Y[k])
+		}
+		secs[i].sx, secs[i].sy = C.double(s.SX), C.double(s.SY)
+	}
+	cons := make([]C.occ_contour, len(sp.Contours))
+	var xy []float64
+	for i, c := range sp.Contours {
+		if c.Ellipse {
+			cons[i].kind = 1
+		}
+		if c.Hole {
+			cons[i].hole = 1
+		}
+		cons[i].n = C.int32_t(len(c.Points))
+		cons[i].rx, cons[i].ry = C.double(c.RX), C.double(c.RY)
+		for _, p := range c.Points {
+			xy = append(xy, p[0], p[1])
+		}
+		if c.PerSection != nil {
+			cons[i].kind = 2
+			cons[i].n = C.int32_t(len(c.PerSection[0]))
+			xy = xy[:len(xy)-2*len(c.Points)]
+			for _, poly := range c.PerSection {
+				for _, p := range poly {
+					xy = append(xy, p[0], p[1])
+				}
+			}
+		}
+	}
+	var xyp *C.double
+	if len(xy) > 0 {
+		xyp = (*C.double)(unsafe.Pointer(&xy[0]))
+	}
+	var a0, a1 *C.double
+	var b0, b1 [3]C.double
+	if sp.ApexStart != nil {
+		for k := 0; k < 3; k++ {
+			b0[k] = C.double(sp.ApexStart[k])
+		}
+		a0 = &b0[0]
+	}
+	if sp.ApexEnd != nil {
+		for k := 0; k < 3; k++ {
+			b1[k] = C.double(sp.ApexEnd[k])
+		}
+		a1 = &b1[0]
+	}
+	closed, ruled := C.int32_t(0), C.int32_t(0)
+	if sp.Closed {
+		closed = 1
+	}
+	if sp.Ruled {
+		ruled = 1
+	}
+	b2i := func(b bool) C.int32_t {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	var out C.occ_handle
+	err := check("sweep", C.occ_sweep(&secs[0], C.int32_t(len(secs)), &cons[0], C.int32_t(len(cons)), xyp, closed, a0, a1, ruled,
+		C.int32_t(sp.CapStartN), C.int32_t(sp.CapEndN), b2i(sp.CapStartRuled), b2i(sp.CapEndRuled), &out))
+	return Handle(out), err
+}

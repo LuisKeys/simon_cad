@@ -341,3 +341,18 @@ Launcher (`--project`, `--recording`, `--no-browser`) and the embedded frontend.
 | `demo/m1_create.recording.json` | Recording used by `make demo` when no key is set |
 | `robot/servo_bracket/steps.json` | The servo bracket as tool calls (dogfood) |
 | `robot/servo_bracket.scadproj` | Permanent regression project (refresh with `UPDATE_ROBOT=1 go test ./internal/app`) |
+
+## Path / sweep / creative-geometry packages
+
+| Package | Role |
+|---|---|
+| `internal/geometry/curve` | Path math: evaluation, arc length, resample, simplify, smooth, rotation-minimising frames, self-intersection. Pure Go. |
+| `internal/geometry/profile` | Section presets and custom contours, validation, orientation. |
+| `internal/geometry/sweep` | Sweep planner (frames, miter, caps, analytic volume) feeding `native/occ/sweep.cpp`. |
+| `internal/geometry/features` | `path`, `profile`, `sweep`, `relief` features and `CodedError`. |
+| `internal/geometry/text` | Font outlines → Bézier regions (kerning, spacing, alignment, mirror, counters). |
+| `internal/geometry/project` | Projection onto a tessellated surface (planar / normal / conform). |
+| `internal/vectorize` | Image and SVG tracing: outline, centerline, filled regions; deterministic. |
+| `internal/meshgeo`, `internal/meshcheck` | BVH (ray, closest point) and mesh integrity checks. |
+| `internal/recipe` | Stamp recipe: parse, defaults/assumptions, merge patch, shrinkage factor. |
+| `internal/tools` (`path`, `sweep`, `vectorize`, `relief`, `stamp`, `text`, `projection`, `sketchsolid`, `printability`, `impression`) | The agent/CLI/UI tools of the family. |

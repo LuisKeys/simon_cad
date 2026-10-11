@@ -67,7 +67,7 @@ try {
   assert.ok(over[1] <= over[2] + 2 && over[3] <= over[4] + 2, 'Choose/Close stays inside the panel');
   await treePicker.getByLabel('Search materials').fill(''); // the earlier 'alum' query is shared
   await treePicker.getByRole('button', { name: 'Glass' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('#tree .mat-grid .mat').length === 2);
+  await page.waitForFunction(() => document.querySelectorAll('#tree .mat-grid .mat').length === 5);
   await treePicker.getByRole('button', { name: 'All' }).click();
   await treePicker.getByLabel('Search materials').fill('steel');
   assert.ok((await treePicker.locator('.mat').count()) >= 4, 'search narrows the grid');
