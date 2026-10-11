@@ -411,3 +411,41 @@ func segArea(s Seg) float64 {
 	}
 	return a / 2
 }
+
+// Subdivide splits every Bézier of the regions into n equal-parameter pieces (de Casteljau), so a
+// non-linear map of the control points (text along a path) follows the curve closely.
+func Subdivide(regs []Region, n int) []Region {
+	if n < 2 {
+		return regs
+	}
+	split := func(segs []Seg) []Seg {
+		out := make([]Seg, 0, len(segs)*n)
+		for _, s := range segs {
+			rest := s
+			for i := 0; i < n-1; i++ {
+				l, r := halve(rest, 1.0/float64(n-i))
+				out = append(out, l)
+				rest = r
+			}
+			out = append(out, rest)
+		}
+		return out
+	}
+	out := make([]Region, len(regs))
+	for i, r := range regs {
+		out[i] = Region{Outer: split(r.Outer)}
+		for _, h := range r.Holes {
+			out[i].Holes = append(out[i].Holes, split(h))
+		}
+	}
+	return out
+}
+
+// halve cuts a Bézier at t into the part before and the part after.
+func halve(s Seg, t float64) (Seg, Seg) {
+	lerp := func(a, b Pt) Pt { return Pt{a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t} }
+	p01, p12, p23 := lerp(s.P0, s.C1), lerp(s.C1, s.C2), lerp(s.C2, s.P1)
+	p012, p123 := lerp(p01, p12), lerp(p12, p23)
+	m := lerp(p012, p123)
+	return Seg{s.P0, p01, p012, m}, Seg{m, p123, p23, s.P1}
+}

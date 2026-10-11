@@ -123,3 +123,27 @@ func TestDeterministic(t *testing.T) {
 		t.Error("layout is not deterministic")
 	}
 }
+
+func TestSubdividePreservesShape(t *testing.T) {
+	l := lay(t, "Sg", Options{})
+	sub := Subdivide(l.Regions, 8)
+	if len(sub) != len(l.Regions) {
+		t.Fatal("regions changed")
+	}
+	if math.Abs(Area(sub)-Area(l.Regions)) > 1e-6*Area(l.Regions) {
+		t.Errorf("area %v vs %v", Area(sub), Area(l.Regions))
+	}
+	for i, r := range sub {
+		if len(r.Outer) != 8*len(l.Regions[i].Outer) || len(r.Holes) != len(l.Regions[i].Holes) {
+			t.Fatal("segment counts wrong")
+		}
+		for k := 1; k < len(r.Outer); k++ {
+			if dist(r.Outer[k-1].P1, r.Outer[k].P0) > 1e-9 {
+				t.Fatal("loop is not continuous")
+			}
+		}
+	}
+	if len(Subdivide(l.Regions, 1)) != len(l.Regions) {
+		t.Error("n=1 must be a no-op")
+	}
+}

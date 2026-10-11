@@ -232,7 +232,7 @@ func buildTextSketch(env Env, a Args) (*textBuild, error) {
 				fmtMM(lay.Width), fmtMM(math.Max(0, L-start)), fmtMM(start))
 		}
 		var tooBent bool
-		regs = txt.Transform(regs, func(p txt.Pt) txt.Pt {
+		regs = txt.Transform(txt.Subdivide(regs, 8), func(p txt.Pt) txt.Pt {
 			sArc := start + p[0]
 			if cv.Closed {
 				sArc = math.Mod(math.Mod(sArc, L)+L, L)
@@ -251,7 +251,7 @@ func buildTextSketch(env Env, a Args) (*textBuild, error) {
 		if tooBent {
 			return nil, fmt.Errorf("the path runs along the plane normal: draw it in the %s plane", plane)
 		}
-		warns = append(warns, "text follows the path by moving the outline's control points: tight curves distort the letters (use a smaller size or a gentler path)")
+		warns = append(warns, "text follows the path: letters are bent along it, so keep the size small relative to the path's bend radius")
 	} else {
 		dx, dy := x0, y0
 		if a.Bool("center") {

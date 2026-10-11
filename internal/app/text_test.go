@@ -203,3 +203,13 @@ func TestUpdateTextRegeneratesTheSolid(t *testing.T) {
 		}
 	}
 }
+
+// letters bent along a gentle curve keep (nearly) their area: the warp follows the outline
+func TestBentTextKeepsItsArea(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	sw(t, a, "create_path", `{"id":"arc","type":"catmull_rom","points":[[0,0,0],[20,6,0],[40,8,0],[60,6,0],[80,0,0]]}`)
+	sw(t, a, "create_text_geometry", `{"id":"bent","text":"Simon","size":6,"mode":"extrude","depth":1,"path":"arc"}`)
+	within(t, "bent text volume", vol(t, a), textArea(t, "Simon", 6), 0.08)
+	assertWatertight(t, a, "bent")
+}
