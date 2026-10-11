@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/accelone/simoncad/internal/commands"
 
 	"github.com/accelone/simoncad/internal/geometry/curve"
 	"github.com/accelone/simoncad/internal/geometry/features"
@@ -33,7 +36,59 @@ func projectionTools() []*Tool {
 			"deflection": positive("Mesh deflection of the target used for the projection in mm (default 0.02)"),
 		}), "target"),
 		Plan: planProjectPath,
+	}, {
+		Name: "refresh_projection",
+		Description: "Re-run the projection of a path made by project_path_to_surface with the same settings: use it after the target body or the source path changed, so the projected path follows. " +
+			"Everything built on the projected path (engravings, sweeps) regenerates. One undo step.",
+		Capability: capGeometry,
+		Schema:     object(props{"path": text("The projected path feature"), "intent": text("Why")}, "path"),
+		Plan:       planRefreshProjection,
 	}}
+}
+
+func planRefreshProjection(env Env, a Args) (*Plan, error) {
+	n, err := requirePath(env, a.Str("path"))
+	if err != nil {
+		return nil, err
+	}
+	rec, ok := n.Parameters["projection"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%q was not made by project_path_to_surface", n.ID)
+	}
+	args := Args{"id": n.ID + "_refresh_tmp"}
+	for k, v := range rec {
+		switch k {
+		case "source":
+			args["path"] = v
+		default:
+			args[k] = v
+		}
+	}
+	inner, err := planProjectPath(env, args)
+	if err != nil {
+		return nil, err
+	}
+	var fresh map[string]any
+	for _, c := range inner.Commands {
+		if af, ok := c.(*commands.AddFeature); ok {
+			fresh = af.Node.Parameters
+		}
+	}
+	if fresh == nil {
+		return nil, fmt.Errorf("the projection produced no path")
+	}
+	plan := &Plan{Intent: intentOr(a, "Refresh projection "+n.ID), Explanation: "Re-projects " + n.ID + " onto " + fmt.Sprint(rec["target"]) + ".", Warnings: inner.Warnings}
+	cur, next := normalizeJSON(n.Parameters).(map[string]any), normalizeJSON(fresh).(map[string]any)
+	for _, k := range []string{"type", "closed", "points"} {
+		if !reflect.DeepEqual(cur[k], next[k]) {
+			plan.Commands = append(plan.Commands, &commands.SetParameter{ID: n.ID, Name: k, Value: next[k]})
+		}
+	}
+	if len(plan.Commands) == 0 {
+		return nil, fmt.Errorf("%s is already up to date with %v", n.ID, rec["target"])
+	}
+	plan.LowRisk = len(plan.Warnings) == 0
+	return plan, nil
 }
 
 func planProjectPath(env Env, a Args) (*Plan, error) {
@@ -167,7 +222,19 @@ func planProjectPath(env Env, a Args) (*Plan, error) {
 		return nil, features.Coded(features.CodePathInvalid, "the projection collapsed the path (points merged)", "%v", err)
 	}
 	params := normalizeJSON(features.PathToParams(out)).(map[string]any)
-	params["projection"] = map[string]any{"source": srcName, "target": a.Str("target"), "mode": string(mode), "offset": a.Num("offset")}
+	// the recipe that refresh_projection replays when the body (or the source path) changes
+	rec := map[string]any{"target": a.Str("target"), "mode": string(mode), "offset": a.Num("offset")}
+	if a.Has("path") {
+		rec["source"] = a.Str("path")
+	} else {
+		rec["points"], rec["path_type"] = a["points"], orDefault(a.Str("path_type"), "catmull_rom")
+	}
+	for _, k := range []string{"dir", "tolerance", "deflection"} {
+		if a.Has(k) {
+			rec[k] = a[k]
+		}
+	}
+	params["projection"] = rec
 
 	base := a.Str("id")
 	if base == "" && a.Has("path") {

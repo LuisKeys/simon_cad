@@ -314,7 +314,7 @@ mechanism). Pure-Go engines sit under the features:
   winding/nesting) produces regions of cubic Béziers that tools turn into an ordinary `sketch`.
 - `geometry/project` + `meshgeo` (BVH over the tessellation) project points to a surface (planar, nearest,
   conform with adaptive refinement). `project_path_to_surface` writes the result as a new `path` node: a
-  snapshot, re-run when the body changes.
+  snapshot; `refresh_projection` replays it when the body changes.
 - `meshcheck` (watertight / non-manifold / components) backs `validate_geometry`, `validate_printability`
   and the STL checks.
 - `relief` is a solid feature composing a sketch prism or a sweep with a union/subtract on a target body.

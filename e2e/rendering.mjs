@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const shots = join(root, 'out', 'e2e');
 mkdirSync(shots, { recursive: true });
-const chrome = process.env.CHROME_BIN || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => existsSync(p));
+const chrome = process.env.CHROME_BIN || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find((p) => existsSync(p));
 const tmp = mkdtempSync(join(tmpdir(), 'simon-'));
 
 const server = spawn(join(root, 'out', 'simoncad'),

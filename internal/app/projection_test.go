@@ -187,3 +187,45 @@ func TestProjectedPathSurvivesUndoAndReload(t *testing.T) {
 		t.Error("projected path lost on reload")
 	}
 }
+
+// a projected path is a snapshot until refresh_projection replays it against the changed body
+func TestRefreshProjectionFollowsTheBody(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	sw(t, a, "create_cylinder", drum)
+	sw(t, a, "create_path", `{"id":"line","points":[[80,-8,30],[80,8,30]],"type":"linear"}`)
+	sw(t, a, "project_path_to_surface", `{"id":"on","path":"line","target":"drum","mode":"conform","dir":[-1,0,0]}`)
+	sw(t, a, "engrave_surface", `{"id":"groove","path":"on","target":"drum","width":2,"depth":1,"style":"flat","surface_normal":[1,0,0]}`)
+	if c := failMsg(t, a, "refresh_projection", `{"path":"on"}`); c == "" {
+		t.Error("refreshing an up-to-date projection should say so")
+	}
+	sw(t, a, "modify_parameter", `{"feature":"drum","parameter":"radius","value":30}`)
+	// the drum is wider now: the old projected path lies inside it until it is refreshed
+	sw(t, a, "refresh_projection", `{"path":"on"}`)
+	for i, p := range pathPoints(t, a, "on") {
+		if r := math.Hypot(p[0], p[1]); math.Abs(r-30) > 0.05 {
+			t.Errorf("point %d at radius %.3f after refresh, want 30", i, r)
+		}
+	}
+	assertWatertight(t, a, "groove")
+	if o := a.ApplyTool("refresh_projection", []byte(`{"path":"line"}`), PolicyCommit); o.OK {
+		t.Error("refreshed a path that was never projected")
+	}
+	if _, err := a.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range pathPoints(t, a, "on") {
+		if r := math.Hypot(p[0], p[1]); math.Abs(r-20) > 0.05 {
+			t.Errorf("after undo point %d at radius %.3f, want 20", i, r)
+		}
+	}
+}
+
+func failMsg(t *testing.T, a *App, tool, args string) string {
+	t.Helper()
+	o := a.ApplyTool(tool, []byte(args), PolicyCommit)
+	if o.OK {
+		return ""
+	}
+	return o.Error
+}

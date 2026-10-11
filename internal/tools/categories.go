@@ -48,7 +48,7 @@ func init() {
 		"project": {"get_model_summary", "measure_distance", "export_step", "export_stl", "restore_checkpoint"},
 		"paths": {"create_path", "update_path", "delete_path", "evaluate_path", "create_profile", "update_profile",
 			"create_sweep", "update_sweep", "create_tube", "create_wire", "create_ribbon", "validate_geometry",
-			"create_relief", "engrave_surface", "create_stamp", "apply_recipe", "update_recipe", "get_recipe", "validate_printability", "stamp_impression", "create_text_geometry", "project_path_to_surface"},
+			"create_relief", "engrave_surface", "create_stamp", "apply_recipe", "update_recipe", "get_recipe", "validate_printability", "stamp_impression", "create_text_geometry", "update_text", "project_path_to_surface", "refresh_projection"},
 		"image": {"analyze_image", "create_from_image", "create_sketch_from_image", "extrude_detected_profile",
 			"confirm_detected_dimension", "get_sketch_proposal", "update_sketch_proposal", "set_sketch_scale",
 			"vectorize_image", "image_to_paths", "sketch_to_solid", "check_solid_vs_trace"},

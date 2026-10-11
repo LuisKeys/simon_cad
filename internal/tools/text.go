@@ -5,9 +5,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/accelone/simoncad/internal/cadir"
+	"github.com/accelone/simoncad/internal/commands"
 	"github.com/accelone/simoncad/internal/geometry/curve"
 	"github.com/accelone/simoncad/internal/geometry/features"
 	txt "github.com/accelone/simoncad/internal/geometry/text"
@@ -47,7 +49,93 @@ func textTools() []*Tool {
 			"start":        number("Distance along the path where the text starts (mm, default 0)"),
 		}), "text", "size"),
 		Plan: planCreateText,
+	}, {
+		Name: "update_text",
+		Description: "Edit lettering made by create_text_geometry: change the words, size, font, spacing, alignment, mirror or placement (same arguments as create_text_geometry; only what you pass changes). " +
+			"The sketch regenerates in place, so an extrude, emboss or stamp built on it follows. `sketch` is the sketch id of the text.",
+		Capability: capGeometry,
+		Schema: func() map[string]any {
+			p := props{
+				"sketch":       text("Sketch feature of the lettering"),
+				"text":         text("New text"),
+				"size":         positive("Em height in mm"),
+				"font":         text("Path to a .ttf/.otf file, or builtin"),
+				"spacing":      number("Extra space between letters in mm"),
+				"line_spacing": positive("Line height as a multiple of size"),
+				"align":        enum("Line alignment", "left", "center", "right"),
+				"mirror":       boolean("Mirror left-right"),
+				"kerning":      boolean("Apply the font's kerning"),
+				"plane":        enum("Sketch plane", "XY", "XZ", "YZ"),
+				"offset":       number("Plane offset along its normal (mm)"),
+				"x":            number("Text origin u (mm)"),
+				"y":            number("Text origin v (mm)"),
+				"center":       boolean("Centre the text's bounding box on (x, y)"),
+				"path":         text("Path feature the baseline follows"),
+				"start":        number("Distance along the path where the text starts (mm)"),
+				"intent":       text("Why"),
+			}
+			return object(p, "sketch")
+		}(),
+		Plan: planUpdateText,
 	}}
+}
+
+func planUpdateText(env Env, a Args) (*Plan, error) {
+	n, err := requireFeature(env, a.Str("sketch"))
+	if err != nil {
+		return nil, err
+	}
+	rec, ok := n.Parameters["text"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%q was not made by create_text_geometry (no lettering is stored on it)", n.ID)
+	}
+	merged := Args{}
+	for k, v := range rec {
+		merged[k] = v
+	}
+	changed := false
+	for _, k := range textRecipeKeys {
+		if v, ok := a[k]; ok {
+			if !reflect.DeepEqual(normalizeJSON(merged[k]), normalizeJSON(v)) {
+				changed = true
+			}
+			merged[k] = v
+		}
+	}
+	if !changed {
+		return nil, fmt.Errorf("the update leaves %s unchanged", n.ID)
+	}
+	if n.References["face"] != "" {
+		// the text sits on a face: that reference stays, plane/offset do not apply
+		if a.Has("plane") || a.Has("offset") {
+			return nil, fmt.Errorf("%s is placed on a face: plane and offset do not apply", n.ID)
+		}
+		merged["face"] = n.References["face"]
+		delete(merged, "plane")
+		delete(merged, "offset")
+	} else {
+		delete(merged, "face")
+	}
+	tb, err := buildTextSketch(env, merged)
+	if err != nil {
+		return nil, err
+	}
+	plan := &Plan{Intent: intentOr(a, "Edit text "+n.ID), Explanation: fmt.Sprintf("Regenerates the lettering of %s (%d shape(s)).", n.ID, len(tb.regions)), Warnings: tb.warns}
+	cur := normalizeJSON(n.Parameters).(map[string]any)
+	next := normalizeJSON(tb.sk).(map[string]any)
+	for _, k := range []string{"entities", "regions", "text", "plane", "offset"} {
+		if !reflect.DeepEqual(cur[k], next[k]) {
+			if _, has := next[k]; !has {
+				continue
+			}
+			plan.Commands = append(plan.Commands, &commands.SetParameter{ID: n.ID, Name: k, Value: next[k]})
+		}
+	}
+	if len(plan.Commands) == 0 {
+		return nil, fmt.Errorf("the update leaves %s unchanged", n.ID)
+	}
+	plan.LowRisk = len(tb.warns) == 0
+	return plan, nil
 }
 
 // loadFont resolves the `font` argument. A user font is a file the agent or user names.
@@ -81,25 +169,27 @@ func planeCoords(plane string, p curve.Vec) (u, v float64) {
 	return p[0], p[1]
 }
 
-func planCreateText(env Env, a Args) (*Plan, error) {
+// textBuild is a laid-out text ready to become a sketch.
+type textBuild struct {
+	sk      map[string]any
+	regs    []txt.Region
+	regions []any
+	warns   []string
+}
+
+// textRecipeKeys are the arguments that define the lettering; they are stored on the sketch so
+// update_text can change one and regenerate the rest.
+var textRecipeKeys = []string{"text", "size", "font", "spacing", "line_spacing", "align", "mirror", "kerning",
+	"plane", "offset", "face", "x", "y", "center", "path", "start"}
+
+// buildTextSketch lays the text out and returns the sketch parameters.
+func buildTextSketch(env Env, a Args) (*textBuild, error) {
 	s := a.Str("text")
 	if strings.TrimSpace(s) == "" {
 		return nil, fmt.Errorf("text is empty")
 	}
 	if n := len([]rune(s)); n > maxTextGlyphs {
 		return nil, fmt.Errorf("text has %d characters; the limit is %d", n, maxTextGlyphs)
-	}
-	mode := orDefault(a.Str("mode"), "sketch")
-	if mode != "sketch" && !a.Has("depth") {
-		return nil, fmt.Errorf("mode %s needs `depth`", mode)
-	}
-	if (mode == "emboss" || mode == "engrave") && a.Str("target") == "" {
-		return nil, fmt.Errorf("mode %s needs a `target` body", mode)
-	}
-	if a.Has("target") {
-		if _, err := requireBounds(env, a.Str("target")); err != nil {
-			return nil, err
-		}
 	}
 	if a.Has("face") && a.Has("plane") {
 		return nil, fmt.Errorf("give either `plane` or `face`, not both")
@@ -201,7 +291,35 @@ func planCreateText(env Env, a Args) (*Plan, error) {
 	if err := features.ValidateSketch(features.Params(sk)); err != nil {
 		return nil, fmt.Errorf("the lettering does not form a valid sketch: %v", err)
 	}
+	recipe := map[string]any{}
+	for _, k := range textRecipeKeys {
+		if v, ok := a[k]; ok {
+			recipe[k] = v
+		}
+	}
+	sk["text"] = recipe
+	return &textBuild{sk: sk, regs: regs, regions: regions, warns: warns}, nil
+}
 
+func planCreateText(env Env, a Args) (*Plan, error) {
+	s := a.Str("text")
+	mode := orDefault(a.Str("mode"), "sketch")
+	if mode != "sketch" && !a.Has("depth") {
+		return nil, fmt.Errorf("mode %s needs `depth`", mode)
+	}
+	if (mode == "emboss" || mode == "engrave") && a.Str("target") == "" {
+		return nil, fmt.Errorf("mode %s needs a `target` body", mode)
+	}
+	if a.Has("target") {
+		if _, err := requireBounds(env, a.Str("target")); err != nil {
+			return nil, err
+		}
+	}
+	tb, err := buildTextSketch(env, a)
+	if err != nil {
+		return nil, err
+	}
+	sk, regs, regions, warns := tb.sk, tb.regs, tb.regions, tb.warns
 	base := a.Str("id")
 	if base == "" {
 		base = strings.Trim(nonID.ReplaceAllString(strings.ToLower(s), "_"), "_")
@@ -258,8 +376,6 @@ func planCreateText(env Env, a Args) (*Plan, error) {
 		id := derivedID(env, base, "_"+mode, taken)
 		if a.Str("id") != "" {
 			id = a.Str("id")
-			skNode.ID = derivedID(env, id, "_sketch", taken)
-			skID = skNode.ID
 		}
 		rp := map[string]any{"source": skID, "target": a.Str("target"), "op": mode, "depth": a.Num("depth")}
 		nodes = append(nodes, newNode(env, a, id, features.ReliefType, rp, skID, a.Str("target")))

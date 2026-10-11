@@ -1028,6 +1028,14 @@ _edit tool._ Drop a path onto the surface of a body so it lies on it (the first 
 | `target` | string | yes | Body to project onto |
 | `tolerance` | number > 0 |  | conform: largest chord-to-surface gap in mm (default 0.05) |
 
+### `refresh_projection`
+
+_edit tool._ Re-run the projection of a path made by project_path_to_surface with the same settings: use it after the target body or the source path changed, so the projected path follows. Everything built on the projected path (engravings, sweeps) regenerates. One undo step.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The projected path feature |
+
 ### `stamp_impression`
 
 _query tool._ Preview what a stamp prints. Returns two SVG drawings: `relief_svg` is the stamp seen from its relief side (the physical stamp), `impression_svg` is the mark it leaves in clay (the relief mirrored left-right). With mirror=true the impression reads like the source drawing; with mirror=false it is reversed. The preview follows the stored recipe, so it is always in sync.
@@ -1095,6 +1103,29 @@ _edit tool._ Change the options of a sweep (caps, twist, tolerance, orientation)
 | `tolerance` | number > 0 |  | Chord deviation of the tessellated sweep in mm (default 0.05) |
 | `twist` | number |  | Extra twist along the path (degrees) |
 | `up` | array of number |  | Initial direction of the profile's X axis [x,y,z] |
+
+### `update_text`
+
+_edit tool._ Edit lettering made by create_text_geometry: change the words, size, font, spacing, alignment, mirror or placement (same arguments as create_text_geometry; only what you pass changes). The sketch regenerates in place, so an extrude, emboss or stamp built on it follows. `sketch` is the sketch id of the text.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `align` | left \| center \| right |  | Line alignment (left \| center \| right) |
+| `center` | boolean |  | Centre the text's bounding box on (x, y) |
+| `font` | string |  | Path to a .ttf/.otf file, or builtin |
+| `kerning` | boolean |  | Apply the font's kerning |
+| `line_spacing` | number > 0 |  | Line height as a multiple of size |
+| `mirror` | boolean |  | Mirror left-right |
+| `offset` | number |  | Plane offset along its normal (mm) |
+| `path` | string |  | Path feature the baseline follows |
+| `plane` | XY \| XZ \| YZ |  | Sketch plane (XY \| XZ \| YZ) |
+| `size` | number > 0 |  | Em height in mm |
+| `sketch` | string | yes | Sketch feature of the lettering |
+| `spacing` | number |  | Extra space between letters in mm |
+| `start` | number |  | Distance along the path where the text starts (mm) |
+| `text` | string |  | New text |
+| `x` | number |  | Text origin u (mm) |
+| `y` | number |  | Text origin v (mm) |
 
 ### `validate_geometry`
 

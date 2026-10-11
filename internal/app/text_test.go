@@ -165,3 +165,41 @@ func TestStampWithMirroredText(t *testing.T) {
 		t.Errorf("stamp height %v, want plate 4 + relief 1.5", hi[2]-lo[2])
 	}
 }
+
+// lettering stays editable: update_text regenerates the sketch and the solid built on it
+func TestUpdateTextRegeneratesTheSolid(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	sw(t, a, "create_text_geometry", `{"id":"word","text":"Hi","size":10,"mode":"extrude","depth":2}`)
+	v0 := vol(t, a)
+	h0 := a.Graph.Hash()
+	sw(t, a, "update_text", `{"sketch":"word_sketch","text":"Simon"}`)
+	within(t, "new words", vol(t, a), textArea(t, "Simon", 10)*2, 3e-3)
+	sw(t, a, "update_text", `{"sketch":"word_sketch","size":20}`)
+	within(t, "doubled size", vol(t, a), textArea(t, "Simon", 20)*2, 3e-3)
+	for i := 0; i < 2; i++ {
+		if _, err := a.Undo(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a.Graph.Hash() != h0 {
+		t.Error("undo did not restore the lettering")
+	}
+	within(t, "restored", vol(t, a), v0, 1e-9)
+	// a text on a plate follows the edit
+	b := New("demo", clock)
+	defer b.Close()
+	sw(t, b, "create_box", `{"id":"plate","dx":60,"dy":30,"dz":4,"x":-30,"y":-15}`)
+	sw(t, b, "create_text_geometry", `{"id":"label","text":"A","size":10,"mode":"emboss","depth":1,"target":"plate","offset":4,"center":true}`)
+	small := vol(t, b)
+	sw(t, b, "update_text", `{"sketch":"label_sketch","text":"AAA"}`)
+	if vol(t, b) <= small {
+		t.Error("the embossed text did not grow")
+	}
+	// errors
+	for _, bad := range []string{`{"sketch":"plate","text":"x"}`, `{"sketch":"label_sketch"}`, `{"sketch":"label_sketch","text":"AAA"}`, `{"sketch":"label_sketch","size":-1}`, `{"sketch":"label_sketch","font":"/no/such.ttf"}`} {
+		if o := b.ApplyTool("update_text", []byte(bad), PolicyCommit); o.OK {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}

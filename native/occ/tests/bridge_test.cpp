@@ -246,6 +246,51 @@ int main() {
     CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1);
     occ_release(h);
 
+    // round caps: a dome of rings running to an apex closes each end of a straight tube
+    // (cylinder pi r^2 L plus two hemispheres 4/3 pi r^3); also an end cap alone and a ruled (cone) cap
+    {
+      const int k = 8;  // rings per dome, apex excluded
+      std::vector<occ_section> v;
+      for (int i = k; i >= 1; i--) {  // start dome, from the apex side inwards
+        double t = (M_PI / 2) * i / (k + 1);
+        v.push_back({{0, 0, -2 * std::sin(t)}, {1, 0, 0}, {0, 1, 0}, std::cos(t), std::cos(t)});
+      }
+      for (int i = 0; i < 5; i++) v.push_back({{0, 0, 10.0 * i / 4}, {1, 0, 0}, {0, 1, 0}, 1, 1});
+      for (int i = 1; i <= k; i++) {  // end dome
+        double t = (M_PI / 2) * i / (k + 1);
+        v.push_back({{0, 0, 10 + 2 * std::sin(t)}, {1, 0, 0}, {0, 1, 0}, std::cos(t), std::cos(t)});
+      }
+      double a0[3] = {0, 0, -2}, a1[3] = {0, 0, 12};
+      int32_t total = static_cast<int32_t>(v.size());
+      CHECK(occ_sweep(v.data(), total, &round2, 1, nullptr, 0, a0, a1, 0, k, k, 0, 0, &h) == OCC_OK);
+      CHECK(occ_mass_props(h, &q) == OCC_OK);
+      double capsule = M_PI * 4 * 10 + 4.0 / 3 * M_PI * 8;
+      CHECK(std::fabs(q.volume - capsule) / capsule < 1e-2);
+      CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1 && q.solid_count == 1);
+      CHECK(q.min_z < -1.9 && q.max_z > 11.9);
+      occ_release(h);
+
+      // only the end capped: the start stays flat
+      std::vector<occ_section> e(v.begin() + k, v.end());
+      CHECK(occ_sweep(e.data(), static_cast<int32_t>(e.size()), &round2, 1, nullptr, 0, nullptr, a1, 0, 0, k, 0, 0, &h) == OCC_OK);
+      CHECK(occ_mass_props(h, &q) == OCC_OK);
+      double halfCapsule = M_PI * 4 * 10 + 2.0 / 3 * M_PI * 8;
+      CHECK(std::fabs(q.volume - halfCapsule) / halfCapsule < 1e-2);
+      CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1);
+      CHECK(std::fabs(q.min_z) < 1e-6 && q.max_z > 11.9);
+      occ_release(h);
+
+      // ruled end cap: a cone on top of the tube
+      std::vector<occ_section> r(sec5.begin(), sec5.end());
+      double a2[3] = {0, 0, 14};
+      CHECK(occ_sweep(r.data(), 5, &round2, 1, nullptr, 0, nullptr, a2, 1, 0, 1, 0, 1, &h) == OCC_OK);
+      CHECK(occ_mass_props(h, &q) == OCC_OK);
+      double coned = M_PI * 4 * 10 + M_PI * 4 * 4 / 3.0;
+      CHECK(std::fabs(q.volume - coned) / coned < 1e-3);
+      CHECK(occ_is_valid(h, &valid) == OCC_OK && valid == 1);
+      occ_release(h);
+    }
+
     // ring: torus R=10, r=2
     const int n = 32;
     std::vector<occ_section> ring(n);

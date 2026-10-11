@@ -339,12 +339,12 @@ Banderas del agente: `--preview`, `--commit`, `--label`, `--autonomous`.
   en relieve espejado, mango, bordes redondeados y compensación de contracción (nunca se asume: la da el usuario).
 - **Texto 3D** (`create_text_geometry`): tipografía TrueType/OpenType (fuente integrada Go Regular o un `.ttf/.otf`),
   kerning, espaciado, alineación, saltos de línea y espejo; los contadores de la "o", "A", "B" se conservan.
-  Modos: sketch, extrude, emboss, engrave; el texto puede seguir un path. Un sketch de texto sirve como diseño de un
+  Modos: sketch, extrude, emboss, engrave; el texto puede seguir un path. `update_text` cambia palabras, tamaño, fuente o ubicación y regenera todo lo construido encima. Un sketch de texto sirve como diseño de un
   sello (`create_stamp` con `sketch`).
 - **Proyección sobre superficies** (`project_path_to_surface`): proyecta un path sobre un cuerpo (BVH sobre su teselado) en modo
   `planar` (según una dirección), `normal` (punto más cercano) o `conform` (puntos extra donde la cuerda se separa de la
   superficie más que la tolerancia), con `offset` a lo largo de la normal. Crea un path nuevo (instantánea: se vuelve a
-  ejecutar si el cuerpo cambia); alimenta `engrave_surface` y los sweeps. Los puntos que no alcanzan la superficie se
+  ejecutar con `refresh_projection`, que reaplica los mismos ajustes y regenera lo que depende del path cuando el cuerpo cambia); alimenta `engrave_surface` y los sweeps. Los puntos que no alcanzan la superficie se
   informan por índice (`SURFACE_PROJECTION_FAILED`). El texto sobre piezas curvas se hace con letras de tope plano que
   nacen dentro de la superficie (offset de plano bajo la superficie); no se deforma cada letra sobre la curvatura.
 - **Dibujo a sólido** (`sketch_to_solid`, `check_solid_vs_trace`): un dibujo o silueta (PNG/JPEG/SVG) pasa a sólido extruido en un
