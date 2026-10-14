@@ -39,6 +39,7 @@ const TOOLS = [
   ['modify_parameter', 'edit', 'Change one parameter of an existing feature (e.g. plate dz 4 → 5).', 'feature* parameter* value* intent', '{ "feature": "plate", "parameter": "dz", "value": 5 }'],
   ['set_expression', 'edit', 'Drive a parameter by an expression over other features. Omit expression to clear.', 'feature* parameter* expression', '{ "feature": "boss", "parameter": "height", "expression": "plate.dz * 3" }'],
   ['rename_feature', 'edit', 'Change a feature’s display name (the id stays).', 'feature* name*', '{ "feature": "box_1", "name": "Base plate" }'],
+  ['batch', 'edit', 'Run several model-editing calls as ONE change: one undo step, all or nothing (used by the UI for operations on many objects; not offered to the agent).', 'calls* intent', '{ "calls": [{ "tool": "suppress_feature", "args": { "feature": "a", "suppressed": true } }, { "tool": "suppress_feature", "args": { "feature": "b", "suppressed": true } }] }'],
   ['suppress_feature', 'edit', 'Suppress / unsuppress a feature (it passes its target through unchanged).', 'feature* suppressed*', '{ "feature": "fillet_1", "suppressed": true }'],
   ['remove_feature', 'edit', 'Delete a feature; fails if others depend on it.', 'feature*', '{ "feature": "hole_2" }'],
   ['delete_objects', 'edit', 'Delete the selection or listed features as ONE undoable ChangeSet. cascade / resolve_owner for dependants and sub-shape selections.', 'features cascade resolve_owner', '{ "features": ["boss"], "cascade": false }'],

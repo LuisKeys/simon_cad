@@ -86,6 +86,7 @@ func Default() *Registry {
 	for _, t := range queryTools() {
 		r.Register(t)
 	}
+	r.Register(batchTool(r)) // last: it plans through the others
 	return r
 }
 

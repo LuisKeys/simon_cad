@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -238,12 +239,44 @@ func parse(s string) (node, error) {
 	return n, nil
 }
 
+// The parsed form of an expression never changes and every rebuild re-evaluates the same few
+// strings, so parses are remembered. Trees are immutable once built, so sharing them between
+// goroutines is safe. The memory is bounded: a full cache is simply emptied.
+const maxCached = 4096
+
+type parsed struct {
+	n   node
+	err error
+}
+
+var (
+	parseMu    sync.Mutex
+	parseCache = map[string]parsed{}
+)
+
+func parseCached(s string) (node, error) {
+	parseMu.Lock()
+	p, ok := parseCache[s]
+	parseMu.Unlock()
+	if ok {
+		return p.n, p.err
+	}
+	n, err := parse(s)
+	parseMu.Lock()
+	if len(parseCache) >= maxCached {
+		clear(parseCache)
+	}
+	parseCache[s] = parsed{n, err}
+	parseMu.Unlock()
+	return n, err
+}
+
 // Check reports whether s is a syntactically valid expression.
-func Check(s string) error { _, err := parse(s); return err }
+func Check(s string) error { _, err := parseCached(s); return err }
 
 // Variables lists the distinct identifiers (excluding function names and constants), in order.
 func Variables(s string) []string {
-	n, err := parse(s)
+	n, err := parseCached(s)
 	if err != nil {
 		return nil
 	}
@@ -310,7 +343,7 @@ var funcs = map[string]struct {
 
 // Eval evaluates s with variable lookup via env. Unknown variables are an error.
 func Eval(s string, env func(name string) (float64, bool)) (float64, error) {
-	n, err := parse(s)
+	n, err := parseCached(s)
 	if err != nil {
 		return 0, err
 	}

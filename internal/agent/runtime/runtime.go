@@ -111,7 +111,9 @@ func (rt *Runtime) SystemPrompt() string {
 	return strings.Join(parts, "\n\n")
 }
 
-func (rt *Runtime) toolset(a *app.App) (map[string]bool, []ToolDef) {
+// Toolset is the tools the runtime's capabilities offer for a: the allowed names and their
+// definitions, each tool once, in capability order.
+func (rt *Runtime) Toolset(a *app.App) (map[string]bool, []ToolDef) {
 	allowed := map[string]bool{}
 	var defs []ToolDef
 	for _, c := range rt.Caps {
@@ -247,7 +249,7 @@ func (rt *Runtime) Begin(ctx context.Context, a *app.App, intent string, policy 
 		}
 		attached = append(attached, "## Image interpretation (from the vision model; work from it and from the image interpretations above)\n"+in.Text)
 	}
-	c.allowed, c.defs = rt.toolset(a)
+	c.allowed, c.defs = rt.Toolset(a)
 	c.system = rt.SystemPrompt()
 	mode := rt.ToolLoading
 	if mode == "" {
@@ -324,6 +326,20 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 		res.Usage.Add(resp.Usage)
 		c.Msgs = append(c.Msgs, Message{Role: "assistant", Content: resp.Content})
 		uses := resp.ToolUses()
+		if truncated(resp.StopReason) {
+			// Out of output tokens: a final answer is cut short, and a tool call may carry
+			// half-written arguments, so none is run. Tell the model to split the work.
+			if len(uses) == 0 {
+				turn.Final = strings.TrimSpace(resp.Text() + "\n\n" + truncatedNotice)
+				return turn, nil
+			}
+			var results []Block
+			for _, u := range uses {
+				results = append(results, Block{Type: "tool_result", ToolUseID: u.ID, Content: truncatedToolError, IsError: true})
+			}
+			c.Msgs = append(c.Msgs, Message{Role: "user", Content: results})
+			continue
+		}
 		if len(uses) == 0 {
 			turn.Final = resp.Text()
 			return turn, nil
@@ -389,6 +405,11 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 	turn.Final = fmt.Sprintf("(stopped after %d steps without a final answer)", rt.MaxSteps)
 	return turn, nil
 }
+
+const (
+	truncatedNotice    = "(the answer was cut off at the output token limit; ask again, or break the request into smaller steps)"
+	truncatedToolError = `{"ok":false,"error":"your response was cut off at the output token limit before this call completed, so it was not run; make smaller calls, one step at a time"}`
+)
 
 // proposed reports whether calls produced an image interpretation proposal.
 func proposed(calls []TurnCall) bool {

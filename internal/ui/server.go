@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/config"
@@ -598,6 +599,11 @@ func (s *Server) routes() {
 	m.HandleFunc("/", s.static)
 }
 
+// sseHeartbeat is how often an idle event stream sends a comment line. It keeps proxies from
+// closing the connection and lets the page tell a quiet server from a dead one; a variable so
+// tests need not wait.
+var sseHeartbeat = 20 * time.Second
+
 // events streams Hub notices as server-sent events.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	fl, ok := w.(http.Flusher)
@@ -611,10 +617,15 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	fmt.Fprint(w, ": connected\n\n")
 	fl.Flush()
+	beat := time.NewTicker(sseHeartbeat)
+	defer beat.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-beat.C:
+			fmt.Fprint(w, ": ping\n\n")
+			fl.Flush()
 		case n := <-ch:
 			b, _ := json.Marshal(n)
 			fmt.Fprintf(w, "data: %s\n\n", b)

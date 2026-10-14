@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"strings"
@@ -388,7 +389,7 @@ func planFromInterpretation(env Env, a Args, mode, existing string) (*Plan, erro
 	}
 
 	// node ids: <base>_sketch, <base>_<op>
-	base := safeID.ReplaceAllString(strings.ToLower(firstNonEmpty(a.Str("id"), a.Str("name"), "image")), "_")
+	base := safeID.ReplaceAllString(strings.ToLower(cmp.Or(a.Str("id"), a.Str("name"), "image")), "_")
 	base = strings.Trim(base, "_")
 	if base == "" || base[0] < 'a' || base[0] > 'z' {
 		base = "image"
@@ -582,13 +583,4 @@ func nodeCommands(nodes []*cadir.Node) []commands.Command {
 		out[i] = &commands.AddFeature{Node: n, Index: -1}
 	}
 	return out
-}
-
-func firstNonEmpty(vs ...string) string {
-	for _, v := range vs {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

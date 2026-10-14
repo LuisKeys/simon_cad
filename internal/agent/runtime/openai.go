@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -95,14 +96,12 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 // post sends payload with retry on 429/5xx and returns the 200 body.
 func (o *OpenAI) post(ctx context.Context, path string, payload []byte) ([]byte, error) {
 	var lastErr error
-	for attempt := 0; attempt < 4; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-time.After(time.Duration(1<<attempt) * 500 * time.Millisecond):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+	var after time.Duration
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err := waitRetry(ctx, attempt, after); err != nil {
+			return nil, err
 		}
+		after = 0
 		hr, err := http.NewRequestWithContext(ctx, http.MethodPost, o.BaseURL+path, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
@@ -119,6 +118,7 @@ func (o *OpenAI) post(ctx context.Context, path string, payload []byte) ([]byte,
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		resp.Body.Close()
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			after = retryAfter(resp.Header)
 			lastErr = fmt.Errorf("%s API %d: %s", o.Flavor, resp.StatusCode, truncate(string(data), 300))
 			continue
 		}
@@ -133,7 +133,7 @@ func (o *OpenAI) post(ctx context.Context, path string, payload []byte) ([]byte,
 			}
 			if json.Unmarshal(data, &e) != nil || e.Error.Message == "" {
 				_ = json.Unmarshal(data, &plain)
-				e.Error.Message = firstNonEmpty(plain.Error, truncate(string(data), 300))
+				e.Error.Message = cmp.Or(plain.Error, truncate(string(data), 300))
 			}
 			return nil, fmt.Errorf("%s API %d: %s", o.Flavor, resp.StatusCode, e.Error.Message)
 		}
@@ -162,7 +162,7 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 				}
 			case "document":
 				if b.Source != nil {
-					parts = append(parts, map[string]any{"type": "input_file", "filename": firstNonEmpty(b.Title, "document.pdf"),
+					parts = append(parts, map[string]any{"type": "input_file", "filename": cmp.Or(b.Title, "document.pdf"),
 						"file_data": "data:" + b.Source.MediaType + ";base64," + b.Source.Data})
 				}
 			case "reasoning":
@@ -205,6 +205,9 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 			tools = append(tools, map[string]any{"type": "function", "name": t.Name, "description": t.Description, "parameters": t.InputSchema})
 		}
 		body["tools"] = tools
+		if req.ForceTool != "" && hasTool(req.Tools, req.ForceTool) {
+			body["tool_choice"] = map[string]any{"type": "function", "name": req.ForceTool}
+		}
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -286,13 +289,4 @@ func (o *OpenAI) completeResponses(ctx context.Context, model string, max int, r
 		}
 	}
 	return r, nil
-}
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
 }

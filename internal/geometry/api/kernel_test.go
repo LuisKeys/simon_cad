@@ -1,9 +1,12 @@
 package api
 
 import (
+	"errors"
 	"math"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestBoxSubtractCylinderVolume(t *testing.T) {
@@ -59,6 +62,9 @@ func TestErrorsDoNotCrash(t *testing.T) {
 // TestChurnNoLeak runs 10k create/boolean/release cycles: handle count must return to
 // zero and resident memory must stay flat.
 func TestChurnNoLeak(t *testing.T) {
+	if raceEnabled {
+		t.Skip("resident memory is inflated several times over by the race detector's instrumentation")
+	}
 	if testing.Short() {
 		t.Skip("short")
 	}
@@ -310,4 +316,200 @@ func TestPlaceAndFaceFrame(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Topology must report exactly the entities Tessellate does (same numbering, same exact
+// measures), because selectors resolve against them; it only skips the triangles.
+func TestTopologyMatchesTessellateWithoutTriangles(t *testing.T) {
+	k := New()
+	defer k.Close()
+	mustS := func(s *Shape, err error) *Shape {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	plate := mustS(k.Box(60, 40, 5))
+	drilled := plate
+	for i := 0; i < 6; i++ {
+		cyl := mustS(k.Cylinder(2, 10))
+		moved := mustS(cyl.Translate(8+float64(i)*8, 20, -2))
+		drilled = mustS(k.Subtract(drilled, moved))
+	}
+	shapes := map[string]*Shape{
+		"box":       plate,
+		"cylinder":  mustS(k.Cylinder(5, 12)),
+		"sphere":    mustS(k.Sphere(7)),
+		"torus":     mustS(k.Torus(10, 2)),
+		"drilled":   drilled,
+		"filleted":  mustS(mustS(k.Box(20, 20, 20)).Fillet(3)),
+		"boolunion": mustS(k.Union(plate, mustS(mustS(k.Box(10, 10, 30)).Translate(10, 10, 0)))),
+	}
+	for name, s := range shapes {
+		full, err := s.Tessellate(0.5)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		topo, err := s.Topology(0.5)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(topo.Positions)+len(topo.Normals)+len(topo.Indices) != 0 {
+			t.Errorf("%s: topology carries triangles", name)
+		}
+		if len(topo.Faces) != len(full.Faces) || len(topo.Edges) != len(full.Edges) {
+			t.Fatalf("%s: %d faces/%d edges, want %d/%d", name, len(topo.Faces), len(topo.Edges), len(full.Faces), len(full.Edges))
+		}
+		for i, f := range topo.Faces {
+			w := full.Faces[i]
+			if f.TriCount != 0 {
+				t.Errorf("%s face %d: tri_count %d, want 0", name, i, f.TriCount)
+			}
+			f.TriStart, f.TriCount, w.TriStart, w.TriCount = 0, 0, 0, 0
+			if f != w {
+				t.Errorf("%s face %d differs:\n topology %+v\n tessellate %+v", name, i, f, w)
+			}
+		}
+		for i, e := range topo.Edges {
+			if e != full.Edges[i] {
+				t.Errorf("%s edge %d differs:\n topology %+v\n tessellate %+v", name, i, e, full.Edges[i])
+			}
+		}
+		if len(topo.Vertices) != len(full.Vertices) {
+			t.Fatalf("%s: %d vertex floats, want %d", name, len(topo.Vertices), len(full.Vertices))
+		}
+		for i := range topo.Vertices {
+			if topo.Vertices[i] != full.Vertices[i] {
+				t.Errorf("%s vertex float %d differs", name, i)
+			}
+		}
+		if len(topo.EdgePoints) != len(full.EdgePoints) {
+			t.Errorf("%s: edge polylines differ in length", name)
+		}
+	}
+	if n := k.LiveMeshes(); n != 0 {
+		t.Fatalf("%d native meshes leaked", n)
+	}
+	if _, err := plate.Topology(-1); err == nil {
+		t.Fatal("a non-positive deflection must be rejected")
+	}
+	gone := mustS(k.Box(1, 1, 1))
+	gone.Release()
+	if _, err := gone.Topology(0.5); err == nil {
+		t.Fatal("a released shape must be rejected")
+	}
+}
+
+func TestTopologyIsMuchCheaperThanMeshingManyHoles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing test")
+	}
+	k := New()
+	defer k.Close()
+	cur, _ := k.Box(400, 40, 5)
+	for i := 0; i < 60; i++ {
+		c, _ := k.Cylinder(1, 10)
+		c2, _ := c.Translate(5+float64(i)*3.5, 20, -2)
+		var err error
+		if cur, err = k.Subtract(cur, c2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time := func(f func()) float64 {
+		best := 1e18
+		for i := 0; i < 3; i++ {
+			start := nowNS()
+			f()
+			if d := float64(nowNS() - start); d < best {
+				best = d
+			}
+		}
+		return best
+	}
+	mesh := time(func() { _, _ = cur.Tessellate(0.5) })
+	topo := time(func() { _, _ = cur.Topology(0.5) })
+	t.Logf("tessellate %.1f ms, topology %.1f ms", mesh/1e6, topo/1e6)
+	if topo*3 > mesh {
+		t.Fatalf("topology (%.1f ms) should be at least 3x cheaper than meshing (%.1f ms)", topo/1e6, mesh/1e6)
+	}
+}
+
+func nowNS() int64 { return time.Now().UnixNano() }
+
+func TestClosedKernelFailsInsteadOfPanicking(t *testing.T) {
+	k := New()
+	box, err := k.Box(1, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.Close()
+	k.Close() // closing twice is fine
+	if _, err := k.Box(1, 1, 1); !errors.Is(err, ErrKernelClosed) {
+		t.Fatalf("Box on a closed kernel: %v, want ErrKernelClosed", err)
+	}
+	if _, err := box.Tessellate(0.5); !errors.Is(err, ErrKernelClosed) {
+		t.Fatalf("Tessellate on a closed kernel: %v", err)
+	}
+	if _, err := box.Topology(0.5); !errors.Is(err, ErrKernelClosed) {
+		t.Fatalf("Topology on a closed kernel: %v", err)
+	}
+	if _, err := box.Props(); !errors.Is(err, ErrKernelClosed) {
+		t.Fatalf("Props on a closed kernel: %v", err)
+	}
+	box.Release() // nothing to free any more; must not panic or block
+	if v := k.Version(); v != "" {
+		t.Fatalf("Version on a closed kernel = %q", v)
+	}
+}
+
+func TestConcurrentReleaseFreesOnce(t *testing.T) {
+	k := New()
+	defer k.Close()
+	base := k.LiveShapes() // the handle table is process-wide: other tests may have left shapes in it
+	box, err := k.Box(1, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := k.LiveShapes(); n != base+1 {
+		t.Fatalf("live = %d, want %d", n, base+1)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); box.Release() }()
+	}
+	wg.Wait()
+	if n := k.LiveShapes(); n != base {
+		t.Fatalf("live = %d after concurrent releases, want %d", n, base)
+	}
+	if _, err := box.Fillet(0.1); !errors.Is(err, ErrReleased) {
+		t.Fatalf("using a released shape: %v", err)
+	}
+}
+
+// Closing while other goroutines are using the kernel: every call either completes or reports
+// ErrKernelClosed; nothing panics (the race detector also watches this one).
+func TestCloseWhileInUse(t *testing.T) {
+	k := New()
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 200; i++ {
+				s, err := k.Box(1, 1, 1)
+				if err != nil {
+					if !errors.Is(err, ErrKernelClosed) {
+						t.Errorf("unexpected error: %v", err)
+					}
+					return
+				}
+				s.Release()
+			}
+		}()
+	}
+	time.Sleep(5 * time.Millisecond)
+	k.Close()
+	wg.Wait()
 }

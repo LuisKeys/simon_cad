@@ -1,28 +1,46 @@
 // Thin client for the Simon CAD UI service. Every call maps one-to-one onto a ui.Service
 // method, which is also what the Wails shell binds.
-const token = document.querySelector('meta[name="simon-token"]')?.content ?? '';
+const token = (typeof document !== 'undefined' && document.querySelector('meta[name="simon-token"]')?.content) || '';
 
-export async function api(path, body) {
-  const res = await fetch('/api/' + path, {
+// A request that gets no answer must end, not hang the panel that awaits it for ever. The agent runs
+// on the server and its progress arrives as notices, so no call here legitimately takes this long.
+export const DEFAULT_TIMEOUT_MS = 120000;
+
+// fetchTimeout is fetch that gives up after ms, with an error that says so.
+async function fetchTimeout(path, init, ms, run) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    return await run(await fetch('/api/' + path, { ...init, signal: ctl.signal }));
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`${path}: no answer from the server after ${Math.round(ms / 1000)} s`);
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
+export async function api(path, body, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
+  return fetchTimeout(path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'X-Simon-Token': token, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+  }, timeout, async (res) => {
+    let data = null;
+    try { data = await res.json(); } catch { /* empty body */ }
+    if (!res.ok) throw failure(data, res.status, `${path}: HTTP ${res.status}`);
+    return data;
   });
-  let data = null;
-  try { data = await res.json(); } catch { /* empty body */ }
-  if (!res.ok) throw failure(data, res.status, `${path}: HTTP ${res.status}`);
-  return data;
 }
 
 // Binary reply (the print simulation's toolpath buffer).
-export async function apiBytes(path) {
-  const res = await fetch('/api/' + path, { headers: { 'X-Simon-Token': token } });
-  if (!res.ok) {
-    let data = null;
-    try { data = await res.json(); } catch { /* empty body */ }
-    throw failure(data, res.status, `${path}: HTTP ${res.status}`);
-  }
-  return res.arrayBuffer();
+export async function apiBytes(path, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
+  return fetchTimeout(path, { headers: { 'X-Simon-Token': token } }, timeout, async (res) => {
+    if (!res.ok) {
+      let data = null;
+      try { data = await res.json(); } catch { /* empty body */ }
+      throw failure(data, res.status, `${path}: HTTP ${res.status}`);
+    }
+    return res.arrayBuffer();
+  });
 }
 
 // failure turns an error reply into an Error that keeps its status, its code (e.g. "fallback_consent") and its details.
@@ -61,10 +79,14 @@ export const diffUrl = (iteration, ref, previous) =>
 // Texture files of a material (loaded by Three's TextureLoader, which cannot set headers).
 export const materialUrl = (id, file) => `/api/materials/${encodeURIComponent(id)}/${encodeURIComponent(file)}?token=${encodeURIComponent(token)}`;
 
-// Server-sent notices; reconnects on its own (EventSource), and callers refetch state.
-export function subscribe(onNotice) {
+// Server-sent notices; reconnects on its own (EventSource). onStatus('lost') / onStatus('open')
+// report the connection, because notices sent while it was down are gone: the caller should
+// refetch the state when it comes back.
+export function subscribe(onNotice, onStatus) {
   const es = new EventSource('/api/events?token=' + encodeURIComponent(token));
   es.onmessage = (e) => { try { onNotice(JSON.parse(e.data)); } catch { /* ignore malformed */ } };
+  es.onopen = () => onStatus?.('open');
+  es.onerror = () => onStatus?.('lost');
   return es;
 }
 

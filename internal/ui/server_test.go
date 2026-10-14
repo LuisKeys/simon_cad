@@ -150,3 +150,33 @@ func TestEventStreamDeliversNotices(t *testing.T) {
 		t.Fatal("no event received")
 	}
 }
+
+// An idle stream sends a comment line now and then, so a client can tell a quiet server from
+// a dead connection and proxies keep the connection open.
+func TestEventStreamSendsHeartbeats(t *testing.T) {
+	defer func(d time.Duration) { sseHeartbeat = d }(sseHeartbeat)
+	sseHeartbeat = 20 * time.Millisecond
+	srv, ts := testServer(t)
+	req, _ := http.NewRequest("GET", ts.URL+"/api/events?token="+srv.Token, nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	pings := make(chan struct{}, 8)
+	go func() {
+		sc := bufio.NewScanner(res.Body)
+		for sc.Scan() {
+			if sc.Text() == ": ping" {
+				pings <- struct{}{}
+			}
+		}
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-pings:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("heartbeat %d never arrived", i+1)
+		}
+	}
+}

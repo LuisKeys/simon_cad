@@ -2,7 +2,9 @@ package commands
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
+	"strings"
 	"testing"
 
 	"github.com/accelone/simoncad/internal/cadir"
@@ -289,5 +291,19 @@ func TestResetAppearanceInverseRestoresAll(t *testing.T) {
 	}
 	if _, err := (&SetOpacity{ID: "a", Opacity: ptr(1.5)}).Apply(g); err == nil {
 		t.Fatal("expected invalid opacity error")
+	}
+}
+
+// A node that cannot be serialized (a NaN parameter has no JSON form) must be refused with a
+// message, not copied into the graph as an empty node.
+func TestAddFeatureRefusesANodeThatCannotBeCopied(t *testing.T) {
+	g := cadir.NewGraph()
+	n := &cadir.Node{ID: "bad", Type: "box", Parameters: map[string]any{"dx": math.NaN(), "dy": 1.0, "dz": 1.0}}
+	_, err := (&AddFeature{Node: n, Index: -1}).Apply(g)
+	if err == nil || !strings.Contains(err.Error(), `"bad" cannot be copied`) {
+		t.Fatalf("want a 'cannot be copied' error, got %v", err)
+	}
+	if len(g.Nodes) != 0 {
+		t.Fatal("the graph must be left untouched")
 	}
 }

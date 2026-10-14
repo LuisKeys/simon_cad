@@ -71,7 +71,7 @@ func TestDesignParametersDriveGeometryAndRegionsLock(t *testing.T) {
 			t.Fatalf("%s must be refused on a locked region: %+v", c.tool, o.Error)
 		}
 	}
-	mustTool(t, a, "set_parameter", `{"name":"length","value":4100}`) // not owned by the region
+	mustTool(t, a, "set_parameter", `{"name":"length","value":4100}`)      // not owned by the region
 	mustTool(t, a, "set_color", `{"features":["body"],"color":"#CC0000"}`) // appearance is allowed
 	mustTool(t, a, "unlock_region", `{"name":"body"}`)
 	mustTool(t, a, "set_parameter", `{"name":"height","value":900}`)

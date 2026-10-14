@@ -102,3 +102,27 @@ func BenchmarkTextExtrude(b *testing.B) {
 		a.Close()
 	}
 }
+
+func benchPattern(b *testing.B, count int) {
+	b.Helper()
+	for i := 0; i < b.N; i++ {
+		a := benchApp(b)
+		for _, call := range [][2]string{
+			{"create_box", `{"id":"plate","dx":400,"dy":40,"dz":5}`},
+			{"add_hole", `{"id":"h","target":"plate","diameter":2,"positions":[[5,20]]}`},
+			{"linear_pattern", fmt.Sprintf(`{"id":"row","source":"h","count":%d,"dx":3.5}`, count)},
+		} {
+			if o := a.ApplyTool(call[0], []byte(call[1]), PolicyCommit); !o.OK {
+				b.Fatalf("%s: %s", call[0], o.Error)
+			}
+		}
+		if _, err := a.Model(); err != nil {
+			b.Fatal(err)
+		}
+		a.Close()
+	}
+}
+
+// A long row of holes: the copies of the tool are united before the one cut.
+func BenchmarkLinearPattern50(b *testing.B)  { benchPattern(b, 50) }
+func BenchmarkLinearPattern100(b *testing.B) { benchPattern(b, 100) }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/accelone/simoncad/internal/geometry/bridge"
 )
@@ -13,13 +14,18 @@ import (
 // ErrReleased is returned when a Shape is used after Release.
 var ErrReleased = errors.New("shape already released")
 
+// ErrKernelClosed is returned by operations on a kernel that has been closed.
+var ErrKernelClosed = errors.New("the geometry kernel is closed")
+
 // Props are the mass/bounding properties of a shape (millimetres).
 type Props = bridge.Props
 
 // Shape is an owned reference to kernel geometry. Release it when done.
 type Shape struct {
 	k *Kernel
-	h bridge.Handle
+	// hv is the kernel handle (0 once released). It is atomic so a Release racing with another
+	// call is an error from the kernel, not a data race, and so exactly one Release frees it.
+	hv atomic.Uint64
 
 	// A shape is immutable, so its mass properties are computed once (they cost milliseconds on
 	// swept or traced surfaces and the rebuild, the features' own checks and the tools all ask).
@@ -32,7 +38,10 @@ type Shape struct {
 type Kernel struct {
 	jobs chan func()
 	done chan struct{}
-	once sync.Once
+	// mu is held for reading while a job is queued and runs, and for writing by Close, so
+	// Close waits for work in flight and nothing is ever sent on the closed jobs channel.
+	mu     sync.RWMutex
+	closed bool
 }
 
 // New starts a kernel worker.
@@ -49,9 +58,15 @@ func New() *Kernel {
 	return k
 }
 
-// Close stops the worker. Shapes must be released beforehand.
+// Close stops the worker after the work in flight. Shapes must be released beforehand.
+// It is safe to call twice; operations on a closed kernel fail with ErrKernelClosed.
 func (k *Kernel) Close() {
-	k.once.Do(func() { close(k.jobs) })
+	k.mu.Lock()
+	if !k.closed {
+		k.closed = true
+		close(k.jobs)
+	}
+	k.mu.Unlock()
 	<-k.done
 }
 
@@ -69,10 +84,18 @@ func (k *Kernel) LiveShapes() int64 {
 	return n
 }
 
-func (k *Kernel) run(fn func()) {
+// run executes fn on the kernel thread and waits for it. It reports ErrKernelClosed, without
+// running fn, when the kernel has been closed.
+func (k *Kernel) run(fn func()) error {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if k.closed {
+		return ErrKernelClosed
+	}
 	d := make(chan struct{})
 	k.jobs <- func() { fn(); close(d) }
 	<-d
+	return nil
 }
 
 func (k *Kernel) wrap(fn func() (bridge.Handle, error)) (*Shape, error) {
@@ -80,11 +103,15 @@ func (k *Kernel) wrap(fn func() (bridge.Handle, error)) (*Shape, error) {
 		h   bridge.Handle
 		err error
 	)
-	k.run(func() { h, err = fn() })
+	if rerr := k.run(func() { h, err = fn() }); rerr != nil {
+		return nil, rerr
+	}
 	if err != nil {
 		return nil, err
 	}
-	return &Shape{k: k, h: h}, nil
+	sh := &Shape{k: k}
+	sh.hv.Store(uint64(h))
+	return sh, nil
 }
 
 func (k *Kernel) Box(dx, dy, dz float64) (*Shape, error) {
@@ -117,46 +144,51 @@ func (k *Kernel) ExtrudePolygon(xy []float64, h float64) (*Shape, error) {
 }
 
 func (k *Kernel) Union(a, b *Shape) (*Shape, error) {
-	if a.h == 0 || b.h == 0 {
+	if a.handle() == 0 || b.handle() == 0 {
 		return nil, ErrReleased
 	}
-	return k.wrap(func() (bridge.Handle, error) { return bridge.Union(a.h, b.h) })
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Union(a.handle(), b.handle()) })
 }
 
 func (k *Kernel) Subtract(a, b *Shape) (*Shape, error) {
-	if a.h == 0 || b.h == 0 {
+	if a.handle() == 0 || b.handle() == 0 {
 		return nil, ErrReleased
 	}
-	return k.wrap(func() (bridge.Handle, error) { return bridge.Subtract(a.h, b.h) })
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Subtract(a.handle(), b.handle()) })
 }
 
 // Intersect keeps only the volume common to a and b.
 func (k *Kernel) Intersect(a, b *Shape) (*Shape, error) {
-	if a.h == 0 || b.h == 0 {
+	if a.handle() == 0 || b.handle() == 0 {
 		return nil, ErrReleased
 	}
-	return k.wrap(func() (bridge.Handle, error) { return bridge.Intersect(a.h, b.h) })
+	return k.wrap(func() (bridge.Handle, error) { return bridge.Intersect(a.handle(), b.handle()) })
 }
 
 func (k *Kernel) ImportSTEP(path string) (*Shape, error) {
 	return k.wrap(func() (bridge.Handle, error) { return bridge.ImportSTEP(path) })
 }
 
-// Release frees the underlying kernel shape. Safe to call twice.
+func (s *Shape) handle() bridge.Handle { return bridge.Handle(s.hv.Load()) }
+
+// Release frees the underlying kernel shape. Safe to call twice, and from several goroutines:
+// exactly one call frees it. After the kernel is closed there is nothing left to free.
 func (s *Shape) Release() {
-	if s == nil || s.h == 0 {
+	if s == nil {
 		return
 	}
-	h := s.h
-	s.h = 0
-	s.k.run(func() { _ = bridge.Release(h) })
+	h := bridge.Handle(s.hv.Swap(0))
+	if h == 0 {
+		return
+	}
+	_ = s.k.run(func() { _ = bridge.Release(h) })
 }
 
 func (s *Shape) unary(fn func(bridge.Handle) (bridge.Handle, error)) (*Shape, error) {
-	if s.h == 0 {
+	if s.handle() == 0 {
 		return nil, ErrReleased
 	}
-	return s.k.wrap(func() (bridge.Handle, error) { return fn(s.h) })
+	return s.k.wrap(func() (bridge.Handle, error) { return fn(s.handle()) })
 }
 
 func (s *Shape) Fillet(radius float64) (*Shape, error) {
@@ -224,31 +256,35 @@ type Frame struct{ Origin, Normal, X [3]float64 }
 
 // FaceFrame returns the placement frame of the planar face with the kernel index (as in Tessellate).
 func (s *Shape) FaceFrame(face int) (Frame, error) {
-	if s.h == 0 {
+	if s.handle() == 0 {
 		return Frame{}, ErrReleased
 	}
 	var (
 		f   Frame
 		err error
 	)
-	s.k.run(func() { f.Origin, f.Normal, f.X, err = bridge.FaceFrame(s.h, face) })
+	if rerr := s.k.run(func() { f.Origin, f.Normal, f.X, err = bridge.FaceFrame(s.handle(), face) }); rerr != nil {
+		err = rerr
+	}
 	return f, err
 }
 
 func (s *Shape) IsValid() (bool, error) {
-	if s.h == 0 {
+	if s.handle() == 0 {
 		return false, ErrReleased
 	}
 	var (
 		ok  bool
 		err error
 	)
-	s.k.run(func() { ok, err = bridge.IsValid(s.h) })
+	if rerr := s.k.run(func() { ok, err = bridge.IsValid(s.handle()) }); rerr != nil {
+		err = rerr
+	}
 	return ok, err
 }
 
 func (s *Shape) Props() (Props, error) {
-	if s.h == 0 {
+	if s.handle() == 0 {
 		return Props{}, ErrReleased
 	}
 	s.pmu.Lock()
@@ -260,7 +296,9 @@ func (s *Shape) Props() (Props, error) {
 		p   Props
 		err error
 	)
-	s.k.run(func() { p, err = bridge.MassProps(s.h) })
+	if rerr := s.k.run(func() { p, err = bridge.MassProps(s.handle()) }); rerr != nil {
+		err = rerr
+	}
 	if err == nil {
 		s.props = &p
 	}
@@ -268,21 +306,25 @@ func (s *Shape) Props() (Props, error) {
 }
 
 func (s *Shape) ExportSTEP(path string) error {
-	if s.h == 0 {
+	if s.handle() == 0 {
 		return ErrReleased
 	}
 	var err error
-	s.k.run(func() { err = bridge.ExportSTEP(s.h, path) })
+	if rerr := s.k.run(func() { err = bridge.ExportSTEP(s.handle(), path) }); rerr != nil {
+		err = rerr
+	}
 	return err
 }
 
 // ExportSTL writes a binary STL meshed at the given linear deflection (mm).
 func (s *Shape) ExportSTL(path string, deflection float64) error {
-	if s.h == 0 {
+	if s.handle() == 0 {
 		return ErrReleased
 	}
 	var err error
-	s.k.run(func() { err = bridge.ExportSTL(s.h, path, deflection, true) })
+	if rerr := s.k.run(func() { err = bridge.ExportSTL(s.handle(), path, deflection, true) }); rerr != nil {
+		err = rerr
+	}
 	return err
 }
 
@@ -352,14 +394,33 @@ func (s *Shape) Tessellate(deflection float64) (*Mesh, error) {
 // TessellateAngular is Tessellate with an explicit angular deflection (radians): the widest
 // angle one segment of a curve may span. Larger values give fewer, longer segments.
 func (s *Shape) TessellateAngular(deflection, angular float64) (*Mesh, error) {
-	if s.h == 0 {
+	if s.handle() == 0 {
 		return nil, ErrReleased
 	}
 	var (
 		m   *Mesh
 		err error
 	)
-	s.k.run(func() { m, err = bridge.TessellateAngular(s.h, deflection, angular) })
+	if rerr := s.k.run(func() { m, err = bridge.TessellateAngular(s.handle(), deflection, angular) }); rerr != nil {
+		err = rerr
+	}
+	return m, err
+}
+
+// Topology returns what Tessellate returns for faces, edges and vertices (same numbering and
+// exact measures) without triangulating: it has no triangles. Use it when only the entities
+// are needed; meshing a face with many holes costs on the order of 100 ms.
+func (s *Shape) Topology(deflection float64) (*Mesh, error) {
+	if s.handle() == 0 {
+		return nil, ErrReleased
+	}
+	var (
+		m   *Mesh
+		err error
+	)
+	if rerr := s.k.run(func() { m, err = bridge.Topology(s.handle(), deflection) }); rerr != nil {
+		err = rerr
+	}
 	return m, err
 }
 

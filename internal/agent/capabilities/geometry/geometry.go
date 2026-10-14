@@ -58,7 +58,8 @@ func (Capability) BuildContext(a *app.App) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b, err := json.MarshalIndent(sum, "", "  ")
+	// Compact: the context is resent on every step and indentation is pure token cost.
+	b, err := json.Marshal(sum)
 	if err != nil {
 		return "", err
 	}

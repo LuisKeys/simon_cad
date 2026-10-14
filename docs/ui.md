@@ -35,7 +35,7 @@ free-form prompts still works (palette tools, parameter edits, undo/redo, timeli
 | `internal/rendering` | `Renderer.Scene(model, known)` meshes the visible bodies (the model's leaves), caches by node content key and returns only bodies the client does not have. `BodyMesh.SelectorFor(kind, index)` / `PickFor(selector)` are the bidirectional pick-ID ↔ selector map. |
 | `internal/ui` | `Service` (state, pick, selection, scene, preview ghost, prompt, ChangeSets, timeline, playback, project I/O, palette), `Server` (JSON API + SSE on loopback, per-run token, Host check), `Hub` (non-blocking notices). |
 | `internal/app/view.go`, `cards.go` | Read-only views the UI uses: `Snapshot`, `PreviewModel`, `ModelAfter`, `ChangeSetCard`. |
-| `frontend/` | `viewport.js` (Three.js, picking, overlays, view cube), `viewlayout.js` (Single/Quad views, cameras, dividers), `axes.js` (coordinate axes, axis gizmo), `app.js` (panels, palette, timeline), `api.js`. No build step; Three.js r186 is vendored under `frontend/vendor/`. |
+| `frontend/` | `viewport.js` (Three.js, picking, overlays, view cube), `viewlayout.js` (Single/Quad views, cameras, dividers), `axes.js` (coordinate axes, axis gizmo), `app.js` (panels, timeline, wiring), `palette.js` + `palette-model.js` (command palette and its rules), `dialogs.js` (confirm / form / ask), `menu.js` (context menu), `toast.js` + `toast-model.js` (queued messages), `bvh.js` (ray picking over a body's triangles), `mesh-codec.js` (packed mesh buffers), `api.js` (requests with a timeout, the event stream and its connection state). No build step; Three.js r186 is vendored under `frontend/vendor/`. |
 | `cmd/simoncad` | Launcher. |
 
 ## Help microsite

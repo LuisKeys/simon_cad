@@ -190,6 +190,10 @@ typedef struct {
 occ_status occ_tessellate(occ_handle s, double deflection, occ_mesh** out);
 /* As occ_tessellate with an explicit angular deflection (radians; occ_tessellate uses 0.5). */
 occ_status occ_tessellate_ex(occ_handle s, double deflection, double angular, occ_mesh** out);
+/* The face/edge/vertex tables of occ_tessellate (same order, same exact values) without
+ * triangulating: positions, normals and indices are empty and every face reports tri_count 0.
+ * Edge polylines use `deflection`. Free with occ_mesh_free. */
+occ_status occ_topology(occ_handle s, double deflection, occ_mesh** out);
 occ_status occ_mesh_get_counts(const occ_mesh* m, occ_mesh_counts* out);
 /* Copies into caller buffers sized from occ_mesh_get_counts: positions/normals 3*vertices
  * floats, indices 3*triangles, faces, edges, edge_pts 3*edge_points floats,

@@ -2,6 +2,10 @@
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
 import { api, apiBytes, subscribe, h, materialUrl } from './api.js';
+import { toast } from './toast.js';
+import { $ } from './dom.js';
+import { showMenu } from './menu.js';
+import { confirmBox, formDialog, ask } from './dialogs.js';
 import { Viewport } from './viewport.js';
 import { initVision } from './vision.js';
 import { initVisualPanel } from './visualcmp.js';
@@ -9,7 +13,8 @@ import { MaterialLibrary } from './materials/library.js';
 import { ThumbnailRenderer } from './materials/pbr.js';
 import { materialEditor, materialMenu, DND_TYPE, noteRecentMaterial } from './materials/panel.js';
 import { icon, featureIcon } from './icons.js';
-import { selectionContext, actionsFor, groupRuns, ACTIONS } from './actions.js';
+import { selectionContext, actionsFor, groupRuns, ACTIONS, featureOf } from './actions.js';
+import { initPalette } from './palette.js';
 import { openSettings, loadTheme } from './settings.js';
 import { initPanels, getPref, setPref } from './panels.js';
 import { initComponents, openComponent, createComponent, replaceComponent, publishProject } from './components.js';
@@ -24,7 +29,6 @@ import { initShortcuts } from './shortcuts.js';
 import { isToggleKey } from './shortcuts-model.js';
 import { initPrintSim } from './printsim-panel.js';
 
-const $ = (id) => document.getElementById(id);
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
   openNode: null, renaming: null, histSel: null, histOpen: getPref('history', true) };
 
@@ -105,6 +109,7 @@ const vp = new Viewport($('gl'), {
   onLayout: (st) => views.save(st),
 });
 window.simonViewport = vp;
+window.simonToast = (...a) => toast(...a); // for the e2e flows
 dimOverlay = new DimensionRenderer(vp, { onEdit: (id, axis, value) => editDimension(id, axis, value), onInvalid: (msg) => toast(msg, 'bad') });
 window.simonDimensions = dimOverlay;
 
@@ -304,6 +309,17 @@ function applySelection(sel) {
   xform.validate();
 }
 
+// Runs one tool through the registry. A refused call (outcome not ok) and a failed request both show an
+// error toast, except a refusal whose message matches `ignore` (one not worth telling the user about).
+// Resolves to the outcome, or null when the request itself failed. Refreshing the page is up to the caller.
+async function runTool(name, args, { ignore } = {}) {
+  try {
+    const o = await api('tool', { name, args });
+    if (!o.ok && !(ignore && ignore.test(o.error ?? ''))) toast(o.error, 'bad');
+    return o;
+  } catch (err) { toast(err.message, 'bad'); return null; }
+}
+
 // ---- data refresh --------------------------------------------------------------------
 
 async function refreshScene() {
@@ -340,17 +356,30 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(refresh, 60);
 }
 
+// Notices sent while the connection was down are lost, so the page is refetched when it returns.
+let connLost = false;
+const onConnection = (status) => {
+  if (status === 'lost') { connLost = true; $('conn').hidden = false; return; }
+  $('conn').hidden = true;
+  if (connLost) { connLost = false; scheduleRefresh(); }
+};
+
 subscribe((n) => {
   visualPanel.onNotice(n);
   printsim.onNotice(n);
   if (n.kind === 'refine' && n.refine) { S.refineState = n.refine; renderAgentState(); return; }
   if (n.kind === 'visual') return;
   if (n.kind === 'chat' && n.chat) { addChat(n.chat); return; }
-  if (n.kind === 'selection') { api('state').then((st) => { S.state = st; applySelection(st.selection); }).catch(() => {}); return; }
+  if (n.kind === 'selection') {
+    // The notice carries the selection; refetch the whole state only from a server that does not send it.
+    if (n.selection) { if (S.state) S.state.selection = n.selection; applySelection(n.selection); }
+    else api('state').then((st) => { S.state = st; applySelection(st.selection); }).catch(() => {});
+    return;
+  }
   if (n.kind === 'agent_state' && n.state) { S.agentState = n.state; renderAgentState(); return; }
   if (n.kind === 'model' && n.model) { S.model = n.model; renderModel(); return; }
   if (n.kind === 'state' || n.kind === 'agent_done') scheduleRefresh();
-});
+}, onConnection);
 
 // ---- rendering of panels ---------------------------------------------------------------
 
@@ -404,7 +433,16 @@ function applyWorkspace(ws) {
   }
 }
 
+// Notes about the project as it was opened (e.g. saved with another OpenCASCADE version): once per project.
+function showOpenWarnings(st) {
+  const key = st.path || st.name;
+  if (!st.open_warnings?.length || S.warnedOpen === key) return;
+  S.warnedOpen = key;
+  for (const w of st.open_warnings) toast(w, 'warn', 9000);
+}
+
 function render(st) {
+  showOpenWarnings(st);
   S.selection = st.selection;
   if (!st.refine_state) S.refineState = null;
   S.level = st.level;
@@ -615,7 +653,7 @@ function treeMenu(n, at) {
     n.type === 'sweep' && n.params?.path && { label: `Edit path ${n.params.path}`, icon: 'path', run: () => startPathEdit(n.params.path) },
     n.visible && { label: hiddenApp ? 'Show' : 'Hide', icon: hiddenApp ? 'eye' : 'eye-off', run: () => applyAppearance('set_visibility', ids, { visible: hiddenApp }) },
     { label: 'Rename', icon: 'pencil', key: 'F2', disabled: ids.length > 1, run: () => startRename(n) },
-    { label: n.suppressed ? 'Unsuppress' : 'Suppress', icon: 'ban', run: async () => { for (const t of nodes) await callTool('suppress_feature', { feature: t.id, suppressed: !n.suppressed }); } },
+    { label: n.suppressed ? 'Unsuppress' : 'Suppress', icon: 'ban', run: () => callTools(nodes.map((t) => ({ tool: 'suppress_feature', args: { feature: t.id, suppressed: !n.suppressed } })), n.suppressed ? 'Unsuppress' : 'Suppress') },
     { sep: true },
     // Component instances are references: they are opened, re-pinned, swapped or turned into
     // local geometry. Everything else can become a component.
@@ -669,27 +707,6 @@ function paramEditor(n) {
 // asks the two questions it may come back with. B-Rep faces/edges/vertices are never edited:
 // they resolve to their owning feature, which is offered instead.
 
-// confirmBox resolves true/false; with `remember` it shows a "Remember my choice" box and resolves { ok, remember }.
-function confirmBox({ title, body, ok = 'Delete', okClass = 'danger', remember = false }) {
-  return new Promise((resolve) => {
-    const d = $('confirm');
-    $('confirm-title').textContent = title;
-    $('confirm-body').textContent = body;
-    $('confirm-ok').textContent = ok;
-    $('confirm-ok').className = okClass;
-    $('confirm-remember').hidden = !remember;
-    $('confirm-remember-box').checked = true;
-    d.hidden = false;
-    $('confirm-cancel').focus();
-    const close = (v) => {
-      d.hidden = true; $('confirm-form').onsubmit = null; $('confirm-cancel').onclick = null;
-      resolve(remember ? { ok: v, remember: $('confirm-remember-box').checked } : v);
-    };
-    $('confirm-form').onsubmit = (e) => { e.preventDefault(); close(true); };
-    $('confirm-cancel').onclick = () => close(false);
-  });
-}
-
 async function deleteObjects(req = {}) {
   if (S.state?.busy) return;
   try {
@@ -721,60 +738,12 @@ async function deleteObjects(req = {}) {
   scheduleRefresh();
 }
 
-// A small menu shared by the viewport, the design tree, the top bar and the action bar.
-// `at` is a point {x, y} or an anchor {el}. Items: {label, icon, key, run, danger, disabled,
-// checked (radio), data} plus {sep: true} and {head: 'Title'}.
-function showMenu(at, items) {
-  const m = $('ctxmenu');
-  const opener = document.activeElement;
-  const close = (restore = false) => {
-    m.hidden = true; document.removeEventListener('pointerdown', away, true);
-    if (restore && opener?.focus) opener.focus();
-  };
-  const away = (e) => { if (!m.contains(e.target)) close(); };
-  const focusable = () => [...m.querySelectorAll('li[tabindex]')];
-  m.replaceChildren(...items.filter(Boolean).map((it) => {
-    if (it.sep) return h('li', { class: 'sep', role: 'separator' });
-    if (it.head) return h('li', { class: 'head', role: 'presentation' }, it.head);
-    const radio = it.checked !== undefined;
-    return h('li', { role: radio ? 'menuitemradio' : 'menuitem', tabindex: '-1', class: it.danger ? 'danger' : '', 'aria-disabled': String(!!it.disabled),
-      'aria-checked': radio ? String(!!it.checked) : null, dataset: it.data,
-      onclick: () => { if (it.disabled) return; close(); it.run?.(); },
-      onkeydown: (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); }
-        else if (e.key === 'Escape') { e.preventDefault(); close(true); }
-        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-          e.preventDefault();
-          const f = focusable(); const i = f.indexOf(e.currentTarget);
-          f[(i + (e.key === 'ArrowDown' ? 1 : -1) + f.length) % f.length]?.focus();
-        }
-      } },
-    it.icon ? icon(it.icon) : radio ? (it.checked ? icon('check') : h('span', { class: 'ic' })) : null,
-    h('span', { class: 'lbl' }, it.label), it.key ? h('kbd', {}, it.key) : null);
-  }));
-  m.hidden = false;
-  const w = m.offsetWidth, ht = m.offsetHeight;
-  let x, y;
-  if (at.el) {
-    const r = at.el.getBoundingClientRect();
-    x = r.left; y = r.bottom + 4;
-    if (y + ht > innerHeight - 8) y = Math.max(8, r.top - ht - 4);
-  } else { x = at.x; y = at.y; }
-  m.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
-  m.style.top = Math.max(8, Math.min(y, innerHeight - ht - 8)) + 'px';
-  document.addEventListener('pointerdown', away, true);
-  focusable()[0]?.focus();
-}
-
 // ---- appearance (color / opacity / visibility) -----------------------------------------
 // Edits go through the tool registry like any other change. They are presentation only:
 // the viewport updates from the CAD-IR without a geometry rebuild.
 
 async function applyAppearance(tool, ids, extra = {}) {
-  try {
-    const o = await api('tool', { name: tool, args: { features: ids, ...extra } });
-    if (!o.ok && !/already as requested/.test(o.error ?? '')) toast(o.error, 'bad');
-  } catch (err) { toast(err.message, 'bad'); }
+  await runTool(tool, { features: ids, ...extra }, { ignore: /already as requested/ });
   scheduleRefresh();
 }
 
@@ -827,7 +796,6 @@ function appearanceEditor(nodes) {
     h('span', {}), reset);
 }
 
-function featureOf(sel) { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1].trim() : ''; }
 
 // ---- dimensions (informational + editable) ------------------------------------------------
 // The server measures (DimensionService); a typed size is a set_object_dimension tool call,
@@ -836,18 +804,12 @@ function featureOf(sel) { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1
 const dimAnchor = () => (ANCHORS.some(([v]) => v === getPref('dimAnchor', 'center')) ? getPref('dimAnchor', 'center') : 'center');
 
 async function editDimension(id, axis, value) {
-  try {
-    const o = await api('tool', { name: 'set_object_dimension', args: { object_id: id, axis, value, anchor: dimAnchor() } });
-    if (!o.ok) toast(o.error, 'bad');
-  } catch (err) { toast(err.message, 'bad'); }
+  await runTool('set_object_dimension', { object_id: id, axis, value, anchor: dimAnchor() });
   await refresh();
 }
 
 async function setLockProportions(id, enabled) {
-  try {
-    const o = await api('tool', { name: 'set_object_proportional_scaling', args: { object_id: id, enabled } });
-    if (!o.ok) toast(o.error, 'bad');
-  } catch (err) { toast(err.message, 'bad'); }
+  await runTool('set_object_proportional_scaling', { object_id: id, enabled });
   await refresh();
 }
 
@@ -1287,7 +1249,7 @@ function triggerAction(a, sel, anchor) {
     case 'pick-mode':
       return showMenu(at, FILTERS.map(([k, label]) => ({ label, checked: S.filter === k, data: { filter: k }, run: () => setFilter(k) })));
     case 'menu':
-      return showMenu(at, a.items.map(([tool, label, ic]) => ({ label, icon: ic, run: () => (tool.startsWith('@') ? actionEnv[tool.slice(1)]?.() : openToolForm(tool)) })));
+      return showMenu(at, a.items.map(([tool, label, ic]) => ({ label, icon: ic, run: () => (tool.startsWith('@') ? actionEnv[tool.slice(1)]?.() : palette.openTool(tool)) })));
     case 'section':
       return showMenu(at, [{ label: 'Off', checked: !vp.section?.axis, data: { axis: '' }, run: () => setSection('') },
         ...['X', 'Y', 'Z'].map((ax) => ({ label: `${ax} plane`, checked: vp.section?.axis === ax, data: { axis: ax }, run: () => setSection(ax) }))]);
@@ -1325,37 +1287,12 @@ async function callTool(name, args, label = name) {
   } catch (err) { toast(err.message, 'bad'); scheduleRefresh(); return null; }
 }
 
-function formDialog({ title, fields, ok = 'Apply' }) {
-  return new Promise((resolve) => {
-    const d = $('formdlg');
-    $('fd-title').textContent = title;
-    $('fd-ok').textContent = ok;
-    const inputs = fields.map((f) => {
-      const id = `fd-${f.key}`;
-      // Length fields hold mm and angle fields degrees; they are shown and typed in the display units.
-      const shown = (v) => (f.length ? Number(units.toDisplay(v).toFixed(6)) : f.angle ? Number(units.angleToDisplay(v).toFixed(6)) : v);
-      const input = f.options
-        ? h('select', { id }, ...f.options.map((o) => h('option', { value: o.value ?? o, selected: (o.value ?? o) === f.value }, o.label ?? o)))
-        : f.text ? h('input', { id, type: 'text', value: String(f.value ?? ''), spellcheck: 'false' })
-          : h('input', { id, type: 'number', step: 'any', value: String(shown(f.value ?? 0)), min: f.min === undefined ? undefined : shown(f.min), title: f.hint });
-      return [f, input];
-    });
-    $('fd-fields').replaceChildren(...inputs.flatMap(([f, i]) => [h('label', { for: i.id }, f.label), i]));
-    d.hidden = false;
-    inputs[0][1].focus(); inputs[0][1].select?.();
-    const close = (v) => { d.hidden = true; $('fd-form').onsubmit = null; $('fd-cancel').onclick = null; resolve(v); };
-    $('fd-form').onsubmit = (e) => {
-      e.preventDefault();
-      const out = {};
-      for (const [f, i] of inputs) {
-        out[f.key] = f.options || f.text ? i.value : Number(i.value);
-        if (f.length) out[f.key] = units.toMM(out[f.key]);
-        else if (f.angle) out[f.key] = units.angleToDeg(out[f.key]);
-      }
-      close(out);
-    };
-    $('fd-cancel').onclick = () => close(null);
-  });
+// Edits to several independent objects are one change: one undo step, applied completely or not at all
+// (the batch tool). A single call goes through as itself. Do not use it for calls that depend on each other
+// (e.g. two extrusions of faces of the same body): each is planned against the model as it is now.
+function callTools(calls, label) {
+  if (calls.length === 1) return callTool(calls[0].tool, calls[0].args, label);
+  return callTool('batch', { calls, intent: `${label} ${calls.length} objects` }, label);
 }
 
 const actionEnv = {
@@ -1409,7 +1346,7 @@ const actionEnv = {
     const [sx, sy, sz] = [v.f * v.x, v.f * v.y, v.f * v.z];
     if (![sx, sy, sz].every((s) => s > 0)) { toast('Scale factors must be greater than 0', 'bad'); return; }
     const factors = sx === sy && sy === sz ? { factor: sx } : { sx, sy, sz };
-    for (const id of ids) await callTool('scale', { target: id, ...factors, about: v.about, intent: `Scale ${id}` }, 'Scale');
+    await callTools(ids.map((id) => ({ tool: 'scale', args: { target: id, ...factors, about: v.about, intent: `Scale ${id}` } })), 'Scale');
   },
   async duplicate() {
     const ids = selIds();
@@ -1469,7 +1406,7 @@ const actionEnv = {
     if (tool === 'face_inset' && !args.depth) delete args.depth;
     for (const face of faces) await callTool(tool, { face, ...args }, spec.ok);
   },
-  toolDialog: (name) => openToolForm(name),
+  toolDialog: (name) => palette.openTool(name),
   materialMenu(ev) {
     const ids = selIds();
     const hasMaterial = (S.state?.tree ?? []).some((t) => ids.includes(t.id) && t.appearance?.material_id);
@@ -1493,46 +1430,7 @@ function openMaterialPanel() { panels.show('left'); materialCtx.rerender(); }
 
 // Tools without a dedicated form reuse the command palette's argument form, prefilled from
 // the selection.
-async function openToolForm(name) {
-  if (!S.paletteAll.length) { try { S.paletteAll = await api('palette'); } catch (e) { toast(e.message, 'bad'); return; } }
-  const e = S.paletteAll.find((x) => x.kind === 'tool' && x.id === name);
-  if (!e) { toast(`${name} is not available`, 'bad'); return; }
-  const tpl = JSON.parse(e.template || '{}');
-  const sels = S.selection?.selectors ?? [];
-  if (sels.some((x) => x.startsWith('face(')) && e.schema?.properties?.face !== undefined) tpl.face = '';
-  $('palette').hidden = false;
-  runPalette({ ...e, template: JSON.stringify(tpl) });
-}
-
 // ---- project dialogs ---------------------------------------------------------------------
-
-function ask({ title, value = '', format = false, ok = 'OK', choices = null }) {
-  return new Promise((resolve) => {
-    const d = $('dialog'), input = $('dialog-input'), fmt = $('dialog-format');
-    $('dialog-title').textContent = title;
-    input.value = value; fmt.hidden = !format; $('dialog-ok').textContent = ok;
-    const list = $('dialog-list');
-    list.replaceChildren();
-    list.hidden = !choices;
-    if (choices) {
-      if (!choices.length) {
-        const li = document.createElement('li'); li.className = 'd'; li.textContent = 'No saved projects yet'; list.append(li);
-      }
-      for (const c of choices) {
-        const li = document.createElement('li');
-        const k = document.createElement('span'); k.textContent = c.label;
-        const dsc = document.createElement('span'); dsc.className = 'd'; dsc.textContent = c.detail ?? '';
-        li.append(k, dsc);
-        li.onclick = () => close({ value: c.value, format: fmt.value });
-        list.append(li);
-      }
-    }
-    d.hidden = false; input.focus(); input.select();
-    const close = (v) => { d.hidden = true; list.hidden = true; $('dialog-form').onsubmit = null; $('dialog-cancel').onclick = null; resolve(v); };
-    $('dialog-form').onsubmit = (e) => { e.preventDefault(); close({ value: input.value.trim(), format: fmt.value }); };
-    $('dialog-cancel').onclick = () => close(null);
-  });
-}
 
 async function newProject() {
   const r = await ask({ title: 'New project name', value: 'untitled', ok: 'Create' });
@@ -1556,7 +1454,7 @@ $('project').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, 
 $('btn-settings').addEventListener('click', () => openSettings({ toast, onTheme: (t) => vp.setTheme(t), onViewport: (v) => vp.setViewPrefs(v), onRender: (r) => vp.setRenderPrefs(r),
   workspace: S.state?.workspace, onWorkspace: (ws) => vp.setWorkspace(ws), onSaved: () => refresh() }));
 $('btn-more').addEventListener('click', (e) => showMenu({ el: e.currentTarget }, [
-  { label: 'Command palette', icon: 'command', key: 'Ctrl+K', run: openPalette },
+  { label: 'Command palette', icon: 'command', key: 'Ctrl+K', run: () => palette.open() },
   { label: 'Keyboard shortcuts', icon: 'keyboard', key: '?', run: () => shortcuts.open() },
   { sep: true }, { head: 'Agent level' },
   { label: 'Review — preview every change', checked: S.level === 'review', data: { level: 'review' }, run: () => setLevel('review') },
@@ -1593,50 +1491,9 @@ $('btn-export').addEventListener('click', async () => {
 
 // ---- command palette -------------------------------------------------------------------
 
-const pal = { items: [], idx: 0 };
-async function openPalette() {
-  $('palette').hidden = false;
-  $('pal-form').hidden = true; $('pal-list').hidden = false;
-  $('pal-input').value = '';
-  $('pal-input').focus();
-  if (!S.paletteAll.length) S.paletteAll = await api('palette');
-  filterPalette($('pal-input').value); // the user may already be typing
-}
-function closePalette() { $('palette').hidden = true; }
-
-function filterPalette(q) {
-  const t = q.trim().toLowerCase();
-  const hits = S.paletteAll.filter((e) => !t || e.title.toLowerCase().includes(t) || e.id.toLowerCase().includes(t) || e.description.toLowerCase().includes(t));
-  pal.items = hits.slice(0, 40);
-  if (t) pal.items.push({ kind: 'ask', id: 'ask', title: `Ask the agent: “${q.trim()}”`, description: 'Natural language through the agent', template: q.trim() });
-  pal.idx = 0;
-  drawPalette();
-}
-function drawPalette() {
-  $('pal-list').replaceChildren(...pal.items.map((e, i) => h('li', { class: i === pal.idx ? 'on' : '', onclick: () => runPalette(e), onmousemove: () => { pal.idx = i; drawPalette(); } },
-    h('span', { class: 'k' }, e.kind), h('span', {}, e.title), h('span', { class: 'd' }, e.description))));
-  $('pal-list').children[pal.idx]?.scrollIntoView({ block: 'nearest' });
-}
-
-async function runPalette(e) {
-  if (e.kind === 'ask') { closePalette(); $('prompt').value = e.template; $('composer').requestSubmit(); return; }
-  if (e.kind === 'intent') { closePalette(); $('prompt').value = e.template; autosize(); $('prompt').focus(); return; }
-  if (e.kind === 'tool') {
-    $('pal-list').hidden = true; $('pal-form').hidden = false;
-    $('pal-form-title').textContent = `${e.title} — ${e.description}`;
-    $('pal-args').value = JSON.stringify(withSelection(JSON.parse(e.template || '{}'), e), null, 2);
-    $('pal-run').onclick = async () => {
-      let args;
-      try { args = JSON.parse($('pal-args').value || '{}'); } catch (err) { toast('Arguments are not valid JSON: ' + err.message, 'bad'); return; }
-      closePalette();
-      await callTool(e.id, args);
-    };
-    $('pal-back').onclick = () => { $('pal-form').hidden = true; $('pal-list').hidden = false; $('pal-input').focus(); };
-    $('pal-args').focus();
-    return;
-  }
-  closePalette();
-  switch (e.id) {
+// What the palette runs for an app command (everything else it does itself).
+function paletteCommand(id) {
+  switch (id) {
     case 'undo': return doUndo();
     case 'redo': return doRedo();
     case 'save': return save();
@@ -1646,32 +1503,7 @@ async function runPalette(e) {
     case 'new': return newProject();
   }
 }
-
-// A tool that takes a face selector gets the current selection prefilled.
-function withSelection(args, e) {
-  const sels = S.selection?.selectors ?? [];
-  const props = e.schema?.properties ?? {};
-  const face = sels.find((x) => x.startsWith('face('));
-  if (face && props.face !== undefined && 'face' in args) args.face = face;
-  // fillet/chamfer: the selected edges, and the feature they belong to.
-  const edges = sels.filter((x) => x.startsWith('edge('));
-  if (edges.length && props.edges !== undefined) {
-    args.edges = edges;
-    args.target = featureOf(edges[0]);
-  }
-  // A single selected object fills the feature the tool acts on.
-  const feats = [...new Set(sels.map(featureOf).filter(Boolean))];
-  if (feats.length === 1) for (const k of ['target', 'source']) if (args[k] === '') args[k] = feats[0];
-  return args;
-}
-
-$('pal-input').addEventListener('input', (e) => filterPalette(e.target.value));
-$('pal-input').addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowDown') { e.preventDefault(); pal.idx = Math.min(pal.idx + 1, pal.items.length - 1); drawPalette(); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); pal.idx = Math.max(pal.idx - 1, 0); drawPalette(); }
-  else if (e.key === 'Enter') { e.preventDefault(); if (pal.items[pal.idx]) runPalette(pal.items[pal.idx]); }
-});
-$('palette').addEventListener('mousedown', (e) => { if (e.target === $('palette')) closePalette(); });
+const palette = initPalette({ S, api, toast, callTool: (...a) => callTool(...a), autosize: () => autosize(), command: paletteCommand });
 
 const shortcuts = initShortcuts($('shortcuts'));
 $('btn-shortcuts').addEventListener('click', () => shortcuts.toggle());
@@ -1688,12 +1520,12 @@ document.addEventListener('keydown', (e) => {
   else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !mod && !overlay && !S.playing && !S.printsim && S.selection?.selectors?.length) {
     e.preventDefault(); // Backspace must not navigate back
     deleteObjects();
-  } else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('palette').hidden ? openPalette() : closePalette(); }
+  } else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); palette.toggle(); }
   else if (e.key === 'Escape') {
     if (!$('ctxmenu').hidden) $('ctxmenu').hidden = true;
     else if (!$('confirm').hidden) $('confirm-cancel').click();
     else if (!$('formdlg').hidden) $('fd-cancel').click();
-    else if (!$('palette').hidden) closePalette();
+    else if (!$('palette').hidden) palette.close();
     else if (!$('dialog').hidden) $('dialog-cancel').click();
     else if (vp.boxMode) toggleBoxSelect();
     else if (vp.measure.on) toggleMeasure();
@@ -1714,13 +1546,6 @@ document.addEventListener('keydown', (e) => {
 
 // ---- toast ---------------------------------------------------------------------------
 
-let toastTimer = null;
-function toast(msg, kind = '', ms = 4500) {
-  const t = $('toast');
-  t.textContent = msg; t.className = `toast ${kind}`; t.hidden = false; t.style.whiteSpace = 'pre-line';
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, ms);
-}
 
 loadTheme((t) => vp.setTheme(t), (v) => vp.setViewPrefs(v), (r) => vp.setRenderPrefs(r));
 refresh();

@@ -15,7 +15,7 @@
 | `make docs` | Regenerate `docs/tools.md` from the live registry |
 | `make ui` | Build and run the desktop UI (`ARGS="--project p.scadproj"`) |
 | `make test-js` | Node tests of the pure frontend helpers (`frontend/*.test.mjs`) |
-| `make e2e` | Headless-Chrome runs: `e2e/m2.mjs` (M2 flow) and `e2e/image.mjs` (Image-to-CAD); needs Chrome, `npm install` in `e2e/` once |
+| `make e2e` | Headless-Chrome runs of every flow in `e2e/*.mjs` (M2, image-to-CAD, materials, modeling, components, views, dimensions, workspace, rendering, visual refinement, models, transform, shortcuts, print simulation, paths, tracing, connection loss and recovery); needs Chrome, `npm install` in `e2e/` once. Run one with `node e2e/<name>.mjs` (set `LD_LIBRARY_PATH` as below) |
 
 Notes:
 - `go test ./...` skips `third_party/` because it contains its own `go.mod`.
@@ -24,7 +24,7 @@ Notes:
   If you run `go build` / `go test` by hand after editing C++, export the same variable.
 - Run tests with `LD_LIBRARY_PATH=$PWD/third_party/occt-install/lib` if you invoke Go directly (the
   Makefile exports it).
-- The race detector works: `go test -race ./internal/...`.
+- The race detector works: `go test -race ./internal/...` (the RSS-based leak test `TestChurnNoLeak` skips itself under it).
 
 ## Test layers
 

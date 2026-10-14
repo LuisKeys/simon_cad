@@ -3,6 +3,7 @@
 package persistence
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -142,11 +143,71 @@ func canonical(v any) ([]byte, error) {
 }
 
 func writeAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	return writeAll([]pendingFile{{path, data}})
+}
+
+// pendingFile is one file a save wants on disk.
+type pendingFile struct {
+	path string
+	data []byte
+}
+
+// unchanged reports whether path already holds exactly data.
+func unchanged(path string, data []byte) bool {
+	cur, err := os.ReadFile(path)
+	return err == nil && bytes.Equal(cur, data)
+}
+
+// writeSynced writes data to path and flushes it to disk, so a rename of it can never
+// expose a file whose contents were lost in a crash.
+func writeSynced(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// writeAll puts files on disk in two phases. Phase one stages each changed file next to its
+// destination (written and synced); only if every one of them was staged does phase two
+// rename them into place. A failure while staging (full disk, permissions) therefore leaves
+// the previous project completely intact instead of a mix of old and new files, and the
+// window in which a crash can leave a mix is reduced to the renames. Files whose content
+// already matches are not touched at all: no I/O, no new modification time.
+func writeAll(files []pendingFile) error {
+	var staged []pendingFile
+	discard := func() {
+		for _, f := range staged {
+			os.Remove(f.path + ".tmp")
+		}
+	}
+	for _, f := range files {
+		if unchanged(f.path, f.data) {
+			continue
+		}
+		if err := writeSynced(f.path+".tmp", f.data); err != nil {
+			os.Remove(f.path + ".tmp")
+			discard()
+			return err
+		}
+		staged = append(staged, f)
+	}
+	for i, f := range staged {
+		if err := os.Rename(f.path+".tmp", f.path); err != nil {
+			staged = staged[i:] // the ones before it are in place; drop the rest
+			discard()
+			return err
+		}
+	}
+	return nil
 }
 
 // Save writes the project directory.
@@ -180,24 +241,25 @@ func Save(dir string, p *Project) error {
 		{"agent-history.json", p.History},
 		{WorkspaceFile, ws},
 	}
+	var pending []pendingFile
 	for _, f := range files {
 		b, err := canonical(f.val)
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.name, err)
 		}
-		if err := writeAtomic(filepath.Join(dir, f.name), b); err != nil {
-			return err
-		}
+		pending = append(pending, pendingFile{filepath.Join(dir, f.name), b})
 	}
 	var evs []byte
 	for _, e := range p.Events {
 		line, _ := json.Marshal(e)
 		evs = append(append(evs, line...), '\n')
 	}
-	if err := writeAtomic(filepath.Join(dir, "events.jsonl"), evs); err != nil {
+	pending = append(pending, pendingFile{filepath.Join(dir, "events.jsonl"), evs})
+	imgs, err := saveImages(dir, p.Images)
+	if err != nil {
 		return err
 	}
-	if err := saveImages(dir, p.Images); err != nil {
+	if err := writeAll(append(pending, imgs...)); err != nil {
 		return err
 	}
 	keep := filepath.Join(dir, "thumbnails", ".gitkeep")
@@ -209,9 +271,9 @@ func Save(dir string, p *Project) error {
 
 const imagesDir = "assets/images"
 
-// saveImages writes the retained images and removes ones that are no longer retained. The
-// directory only exists when there is something to keep.
-func saveImages(dir string, imgs []Image) error {
+// saveImages removes retained images that are gone and returns the files to write for the
+// ones that remain. The directory only exists when there is something to keep.
+func saveImages(dir string, imgs []Image) ([]pendingFile, error) {
 	full := filepath.Join(dir, filepath.FromSlash(imagesDir))
 	want := map[string]bool{}
 	for _, im := range imgs {
@@ -221,23 +283,22 @@ func saveImages(dir string, imgs []Image) error {
 		for _, e := range entries {
 			if !e.IsDir() && !want[e.Name()] {
 				if err := os.Remove(filepath.Join(full, e.Name())); err != nil {
-					return err
+					return nil, err
 				}
 			}
 		}
 	}
 	if len(imgs) == 0 {
-		return nil
+		return nil, nil
 	}
 	if err := os.MkdirAll(full, 0o755); err != nil {
-		return err
+		return nil, err
 	}
+	out := make([]pendingFile, 0, len(imgs))
 	for _, im := range imgs {
-		if err := writeAtomic(filepath.Join(full, im.ID+im.Ext), im.Data); err != nil {
-			return err
-		}
+		out = append(out, pendingFile{filepath.Join(full, im.ID+im.Ext), im.Data})
 	}
-	return nil
+	return out, nil
 }
 
 func loadImages(dir string) ([]Image, error) {

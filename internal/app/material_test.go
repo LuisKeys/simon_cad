@@ -2,9 +2,9 @@ package app
 
 import (
 	"encoding/json"
-	"strings"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/accelone/simoncad/internal/rendering"
@@ -177,8 +177,8 @@ func TestMissingMaterialFallsBackAtRender(t *testing.T) {
 	}
 }
 
-func toJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
-func contains(s, sub string) bool { return strings.Contains(s, sub) }
+func toJSON(v any) string              { b, _ := json.Marshal(v); return string(b) }
+func contains(s, sub string) bool      { return strings.Contains(s, sub) }
 func replaceAll(s, a, b string) string { return strings.ReplaceAll(s, a, b) }
 
 // Assigning a material replaces an earlier color override (so the material's color shows),

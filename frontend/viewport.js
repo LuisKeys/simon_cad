@@ -13,8 +13,33 @@ import { WorkspaceGrid } from './grid.js';
 import { rectFrom, boundsOf, rectHit } from './boxselect-model.js';
 import { renderParams } from './render-model.js';
 import { PLANE_AXES, gridShown } from './grid-model.js';
+import { buildBVH, raycastBVH } from './bvh.js';
+import { decodeBody } from './mesh-codec.js';
 
 const COLORS = { body: 0x9fb2c8, edge: 0x1b2330, hover: 0x8fd3ff, select: 0xff8a1f, ghost: 0x35d0c8, sketch: 0xf2a33c, removed: 0xef6a6a, path: 0x5bc0f8, pathHot: 0xff8a1f };
+// Mesh.raycast replacement: walks a bounding-volume hierarchy (built on the first pick of the
+// body) instead of testing every triangle. It reports what the stock raycast reports: hits
+// in world space with distance, point and faceIndex, honouring the material's side.
+const _inv = new THREE.Matrix4(), _ray = new THREE.Ray(), _hitPt = new THREE.Vector3();
+const _sA = new THREE.Vector3(), _sC = new THREE.Vector3(), _sProj = new THREE.Vector3(); // scratch points for screen-space picking
+function bvhRaycast(raycaster, intersects) {
+  if (!this.material || this.material.side === THREE.BackSide) return THREE.Mesh.prototype.raycast.call(this, raycaster, intersects);
+  const geo = this.geometry, index = geo.index;
+  if (!index) return THREE.Mesh.prototype.raycast.call(this, raycaster, intersects);
+  this.updateMatrixWorld();
+  const bvh = this.userData.bvh ??= buildBVH(geo.getAttribute('position').array, index.array);
+  _inv.copy(this.matrixWorld).invert();
+  _ray.copy(raycaster.ray).applyMatrix4(_inv);
+  const o = _ray.origin, d = _ray.direction;
+  const hits = raycastBVH(bvh, [o.x, o.y, o.z], [d.x, d.y, d.z], this.material.side === THREE.FrontSide);
+  for (const h of hits) {
+    _hitPt.copy(d).multiplyScalar(h.t).add(o).applyMatrix4(this.matrixWorld);
+    const distance = raycaster.ray.origin.distanceTo(_hitPt);
+    if (distance < raycaster.near || distance > raycaster.far) continue;
+    intersects.push({ distance, point: _hitPt.clone(), object: this, faceIndex: h.tri, face: null });
+  }
+}
+
 const PICK_PX = 7;
 const MAX_VERTEX_PICK = 4000;
 const CUBE_MARGIN = 8;
@@ -178,14 +203,18 @@ export class Viewport {
   }
 
   _addBody(d) {
+    // The server packs the buffers (mesh-codec.js); the typed arrays go straight to the GPU
+    // attributes and stay in b.data for picking, with no copy.
+    decodeBody(d);
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(d.positions ?? []), 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(Float32Array.from(d.normals ?? []), 3));
-    geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(d.indices ?? []), 1));
+    geo.setAttribute('position', new THREE.BufferAttribute(d.positions, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(d.normals, 3));
+    geo.setIndex(new THREE.BufferAttribute(d.indices, 1));
     geo.computeBoundingSphere();
     const material = new THREE.MeshStandardMaterial({ color: COLORS.body, metalness: 0.25, roughness: 0.45, side: THREE.FrontSide });
     const mesh = new THREE.Mesh(geo, material); // placeholder until _applyAppearance assigns the shared material
     mesh.userData.body = d.id;
+    mesh.raycast = bvhRaycast;
     mesh.castShadow = mesh.receiveShadow = true;
 
     const segs = [];
@@ -241,6 +270,7 @@ export class Viewport {
     if (!b) return;
     this.scene.remove(b.group);
     b.mesh.geometry.dispose(); b.edges.geometry.dispose(); b.edges.material.dispose();
+    b.outlineGeo?.dispose();
     if (b.wire) { b.wire.geometry.dispose(); b.wire.material.dispose(); }
     if (b.matKey) this.materials.release(b.matKey); else b.material.dispose();
     this.bodies.delete(id);
@@ -337,10 +367,11 @@ export class Viewport {
         b.edges.material.color.setHex(COLORS.removed);
       }
       for (const d of ghost.added ?? []) {
+        decodeBody(d);
         const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(d.positions), 3));
-        geo.setAttribute('normal', new THREE.BufferAttribute(Float32Array.from(d.normals), 3));
-        geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(d.indices), 1));
+        geo.setAttribute('position', new THREE.BufferAttribute(d.positions, 3));
+        geo.setAttribute('normal', new THREE.BufferAttribute(d.normals, 3));
+        geo.setIndex(new THREE.BufferAttribute(d.indices, 1));
         const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
           color: COLORS.ghost, transparent: true, opacity: 0.55, metalness: 0.1, roughness: 0.5, depthWrite: false }));
         const segs = [];
@@ -514,7 +545,7 @@ export class Viewport {
   }
 
   _toScreen(v, n, cam = this.camera) {
-    const p = v.clone().project(cam);
+    const p = _sProj.copy(v).project(cam);
     return { x: ((p.x + 1) / 2) * n.w, y: ((1 - p.y) / 2) * n.h, z: p.z };
   }
 
@@ -546,12 +577,12 @@ export class Viewport {
         const vs = b.data.vertices ?? [];
         if (vs.length > MAX_VERTEX_PICK) continue;
         for (const v of vs) {
-          const w = new THREE.Vector3(...v.pos);
+          const w = _sA.set(v.pos[0], v.pos[1], v.pos[2]);
           if (this._clipped(w)) continue;
           const s = this._toScreen(w, n, cam);
           if (s.z < -1 || s.z > 1) continue;
           const d = Math.hypot(s.x - n.px, s.y - n.py);
-          if (d < bd && this._visibleAt(w, hit, cam)) { bd = d; best = { body: b.data.id, kind: 'vertex', index: v.index, point: w }; }
+          if (d < bd && this._visibleAt(w, hit, cam)) { bd = d; best = { body: b.data.id, kind: 'vertex', index: v.index, point: w.clone() }; }
         }
       }
       if (best) return best;
@@ -564,7 +595,7 @@ export class Viewport {
         for (const e of b.data.edges ?? []) {
           for (let i = 0; i + 1 < e.pt_count; i++) {
             const a = (e.pt_start + i) * 3, c = (e.pt_start + i + 1) * 3;
-            const A = new THREE.Vector3(ep[a], ep[a + 1], ep[a + 2]), C = new THREE.Vector3(ep[c], ep[c + 1], ep[c + 2]);
+            const A = _sA.set(ep[a], ep[a + 1], ep[a + 2]), C = _sC.set(ep[c], ep[c + 1], ep[c + 2]);
             const sa = this._toScreen(A, n, cam), sc = this._toScreen(C, n, cam);
             const dx = sc.x - sa.x, dy = sc.y - sa.y, L2 = dx * dx + dy * dy;
             let t = L2 ? ((n.px - sa.x) * dx + (n.py - sa.y) * dy) / L2 : 0;
@@ -698,14 +729,25 @@ export class Viewport {
     c.addEventListener('pointermove', (e) => {
       if (down && lp && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) cancelLp();
       if (down || this.measure.on) return;
-      const p = this.pick(e);
-      const same = (!p && !this.hover) || (p && this.hover && p.body === this.hover.body && p.kind === this.hover.kind && p.index === this.hover.index);
-      if (same) return;
-      this.hover = p;
-      this._drawOverlay(this.hoverGroup, p ? [p] : [], COLORS.hover, 0.4);
-      this.hooks.onHover?.(p);
+      // Picking walks edges and vertices, so do it at most once per frame, for the latest position.
+      this._hoverAt = { clientX: e.clientX, clientY: e.clientY };
+      if (this._hoverRaf) return;
+      this._hoverRaf = requestAnimationFrame(() => {
+        this._hoverRaf = 0;
+        const at = this._hoverAt;
+        if (!at || down || this.measure.on) return;
+        const p = this.pick(at);
+        const same = (!p && !this.hover) || (p && this.hover && p.body === this.hover.body && p.kind === this.hover.kind && p.index === this.hover.index);
+        if (same) return;
+        this.hover = p;
+        this._drawOverlay(this.hoverGroup, p ? [p] : [], COLORS.hover, 0.4);
+        this.hooks.onHover?.(p);
+      });
     });
-    c.addEventListener('pointerleave', () => { if (this.hover) { this.hover = null; this._drawOverlay(this.hoverGroup, [], COLORS.hover); this.hooks.onHover?.(null); } });
+    c.addEventListener('pointerleave', () => {
+      if (this._hoverRaf) { cancelAnimationFrame(this._hoverRaf); this._hoverRaf = 0; }
+      this._hoverAt = null;
+      if (this.hover) { this.hover = null; this._drawOverlay(this.hoverGroup, [], COLORS.hover); this.hooks.onHover?.(null); } });
   }
 
   // ---- highlight overlays ----------------------------------------------------------------
@@ -713,30 +755,48 @@ export class Viewport {
   setSelection(picks) { this._drawOverlay(this.selGroup, picks, COLORS.select, 0.22, true); }
 
   _drawOverlay(group, picks, color, opacity = 0.5, outline = false) {
-    for (const c of [...group.children]) { group.remove(c); c.geometry?.dispose(); c.material?.dispose(); }
+    for (const c of [...group.children]) {
+      group.remove(c);
+      // A highlight borrows the body's vertex (and, for a whole body, index) buffers. Detach
+      // them first: dispose() would delete the GPU copies the body is still drawn from and
+      // force a re-upload on the next frame, on every hover change.
+      if (c.userData.borrowed) {
+        c.geometry.deleteAttribute('position'); c.geometry.deleteAttribute('normal');
+        if (c.userData.borrowedIndex) c.geometry.index = null;
+      }
+      if (!c.userData.cachedGeometry) c.geometry?.dispose();
+      c.material?.dispose();
+    }
     for (const p of picks) {
       const b = this.bodies.get(p.body);
       if (!b) continue;
       const kind = p.kind;
       if (kind === 'face' || kind === 'body') {
-        const idx = b.data.indices;
-        let slice = idx;
-        if (kind === 'face') {
+        const whole = kind === 'body';
+        let slice = null;
+        if (!whole) {
           const f = b.data.faces[p.index];
           if (!f) continue;
-          slice = idx.slice(f.tri_start * 3, (f.tri_start + f.tri_count) * 3);
+          slice = b.data.indices.slice(f.tri_start * 3, (f.tri_start + f.tri_count) * 3);
         }
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', b.mesh.geometry.getAttribute('position'));
         g.setAttribute('normal', b.mesh.geometry.getAttribute('normal'));
-        g.setIndex(new THREE.BufferAttribute(Uint32Array.from(slice), 1));
+        // A whole body shares its own index buffer: no per-redraw copy of every triangle.
+        g.setIndex(whole ? b.mesh.geometry.index : new THREE.BufferAttribute(Uint32Array.from(slice), 1));
         const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false,
           polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide }));
+        m.userData.borrowed = true;
+        m.userData.borrowedIndex = whole;
         group.add(m);
         if (outline) {
           // Selected geometry reads as an orange outline over a light tint, not a solid fill.
-          const ol = new THREE.LineSegments(new THREE.EdgesGeometry(g, 25),
+          // A whole body's outline never changes, so it is computed once per body (EdgesGeometry
+          // walks every triangle) and freed with the body.
+          const eg = whole ? (b.outlineGeo ??= new THREE.EdgesGeometry(g, 25)) : new THREE.EdgesGeometry(g, 25);
+          const ol = new THREE.LineSegments(eg,
             new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false }));
+          ol.userData.cachedGeometry = whole;
           ol.renderOrder = 9;
           group.add(ol);
         }

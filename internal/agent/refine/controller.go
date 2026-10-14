@@ -278,7 +278,7 @@ func (c *Controller) Run(ctx context.Context, goal string, imageIDs []string) (*
 		it := c.record(next, "refine", corrections, before, tools.ParameterValues(a.Graph), cs, "")
 		if next.Overall() < cur.Overall()-c.Tolerance {
 			c.emit(Event{State: StateReverting, Message: fmt.Sprintf("Overall score fell from %s to %s — reverting.", visual.Percent(cur.Overall()), visual.Percent(next.Overall())), Iteration: it.N})
-			ids, err := revert(a, cs)
+			ids, err := a.RevertLatest(cs)
 			if len(ids) > 0 && c.OnRevert != nil {
 				c.OnRevert(ids)
 			}
@@ -469,25 +469,6 @@ func (c *Controller) evaluate(ctx context.Context) (*Evaluation, error) {
 	e.Scores[visual.MetricOverall] = stage.Overall(e.Scores)
 	e.Gate = stage.Check(e.Scores)
 	return e, nil
-}
-
-// revert undoes the given committed ChangeSets, newest first, while they are the latest.
-func revert(a *app.App, ids []string) ([]string, error) {
-	var done []string
-	for i := len(ids) - 1; i >= 0; i-- {
-		cs, err := a.Undo()
-		if err != nil {
-			return done, err
-		}
-		if cs.ID != ids[i] {
-			if _, rerr := a.Redo(); rerr != nil {
-				return done, rerr
-			}
-			return done, fmt.Errorf("the model changed during refinement; could not revert %s", ids[i])
-		}
-		done = append(done, cs.ID)
-	}
-	return done, nil
 }
 
 func round3(v float64) float64 { return math.Round(v*1000) / 1000 }

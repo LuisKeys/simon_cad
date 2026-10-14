@@ -61,15 +61,15 @@ type Body struct {
 	topo     *selectors.Topology
 }
 
-// topologyDeflection only affects the throwaway mesh used to enumerate faces; face
-// descriptors come from the exact B-Rep, not from triangles.
+// topologyDeflection only affects the polylines of the edge tables; face descriptors come
+// from the exact B-Rep, not from triangles, so no mesh is built to enumerate them.
 const topologyDeflection = 0.5
 
 // Topology lazily derives the face/edge/vertex descriptors selectors resolve against.
 // It returns nil if the shape cannot be meshed.
 func (b *Body) Topology() *selectors.Topology {
 	b.topoOnce.Do(func() {
-		if m, err := b.Shape.Tessellate(topologyDeflection); err == nil {
+		if m, err := b.Shape.Topology(topologyDeflection); err == nil {
 			b.topo = TopologyOf(b.Bounds(), m)
 		}
 	})

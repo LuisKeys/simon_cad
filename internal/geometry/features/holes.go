@@ -485,25 +485,53 @@ func patternSource(c *Ctx) (src *Body, tool *api.Shape, subtract bool, err error
 	return src, tool, subtract, err
 }
 
+// applyCopies unites the copies of the tool and applies the result to src once. The copies
+// are united pairwise, in rounds, rather than one after another: folding them into a growing
+// accumulator makes every union work on all the geometry built so far, which is quadratic in
+// the copy count (100 holes took 3x as long as 50 twice over), whereas a balanced reduction
+// keeps each union small.
 func applyCopies(c *Ctx, src *Body, tool *api.Shape, subtract bool, copies []func(a *arena, t *api.Shape) (*api.Shape, error)) (*api.Shape, error) {
 	a := &arena{}
-	var acc *api.Shape
+	parts := make([]*api.Shape, 0, len(copies))
 	for _, mk := range copies {
 		cp, err := mk(a, tool)
 		if err != nil {
 			a.releaseExcept(nil)
 			return nil, err
 		}
-		if acc == nil {
-			acc = cp
-		} else if acc, err = a.add(c.K.Union(acc, cp)); err != nil {
-			a.releaseExcept(nil)
-			return nil, err
-		}
+		parts = append(parts, cp)
+	}
+	acc, err := unionAll(c, a, parts)
+	if err != nil {
+		a.releaseExcept(nil)
+		return nil, err
 	}
 	res, err := applyTool(c.K, src.Shape, acc, subtract)
 	a.releaseExcept(nil)
 	return res, err
+}
+
+// unionAll fuses shapes by balanced pairwise reduction; every intermediate is owned by a.
+// It returns nil for an empty list.
+func unionAll(c *Ctx, a *arena, parts []*api.Shape) (*api.Shape, error) {
+	for len(parts) > 1 {
+		next := make([]*api.Shape, 0, (len(parts)+1)/2)
+		for i := 0; i+1 < len(parts); i += 2 {
+			u, err := a.add(c.K.Union(parts[i], parts[i+1]))
+			if err != nil {
+				return nil, err
+			}
+			next = append(next, u)
+		}
+		if len(parts)%2 == 1 {
+			next = append(next, parts[len(parts)-1])
+		}
+		parts = next
+	}
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	return parts[0], nil
 }
 
 func buildLinearPattern(c *Ctx) (*api.Shape, error) {

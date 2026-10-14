@@ -205,7 +205,7 @@ func (p Planner) Plan(ctx context.Context, history []runtime.Message, contextTex
 	}
 	msgs := append(append([]runtime.Message(nil), history...), runtime.Message{Role: "user", Content: []runtime.Block{
 		{Type: "text", Text: contextText + "## User request\n" + intent + "\n\nCall submit_plan with the plan for this request."}}})
-	resp, err := p.Provider.Complete(ctx, runtime.Request{System: sb.String(), Messages: msgs, NoThinking: p.NoThinking,
+	resp, err := p.Provider.Complete(ctx, runtime.Request{System: sb.String(), Messages: msgs, NoThinking: p.NoThinking, ForceTool: "submit_plan",
 		Tools: []runtime.ToolDef{{Name: "submit_plan", Description: "Submit the structured plan for the request.", InputSchema: p.schema()}}})
 	if err != nil {
 		return nil, runtime.Usage{}, err

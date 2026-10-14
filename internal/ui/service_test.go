@@ -467,3 +467,66 @@ func TestInteractiveTransformCommitsAtReviewAndKeepsSelection(t *testing.T) {
 		t.Fatal("one undo step per transform")
 	}
 }
+
+func histMsg(role string, n int) runtime.Message {
+	return runtime.Message{Role: role, Content: []runtime.Block{{Type: "text", Text: strings.Repeat("x", n)}}}
+}
+
+func TestTrimHistoryDropsOldestToFitTheSizeBudget(t *testing.T) {
+	in := []runtime.Message{histMsg("user", 400), histMsg("assistant", 400), histMsg("user", 400), histMsg("assistant", 400)}
+	// 1600 chars do not fit 1000: the two oldest go, leaving 800 that start with a user turn
+	out := trimHistory(in, 30, 1000)
+	if len(out) != 2 || out[0].Role != "user" || out[1].Role != "assistant" {
+		t.Fatalf("want the newest user/assistant pair, got %d messages starting with %q", len(out), out[0].Role)
+	}
+	// when dropping leaves an assistant message first, it is dropped too
+	out = trimHistory(in, 30, 1200)
+	if len(out) != 2 || out[0].Role != "user" {
+		t.Fatalf("history must start with a user message: %+v", out)
+	}
+}
+
+func TestTrimHistoryKeepsAnythingThatFits(t *testing.T) {
+	in := []runtime.Message{histMsg("user", 10), histMsg("assistant", 10), histMsg("user", 10)}
+	if out := trimHistory(in, 30, 1000); len(out) != 3 {
+		t.Fatalf("nothing should be dropped: %d", len(out))
+	}
+	if out := trimHistory(in, 2, 1000); len(out) != 1 || out[0].Role != "user" {
+		t.Fatalf("message cap then leading-user rule: %+v", out)
+	}
+}
+
+func TestTrimHistoryTruncatesAnOversizedLastMessage(t *testing.T) {
+	out := trimHistory([]runtime.Message{histMsg("user", 5000)}, 30, 1000)
+	if len(out) != 1 || len(out[0].Content[0].Text) > 1010 || !strings.HasPrefix(out[0].Content[0].Text, "…") {
+		t.Fatalf("a single huge message must be cut to the budget, keeping its end")
+	}
+}
+
+// The selection notice carries the new selection, so the page can apply it without
+// refetching the whole state (chat and tree included).
+func TestSelectionNoticeCarriesTheSelection(t *testing.T) {
+	s := newSvc(t)
+	s.SetLevel(LevelAuto)
+	s.CallTool("create_box", json.RawMessage(`{"id":"b","dx":20,"dy":20,"dz":20}`))
+	ch, cancel := s.Hub().Subscribe()
+	defer cancel()
+	want, err := s.Pick(PickRequest{Body: "b", Kind: "face", Index: 0, Triangle: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case n := <-ch:
+			if n.Kind != "selection" {
+				continue
+			}
+			if n.Selection == nil || len(n.Selection.Selectors) != 1 || n.Selection.Selectors[0] != want.Selectors[0] {
+				t.Fatalf("selection notice = %+v, want selectors %v", n.Selection, want.Selectors)
+			}
+			return
+		case <-time.After(3 * time.Second):
+			t.Fatal("no selection notice")
+		}
+	}
+}

@@ -6,6 +6,7 @@ package sweep
 import (
 	"errors"
 	"fmt"
+	"github.com/accelone/simoncad/internal/vec"
 	"math"
 	"sort"
 
@@ -131,18 +132,12 @@ func validCap(c string) bool { return c == "flat" || c == "round" || c == "point
 
 // ---- vector helpers ---------------------------------------------------------------------
 
-func sub(a, b Vec) Vec         { return Vec{a[0] - b[0], a[1] - b[1], a[2] - b[2]} }
-func add(a, b Vec) Vec         { return Vec{a[0] + b[0], a[1] + b[1], a[2] + b[2]} }
-func mul(a Vec, s float64) Vec { return Vec{a[0] * s, a[1] * s, a[2] * s} }
-func dot(a, b Vec) float64     { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
-func norm(a Vec) float64       { return math.Sqrt(dot(a, a)) }
-func unit(a Vec) Vec {
-	n := norm(a)
-	if n < 1e-300 {
-		return Vec{}
-	}
-	return mul(a, 1/n)
-}
+func sub(a, b Vec) Vec         { return vec.Sub(a, b) }
+func add(a, b Vec) Vec         { return vec.Add(a, b) }
+func mul(a Vec, s float64) Vec { return vec.Scale(a, s) }
+func dot(a, b Vec) float64     { return vec.Dot(a, b) }
+func norm(a Vec) float64       { return vec.Len(a) }
+func unit(a Vec) Vec           { return vec.Unit(a) }
 
 // ---- profile contours -------------------------------------------------------------------
 
@@ -636,9 +631,7 @@ func appendCap(job *Job, sh *shape, atEnd bool, kind string, capLen float64) {
 	}
 }
 
-func cross(a, b Vec) Vec {
-	return Vec{a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]}
-}
+func cross(a, b Vec) Vec { return vec.Cross(a, b) }
 
 // SectionsPerRun is how many consecutive sections the kernel lofts together
 // (kChunk in native/occ/sweep.cpp). Sections inside one run are evenly spaced, so each loft is

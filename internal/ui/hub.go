@@ -12,11 +12,14 @@ import (
 // Notice tells a front end that something changed; it carries no model data, so a client
 // refetches the state or scene it needs.
 type Notice struct {
-	Kind  string          `json:"kind"` // state | selection | chat | event | agent_state | agent_done | refine | visual | model | printsim
-	Type  string          `json:"type,omitempty"`
-	Seq   int             `json:"seq,omitempty"`
-	Chat  *ChatMessage    `json:"chat,omitempty"`
-	State *workflow.Event `json:"state,omitempty"` // agent_state: the workflow transition
+	Kind string       `json:"kind"` // state | selection | chat | event | agent_state | agent_done | refine | visual | model | printsim
+	Type string       `json:"type,omitempty"`
+	Seq  int          `json:"seq,omitempty"`
+	Chat *ChatMessage `json:"chat,omitempty"`
+	// Selection is the new selection (kind "selection"), so a client can apply it without
+	// refetching the whole state.
+	Selection *SelectionView  `json:"selection,omitempty"`
+	State     *workflow.Event `json:"state,omitempty"` // agent_state: the workflow transition
 	// Refine is a visual-refinement progress event (kind "refine"); kind "visual" means the
 	// visual state (iterations, regions, references) changed.
 	Refine *refine.Event `json:"refine,omitempty"`

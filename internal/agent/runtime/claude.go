@@ -77,6 +77,42 @@ type apiRequest struct {
 	Messages  []Message        `json:"messages"`
 	Tools     []apiTool        `json:"tools,omitempty"`
 	Thinking  *apiThinking     `json:"thinking,omitempty"`
+	// ToolChoice forces one tool call (Request.ForceTool).
+	ToolChoice *apiToolChoice `json:"tool_choice,omitempty"`
+}
+
+type apiToolChoice struct {
+	Type string `json:"type"` // tool
+	Name string `json:"name"`
+}
+
+// withMessageCache returns msgs with a cache breakpoint on the last block of the last
+// message, so every step of a tool loop re-reads the transcript so far instead of being
+// billed for it again (the prefix before a breakpoint is matched up to 20 blocks back,
+// and a loop step adds only two). The stored messages are left untouched. Blocks that
+// cannot carry the marker (thinking, empty text) are skipped to an earlier block of the
+// same message.
+func withMessageCache(msgs []Message) []Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	last := msgs[len(msgs)-1]
+	for i := len(last.Content) - 1; i >= 0; i-- {
+		b := last.Content[i]
+		switch {
+		case b.Type == "thinking" || b.Type == "redacted_thinking":
+			continue
+		case b.Type == "text" && b.Text == "":
+			continue
+		}
+		b.CacheControl = ephemeral()
+		content := append([]Block(nil), last.Content...)
+		content[i] = b
+		out := append([]Message(nil), msgs...)
+		out[len(out)-1] = Message{Role: last.Role, Content: content}
+		return out
+	}
+	return msgs
 }
 
 type apiThinking struct {
@@ -127,13 +163,17 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 	if max == 0 {
 		max = 4096
 	}
-	body := apiRequest{Model: model, MaxTokens: max, Messages: req.Messages}
+	body := apiRequest{Model: model, MaxTokens: max, Messages: withMessageCache(req.Messages)}
 	if req.System != "" {
 		// The tool definitions and system prompt dominate the input and are resent every
 		// step, so the system block closes a cached prefix (tools come first in it).
 		body.System = []apiSystemBlock{{Type: "text", Text: req.System, CacheControl: ephemeral()}}
 	}
-	if !req.NoThinking {
+	forced := req.ForceTool != "" && hasTool(req.Tools, req.ForceTool)
+	if forced {
+		body.ToolChoice = &apiToolChoice{Type: "tool", Name: req.ForceTool}
+	}
+	if !req.NoThinking && !forced {
 		body.Thinking = &apiThinking{Type: "enabled", BudgetTokens: thinkingBudget}
 		if body.MaxTokens <= thinkingBudget {
 			body.MaxTokens = thinkingBudget + max
@@ -151,14 +191,12 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 		return nil, err
 	}
 	var lastErr error
-	for attempt := 0; attempt < 4; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-time.After(time.Duration(1<<attempt) * 500 * time.Millisecond):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+	var after time.Duration
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err := waitRetry(ctx, attempt, after); err != nil {
+			return nil, err
 		}
+		after = 0
 		hr, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
@@ -174,6 +212,7 @@ func (c *Claude) Complete(ctx context.Context, req Request) (*Response, error) {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		resp.Body.Close()
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			after = retryAfter(resp.Header)
 			lastErr = fmt.Errorf("anthropic API %d: %s", resp.StatusCode, truncate(string(data), 300))
 			continue
 		}
@@ -211,4 +250,13 @@ func truncate(s string, n int) string {
 		return s[:n] + "…"
 	}
 	return s
+}
+
+func hasTool(tools []ToolDef, name string) bool {
+	for _, t := range tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
 }

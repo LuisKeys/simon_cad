@@ -72,6 +72,8 @@ h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: up
 .brand .word b { color: var(--accent); font-weight: 800; }
 .project { background: transparent; color: var(--muted); max-width: 30ch; padding: 0 10px; font-size: 14px; }
 .project:hover:not(:disabled) { color: var(--text); }
+.conn { color: var(--bad); font-size: 12px; margin-left: 10px; white-space: nowrap; }
+.conn[hidden] { display: none; }
 .project .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project .dirty { color: var(--warn); }
 .project .ic { width: 16px; height: 16px; opacity: .7; }
@@ -310,6 +312,7 @@ button.ghost.wide { width: 100%; margin-top: 8px; }
 .pal-form textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .row { display: flex; gap: 8px; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #262626; border-radius: 8px; padding: 10px 16px; z-index: 20; max-width: calc(100vw - 24px); box-shadow: 0 8px 24px rgba(0,0,0,.5); box-shadow: 0 8px 24px rgba(0,0,0,.5), inset 3px 0 0 var(--line); }
+.toast.warn { box-shadow: 0 8px 24px rgba(0,0,0,.5), inset 3px 0 0 var(--warn, #e0a030); }
 .toast.bad { box-shadow: 0 8px 24px rgba(0,0,0,.5), inset 3px 0 0 var(--bad); } .toast.ok { box-shadow: 0 8px 24px rgba(0,0,0,.5), inset 3px 0 0 var(--ok); }
 .toast[hidden] { display: none; }
 

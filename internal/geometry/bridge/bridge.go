@@ -342,6 +342,23 @@ func TessellateAngular(s Handle, deflection, angular float64) (*Mesh, error) {
 	if err := check("tessellate", C.occ_tessellate_ex(C.occ_handle(s), C.double(deflection), C.double(angular), &m)); err != nil {
 		return nil, err
 	}
+	return copyMesh(m)
+}
+
+// Topology returns the face, edge and vertex tables of Tessellate without triangulating the
+// shape: the entities, their order and their exact measures are the same, but there are no
+// triangles (Positions, Normals and Indices are empty, every Face has TriCount 0). It is the
+// cheap way to enumerate a shape's topology.
+func Topology(s Handle, deflection float64) (*Mesh, error) {
+	var m *C.occ_mesh
+	if err := check("topology", C.occ_topology(C.occ_handle(s), C.double(deflection), &m)); err != nil {
+		return nil, err
+	}
+	return copyMesh(m)
+}
+
+// copyMesh copies a native mesh into Go memory and frees it.
+func copyMesh(m *C.occ_mesh) (*Mesh, error) {
 	defer C.occ_mesh_free(m)
 	var c C.occ_mesh_counts
 	if err := check("mesh counts", C.occ_mesh_get_counts(m, &c)); err != nil {

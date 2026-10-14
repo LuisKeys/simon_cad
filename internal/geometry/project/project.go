@@ -6,6 +6,7 @@ package project
 
 import (
 	"fmt"
+	"github.com/accelone/simoncad/internal/vec"
 	"math"
 
 	"github.com/accelone/simoncad/internal/meshgeo"
@@ -40,21 +41,13 @@ func New(positions, normals []float32, indices []uint32) (*Surface, error) {
 
 func sq(x float64) float64 { return x * x }
 
-func sub(a, b Vec) Vec         { return Vec{a[0] - b[0], a[1] - b[1], a[2] - b[2]} }
-func add(a, b Vec) Vec         { return Vec{a[0] + b[0], a[1] + b[1], a[2] + b[2]} }
-func mul(a Vec, k float64) Vec { return Vec{a[0] * k, a[1] * k, a[2] * k} }
-func dot(a, b Vec) float64     { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
-func length(a Vec) float64     { return math.Sqrt(dot(a, a)) }
-func unit(a Vec) Vec {
-	l := length(a)
-	if l < 1e-300 {
-		return Vec{}
-	}
-	return mul(a, 1/l)
-}
-func cross(a, b Vec) Vec {
-	return Vec{a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]}
-}
+func sub(a, b Vec) Vec         { return vec.Sub(a, b) }
+func add(a, b Vec) Vec         { return vec.Add(a, b) }
+func mul(a Vec, k float64) Vec { return vec.Scale(a, k) }
+func dot(a, b Vec) float64     { return vec.Dot(a, b) }
+func length(a Vec) float64     { return vec.Len(a) }
+func unit(a Vec) Vec           { return vec.Unit(a) }
+func cross(a, b Vec) Vec       { return vec.Cross(a, b) }
 
 func (s *Surface) vert(i uint32) Vec {
 	return Vec{float64(s.pos[3*i]), float64(s.pos[3*i+1]), float64(s.pos[3*i+2])}

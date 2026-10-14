@@ -4,6 +4,7 @@
 package meshgeo
 
 import (
+	"github.com/accelone/simoncad/internal/vec"
 	"math"
 	"sort"
 )
@@ -11,21 +12,13 @@ import (
 // Vec is a 3D vector.
 type Vec = [3]float64
 
-func sub(a, b Vec) Vec         { return Vec{a[0] - b[0], a[1] - b[1], a[2] - b[2]} }
-func add(a, b Vec) Vec         { return Vec{a[0] + b[0], a[1] + b[1], a[2] + b[2]} }
-func mul(a Vec, s float64) Vec { return Vec{a[0] * s, a[1] * s, a[2] * s} }
-func dot(a, b Vec) float64     { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
-func cross(a, b Vec) Vec {
-	return Vec{a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]}
-}
-func norm(a Vec) float64 { return math.Sqrt(dot(a, a)) }
-func unit(a Vec) Vec {
-	n := norm(a)
-	if n < 1e-300 {
-		return Vec{}
-	}
-	return mul(a, 1/n)
-}
+func sub(a, b Vec) Vec         { return vec.Sub(a, b) }
+func add(a, b Vec) Vec         { return vec.Add(a, b) }
+func mul(a Vec, s float64) Vec { return vec.Scale(a, s) }
+func dot(a, b Vec) float64     { return vec.Dot(a, b) }
+func cross(a, b Vec) Vec       { return vec.Cross(a, b) }
+func norm(a Vec) float64       { return vec.Len(a) }
+func unit(a Vec) Vec           { return vec.Unit(a) }
 
 type tri struct{ a, b, c Vec }
 

@@ -235,7 +235,11 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 				return
 			}
 		}
-		pj, _ := json.Marshal(params)
+		pj, err := json.Marshal(params)
+		if err != nil { // never key on an empty string: distinct parameters would share a cache entry
+			fail("parameters cannot be serialized: %v", err)
+			return
+		}
 		res.Status, res.Key = cadir.StatusOK, hashKey(feat.Type, string(pj))
 		return
 	}
@@ -266,8 +270,16 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 		}
 	}
 
-	pj, _ := json.Marshal(params)
-	refs, _ := json.Marshal(n.References)
+	pj, err := json.Marshal(params)
+	if err != nil {
+		fail("parameters cannot be serialized: %v", err)
+		return
+	}
+	refs, err := json.Marshal(n.References)
+	if err != nil {
+		fail("references cannot be serialized: %v", err)
+		return
+	}
 	res.Key = hashKey(builderVersion, n.Type, string(pj), string(refs), hashKey(depKeys...))
 	if en, ok := e.cache[res.Key]; ok {
 		en.gen = e.gen

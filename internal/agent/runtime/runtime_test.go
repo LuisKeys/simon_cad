@@ -106,7 +106,7 @@ func TestContextBuilderIsDeterministicAndIncludesSelection(t *testing.T) {
 	if a != b {
 		t.Fatal("context differs between identical runs")
 	}
-	for _, want := range []string{`"plate"`, "face(feature=plate,side=+Z)", "Units: mm", `"area": 1200`} {
+	for _, want := range []string{`"plate"`, "face(feature=plate,side=+Z)", "Units: mm", `"area":1200`} {
 		if !contains(a, want) {
 			t.Errorf("context missing %q:\n%s", want, a)
 		}
@@ -241,5 +241,38 @@ func TestProviderSelectionFromEnv(t *testing.T) {
 	t.Setenv("ANTHROPIC_MODEL", "claude-x")
 	if p, err := runtime.NewProviderFromEnv(); err != nil || p.Name() != "claude-x" {
 		t.Fatalf("claude: %v %v", p, err)
+	}
+}
+
+// A reply cut off by the output limit must not be taken for a finished answer, and a tool
+// call whose arguments may be half written must not run.
+func TestTruncatedReplyIsFlaggedAndToolCallNotRun(t *testing.T) {
+	a := app.New("t", time.Now)
+	defer a.Close()
+	rec := runtime.Recording{Responses: []runtime.Response{
+		{StopReason: "max_tokens", Content: []runtime.Block{{Type: "tool_use", ID: "x", Name: "create_box", Input: json.RawMessage(`{"id":"b","dx":10`)}}},
+		{StopReason: "max_tokens", Content: []runtime.Block{{Type: "text", Text: "Here is the"}}},
+	}}
+	rt := &runtime.Runtime{Provider: &runtime.Replay{Rec: rec}, Caps: caps()}
+	res, err := rt.Run(context.Background(), a, "x", app.PolicyCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ToolCalls != 0 {
+		t.Fatalf("a truncated tool call must not run, ran %d", res.ToolCalls)
+	}
+	if !strings.Contains(res.Final, "cut off") || !strings.HasPrefix(res.Final, "Here is the") {
+		t.Fatalf("final = %q, want the partial text plus a cut-off notice", res.Final)
+	}
+	var sawError bool
+	for _, m := range res.Transcript {
+		for _, b := range m.Content {
+			if b.Type == "tool_result" && b.IsError && strings.Contains(b.Content, "cut off") {
+				sawError = true
+			}
+		}
+	}
+	if !sawError {
+		t.Fatal("the model must be told its tool call was dropped")
 	}
 }

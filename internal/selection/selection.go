@@ -55,6 +55,6 @@ func (c Context) Selectors() []string {
 
 // JSON is the deterministic serialization placed in the agent context.
 func (c Context) JSON() string {
-	b, _ := json.MarshalIndent(c, "", "  ")
+	b, _ := json.Marshal(c) // compact: this is model context, not for people
 	return string(b)
 }

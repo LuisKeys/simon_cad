@@ -96,6 +96,31 @@ int main() {
     CHECK(occ_live_handle_count() == 0);
   }
 
+  // Topology without meshing: the same entity tables as occ_tessellate, but no triangles.
+  {
+    occ_handle box3 = 0;
+    occ_mesh *full = nullptr, *topo = nullptr;
+    CHECK(occ_box(10, 20, 30, &box3) == OCC_OK);
+    CHECK(occ_tessellate(box3, 0.1, &full) == OCC_OK);
+    CHECK(occ_topology(box3, 0.1, &topo) == OCC_OK);
+    occ_mesh_counts cf, ct;
+    CHECK(occ_mesh_get_counts(full, &cf) == OCC_OK && occ_mesh_get_counts(topo, &ct) == OCC_OK);
+    CHECK(ct.faces == cf.faces && ct.edges == cf.edges && ct.topo_vertices == cf.topo_vertices);
+    CHECK(ct.vertices == 0 && ct.triangles == 0);
+    std::vector<occ_face_info> ff(cf.faces), tf(ct.faces);
+    CHECK(occ_mesh_copy(full, nullptr, nullptr, nullptr, ff.data(), nullptr, nullptr, nullptr) == OCC_OK);
+    CHECK(occ_mesh_copy(topo, nullptr, nullptr, nullptr, tf.data(), nullptr, nullptr, nullptr) == OCC_OK);
+    for (int i = 0; i < cf.faces; ++i) {
+      CHECK(tf[i].tri_count == 0 && ff[i].tri_count == 2);
+      CHECK(tf[i].area == ff[i].area && tf[i].nx == ff[i].nx && tf[i].cz == ff[i].cz);
+    }
+    CHECK(occ_topology(box3, -1, &topo) == OCC_ERR_INVALID_ARG);
+    occ_mesh_free(full);
+    occ_mesh_free(topo);
+    CHECK(occ_live_mesh_count() == 0);
+    CHECK(occ_release(box3) == OCC_OK);
+  }
+
   // Tessellation: a box has 6 planar faces, 12 edges, 8 vertices; winding agrees with normals.
   {
     occ_handle box2 = 0;

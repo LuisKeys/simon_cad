@@ -1,6 +1,7 @@
 package vision
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -308,7 +309,7 @@ func ToSketch(p *Proposal, scale *Scale) (*Sketch, error) {
 	}
 	params["entities"], params["regions"] = ents, regs
 	if pl := p.Placement; pl.Face == "" {
-		params["plane"] = firstNonEmpty(pl.Plane, "XY")
+		params["plane"] = cmp.Or(pl.Plane, "XY")
 		if pl.Offset != 0 {
 			params["offset"] = pl.Offset
 		}
@@ -338,13 +339,6 @@ func strs(in []string) []any {
 		out[i] = s
 	}
 	return out
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 func snapConcentric(p *Proposal, ids []string) bool {

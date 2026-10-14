@@ -12,10 +12,10 @@ The only code that touches OpenCascade.
 | `include/occ_bridge.h` | The stable C ABI. No OCCT type crosses it. `occ_handle` is a `uint64` (0 = invalid); `occ_status` 0 = OK. |
 | `bridge.cpp` | Handle table (mutex-guarded map), thread-local error message, `guarded()` exception→status translation, release, translate / rotate / mirror, `occ_is_valid`, `occ_mass_props`. |
 | `primitives.cpp` | `occ_box`, `occ_cylinder`, `occ_cone`, `occ_extrude_polygon` (closed XY polygon prism). |
-| `booleans.cpp` | `occ_boolean_union`, `occ_boolean_subtract`, `occ_boolean_intersect` (inputs not consumed). |
+| `booleans.cpp` | `occ_boolean_union`, `occ_boolean_subtract`, `occ_boolean_intersect` (inputs not consumed). A failure carries OCCT's own alerts in its message (e.g. `boolean union failed: BOPAlgo_AlertTooFewArguments`), which the agent reads to repair a model. |
 | `fillets.cpp` | `occ_fillet_all_edges`, `occ_chamfer_all_edges`, and the selective `occ_fillet_edges`, `occ_chamfer_edges` (kernel edge indices). |
 | `modify.cpp` | `occ_scale` (uniform `gp_Trsf` / non-uniform `gp_GTrsf`), `occ_unify_faces`, face edits by kernel index: `occ_face_get`, `occ_face_inset` (`BRepOffsetAPI_MakeOffset`), `occ_face_imprint_inset` (`BRepFeat_SplitShape`), `occ_offset_face` (`BRepOffset_MakeOffset::SetOffsetOnFace`, result re-closed into a valid solid). |
-| `mesh.cpp` | `occ_tessellate` / `occ_mesh_*`: per-face triangle ranges, edge polylines, topological vertices and per-face/edge descriptors; numbering in `TopExp::MapShapes` order. |
+| `mesh.cpp` | `occ_tessellate` / `occ_mesh_*`: per-face triangle ranges, edge polylines, topological vertices and per-face/edge descriptors; numbering in `TopExp::MapShapes` order. `occ_topology` returns the same tables without triangulating (about 10x cheaper on a plate with many holes); selectors use it. |
 | `export.cpp` | STEP export/import, STL export. Silences OCCT's stdout messages so `--json` output stays clean. |
 | `tests/bridge_test.cpp` | ABI test: validity, volumes, error paths, handle-count returns to 0 after churn. Runs under valgrind. |
 | `CMakeLists.txt` | Builds `libsimon_occ.a` and `bridge_test` against the local OCCT. |
@@ -81,9 +81,29 @@ face ranges, edge polylines, vertices and a selector per entity. `SelectorFor` /
 
 `Service` (the facade a front end calls: `State`, `Scene`, `Pick`, `SetSelection`, `Preview`,
 `Prompt`, `CallTool`, `SetParameter`, `Commit`, `Reject`, `Undo`, `Redo`, `Restore`, `Compare`,
-`PlaybackFrame`, `New/Open/Save/Export`, `Palette`), `Server` (loopback HTTP + SSE, per-run token,
-Host check), `Hub` (non-blocking notices). `nomutation_test.go` statically enforces that nothing here
-bypasses the tool registry.
+`PlaybackFrame`, `New/Open/Save/Export`, `Palette`), `Server` (loopback HTTP + SSE with a heartbeat,
+per-run token, Host check), `Hub` (non-blocking notices; a `selection` notice carries the selection).
+`nomutation_test.go` statically enforces that nothing here bypasses the tool registry.
+
+`Service` is one type spread over files by responsibility: `service.go` (the type, construction, the
+lock discipline), `selection.go`, `scene.go` (scene delta and preview ghost), `routing.go` (model
+router, fallback consent), `agentturn.go` (`Prompt`/`PromptWith`), `drafts.go`, `specs.go` (attached
+documents), `images.go` (images, materials, interpretations), `chathistory.go` (what chat is replayed to
+the model, bounded by count and size), `tools.go` (tool calls, delete, commit/undo/redo), `timeline.go`
+(checkpoints, compare, playback), `project.go`, `state.go` (the state the page renders) and `palette.go`.
+
+## `internal/app`
+
+`App` is the project session: graph, rebuild engine, ChangeSet manager, history, vision and materials
+stores. Files: `app.go` (the type, `New`/`Open`/`Save`), `modelaccess.go` (model, selection, workspace),
+`toolenv.go` (the `tools.Env` the registry sees, and export), `changesets.go` (prompts, `ApplyTool`,
+commit/undo/redo, checkpoints, `RevertLatest`). `Open` records `OpenWarnings` (for example a project
+saved with another OpenCASCADE version).
+
+## `internal/vec`
+
+The 3D vector arithmetic (`Add`, `Sub`, `Scale`, `Dot`, `Cross`, `Len`, `Unit`, `Lerp`, `Dist`) shared by
+`geometry/curve`, `geometry/project`, `geometry/sweep` and `meshgeo`, which forward their local helpers to it.
 
 ## `internal/selection`
 

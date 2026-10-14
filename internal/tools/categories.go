@@ -34,7 +34,7 @@ func init() {
 		"primitives": {"create_box", "create_cylinder", "create_sphere", "create_cone", "create_torus"},
 		"sketch":     {"create_sketch", "extrude_sketch", "extrude_profile"},
 		"edit": {"add_hole", "fillet", "chamfer", "boolean", "face_extrude", "face_inset", "face_offset",
-			"remove_feature", "suppress_feature", "rename_feature", "delete_objects", "check_delete"},
+			"remove_feature", "suppress_feature", "rename_feature", "delete_objects", "check_delete", "batch"},
 		"transform": {"move_object", "rotate_object", "transform", "scale", "align", "mirror", "duplicate",
 			"linear_pattern", "circular_pattern", "group", "ungroup", "resize_object", "set_object_dimension",
 			"set_object_proportional_scaling", "get_object_dimensions", "get_object_transform"},

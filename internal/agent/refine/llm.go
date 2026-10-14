@@ -34,7 +34,7 @@ func imageBlock(data []byte, mediaType string) runtime.Block {
 func structured(ctx context.Context, p runtime.Provider, system string, content []runtime.Block, tool runtime.ToolDef, usage *runtime.Usage) (json.RawMessage, error) {
 	msgs := []runtime.Message{{Role: "user", Content: content}}
 	for attempt := 0; attempt < 2; attempt++ {
-		resp, err := p.Complete(ctx, runtime.Request{System: system, Messages: msgs, Tools: []runtime.ToolDef{tool}, NoThinking: true, MaxTokens: 4096})
+		resp, err := p.Complete(ctx, runtime.Request{System: system, Messages: msgs, Tools: []runtime.ToolDef{tool}, ForceTool: tool.Name, NoThinking: true, MaxTokens: 4096})
 		if err != nil {
 			return nil, err
 		}

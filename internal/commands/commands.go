@@ -126,7 +126,10 @@ func (c *AddFeature) Apply(g *cadir.Graph) (Command, error) {
 	if idx < 0 || idx > len(g.Nodes) {
 		idx = len(g.Nodes)
 	}
-	n := cloneNode(c.Node)
+	n, err := cloneNode(c.Node)
+	if err != nil {
+		return nil, fmt.Errorf("AddFeature: feature %q cannot be copied: %w", c.Node.ID, err)
+	}
 	g.Nodes = append(g.Nodes, nil)
 	copy(g.Nodes[idx+1:], g.Nodes[idx:])
 	g.Nodes[idx] = n
@@ -155,11 +158,18 @@ func (c *RemoveFeature) Apply(g *cadir.Graph) (Command, error) {
 	return &AddFeature{Node: n, Index: idx}, nil
 }
 
-func cloneNode(n *cadir.Node) *cadir.Node {
-	b, _ := json.Marshal(n)
+// cloneNode deep-copies a node through its JSON form. It fails (instead of returning a
+// silently empty node) for a node that has no JSON form, such as one holding a NaN parameter.
+func cloneNode(n *cadir.Node) (*cadir.Node, error) {
+	b, err := json.Marshal(n)
+	if err != nil {
+		return nil, err
+	}
 	var c cadir.Node
-	_ = json.Unmarshal(b, &c)
-	return &c
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 // ---- SetParameter / SetExpression ------------------------------------------------

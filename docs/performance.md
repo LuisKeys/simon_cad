@@ -43,6 +43,26 @@ an unrelated edit regenerates nothing. Data nodes (`path`, `profile`) cost nothi
 - Known limitation: swept ridges thinner than ≈ 0.35 mm can produce invalid kernel geometry; the
   stamp pipeline therefore builds stroke ridges as a 2D union (`StrokesToRegions`) and extrudes once.
 
+## Optimizations after the sweep work
+
+Measured on a 24-thread Linux machine (not the M3 Max above), Go 1.27, OpenCASCADE 7.8.1, Chrome 155.
+Each row is before → after, with the benchmark or test that shows it.
+
+| Area | What changed | Before → after |
+|---|---|---|
+| Linear/circular pattern | The copies of the tool are united by balanced pairwise reduction instead of folding into a growing accumulator (`applyCopies`). `BenchmarkLinearPattern50/100` | 50 copies 256 → 143 ms; 100 copies 811 → 310 ms (the cost stopped being quadratic) |
+| Selector topology | `Body.Topology()` takes the face/edge/vertex tables from the exact B-Rep (`occ_topology`) instead of tessellating a throwaway mesh. `TestTopologyMatchesTessellateWithoutTriangles` pins that the tables are identical; `TestTopologyIsMuchCheaperThanMeshingManyHoles` | plate with 60 holes: 65 → 5.7 ms; with 100 holes meshing costs about 110 ms |
+| Expression evaluation | Parsed expressions are remembered (bounded cache). `BenchmarkEvalRepeated` vs `BenchmarkParseUncached` | 1243 → 122 ns, 33 → 2 allocations |
+| Mesh transfer | `positions`, `normals`, `indices` and `edge_points` travel as base64 of little-endian bytes (`rendering/packed.go`, `frontend/mesh-codec.js`); a plain array is still accepted. | 119k-triangle body: JSON 5.7 → 3.7 MB; server encode 24 → 8.6 ms; browser parse+decode 11.1 → 2.5 ms (9.1 ms with the `atob` fallback) |
+| Picking | Face picking walks a bounding-volume hierarchy built on a body's first pick (`frontend/bvh.js`); hover is picked once per frame; the hover/selection overlay no longer deletes the body's GPU buffers (it used to dispose attributes it shared with the body, forcing a re-upload on every hover change) and reuses its outline | ~1M triangles: ray 8.0 ms → 0.022 ms (362x); building the hierarchy costs 735 ms once for a body that large (about 7 ms per 10k triangles) |
+| Saving | Unchanged files are not rewritten; files are written and synced, then renamed together | an unchanged save writes nothing; a failed save leaves the previous project intact |
+| LLM requests | The transcript carries a cache breakpoint on its last block, so each step of a tool loop re-reads the earlier steps from the prompt cache; context JSON is compact; replayed chat history is also bounded by size | (cost effect depends on the provider's cache; verify with `cached_input_tokens` in the usage report) |
+
+Not changed, on purpose: `Translate(0,0,0)` as a shape copy costs 0.06 ms on a plain plate and 1.6 ms with
+100 holes (not worth a native `share`); a failed boolean is not retried with a fuzzy tolerance (OCCT booleans
+did not fail on any pathological input tried, so there is no case to prove it helps); checkpoints still store
+full graph snapshots (projects are hundreds of KB).
+
 ## Regression models
 
 `testdata/regression/models.json` pins volume, bounding box, solid count and face count of nine reference

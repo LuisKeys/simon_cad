@@ -160,6 +160,14 @@ _edit tool._ Drill one or more holes into a feature's face. `positions` are worl
 | `positions` | array of array |  | Hole centers in world coordinates |
 | `target` | string |  | Feature id to drill into (required unless face is given) |
 
+### `batch`
+
+_edit tool._ Run several model-editing tool calls as one change: one ChangeSet, one undo step, all or nothing. Each call acts on the model as it is now (plus the ids earlier calls of the batch generate); a call cannot refer to a feature created by an earlier call of the same batch.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `calls` | array of object | yes | The calls, in order |
+
 ### `boolean`
 
 _edit tool._ Combine two features: op=union merges `tool` into `target`; op=subtract removes `tool` from `target`; op=intersect keeps only the volume shared by both. Both inputs are consumed (they stop appearing as separate bodies).

@@ -58,11 +58,11 @@ type BodyMesh struct {
 	Key        string           `json:"key"` // content key; unchanged key ⇒ unchanged geometry
 	Selector   string           `json:"selector"`
 	Bounds     selectors.Bounds `json:"bounds"`
-	Positions  []float32        `json:"positions"`
-	Normals    []float32        `json:"normals"`
-	Indices    []uint32         `json:"indices"`
+	Positions  F32              `json:"positions"` // packed, see packed.go
+	Normals    F32              `json:"normals"`
+	Indices    U32              `json:"indices"`
 	Faces      []FaceRange      `json:"faces"`
-	EdgePoints []float32        `json:"edge_points"`
+	EdgePoints F32              `json:"edge_points"`
 	Edges      []EdgeLine       `json:"edges"`
 	Vertices   []VertexPoint    `json:"vertices"`
 	Triangles  int              `json:"triangles"`

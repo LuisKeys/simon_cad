@@ -9,7 +9,7 @@
 export const GROUPS = ['mode', 'create', 'view', 'transform', 'geometry', 'face', 'boolean', 'organize', 'appearance', 'visibility', 'measure', 'destructive'];
 
 const kindOf = (sel) => /^(\w+)\(/.exec(sel)?.[1] ?? '';
-const featureOf = (sel) => { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1].trim() : ''; };
+export const featureOf = (sel) => { const m = /feature=([^,)]+)/.exec(sel); return m ? m[1].trim() : ''; };
 
 /** Summarise a selector list: { ctx, kinds:Set, features:[ids], count, grouped }. `groupOf`
  *  maps a feature id to its design-tree group ('' when none). */

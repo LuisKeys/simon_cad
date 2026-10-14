@@ -62,7 +62,7 @@ func (ag *Agent) Run(ctx context.Context, a *app.App, intent string, policy app.
 	}
 
 	ag.emit(Event{State: StatePlanning, Message: "Planning…"})
-	_, defs := toolDefs(rt, a)
+	_, defs := rt.Toolset(a)
 	plan, usage, err := Planner{Provider: rt.Provider, NoThinking: rt.NoThinking, Tools: defs}.Plan(ctx, c.Msgs, c.Context(), intent)
 	c.Res.Usage.Add(usage)
 	if err != nil {
@@ -134,7 +134,7 @@ func (ag *Agent) Run(ctx context.Context, a *app.App, intent string, policy app.
 		}
 		if next.HardCount() > rep.HardCount() {
 			// The repair broke the model: return to the latest valid state.
-			ids, err := revert(a, c.Res.Committed[mark:])
+			ids, err := a.RevertLatest(c.Res.Committed[mark:])
 			reverted = append(reverted, ids...)
 			if len(ids) > 0 && ag.OnRevert != nil {
 				ag.OnRevert(ids)
@@ -193,40 +193,6 @@ func (ag *Agent) stopped(c *runtime.Conversation, out *Result, st *StepResult) e
 func (ag *Agent) fail(out *Result, err error) {
 	out.State = StateFailed
 	ag.emit(Event{State: StateFailed, Message: err.Error()})
-}
-
-// revert undoes the given committed ChangeSets, newest first, as long as they are the
-// latest ones on the undo stack.
-func revert(a *app.App, ids []string) ([]string, error) {
-	var done []string
-	for i := len(ids) - 1; i >= 0; i-- {
-		cs, err := a.Undo()
-		if err != nil {
-			return done, err
-		}
-		if cs.ID != ids[i] {
-			if _, rerr := a.Redo(); rerr != nil {
-				return done, rerr
-			}
-			return done, fmt.Errorf("the model changed during correction; could not revert %s", ids[i])
-		}
-		done = append(done, cs.ID)
-	}
-	return done, nil
-}
-
-func toolDefs(rt *runtime.Runtime, a *app.App) (map[string]bool, []runtime.ToolDef) {
-	allowed := map[string]bool{}
-	var defs []runtime.ToolDef
-	for _, cp := range rt.Caps {
-		for _, t := range cp.ToolSubset(a.Reg) {
-			if !allowed[t.Name] {
-				allowed[t.Name] = true
-				defs = append(defs, runtime.ToolDef{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
-			}
-		}
-	}
-	return allowed, defs
 }
 
 func executable(p *Plan) int {

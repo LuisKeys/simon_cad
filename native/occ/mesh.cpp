@@ -47,7 +47,7 @@ static void bounds(const TopoDS_Shape& s, double* mn, double* mx) {
   b.Get(mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
 }
 
-static void add_face(occ_mesh& m, const TopoDS_Face& f) {
+static void add_face(occ_mesh& m, const TopoDS_Face& f, bool with_triangles) {
   occ_face_info fi;
   std::memset(&fi, 0, sizeof fi);
   fi.tri_start = (int32_t)(m.idx.size() / 3);
@@ -103,7 +103,8 @@ static void add_face(occ_mesh& m, const TopoDS_Face& f) {
   }
 
   TopLoc_Location loc;
-  Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(f, loc);
+  Handle(Poly_Triangulation) tri;
+  if (with_triangles) tri = BRep_Tool::Triangulation(f, loc);
   if (!tri.IsNull()) {
     BRepLib_ToolTriangulatedShape::ComputeNormals(f, tri);
     const gp_Trsf tr = loc.Transformation();
@@ -167,34 +168,50 @@ occ_status occ_tessellate(occ_handle h, double deflection, occ_mesh** out) {
   return occ_tessellate_ex(h, deflection, 0.5, out);
 }
 
+// Builds the mesh of a shape. With meshing off only the exact B-Rep tables are produced
+// (face/edge/vertex identity, areas, centroids, normals, bounds): they never depended on the
+// triangles, and skipping BRepMesh is what makes this cheap on faces with many holes.
+static occ_mesh* build_mesh(const TopoDS_Shape& s, double deflection, double angular, bool meshing) {
+  // OCCT keeps a triangulation on the shape and reuses any that is already as fine as
+  // requested, so a coarser request would silently return the finer mesh. Start clean.
+  if (meshing) {
+    BRepTools::Clean(s);
+    BRepMesh_IncrementalMesh mesher(s, deflection, false, angular, false);
+  }
+  auto* m = new occ_mesh();
+  try {
+    TopTools_IndexedMapOfShape faces, edges, verts;
+    TopExp::MapShapes(s, TopAbs_FACE, faces);
+    TopExp::MapShapes(s, TopAbs_EDGE, edges);
+    TopExp::MapShapes(s, TopAbs_VERTEX, verts);
+    for (int i = 1; i <= faces.Extent(); ++i) add_face(*m, TopoDS::Face(faces(i)), meshing);
+    for (int i = 1; i <= edges.Extent(); ++i) add_edge(*m, TopoDS::Edge(edges(i)), deflection);
+    for (int i = 1; i <= verts.Extent(); ++i) {
+      gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(verts(i)));
+      m->vert_pts.push_back((float)p.X()); m->vert_pts.push_back((float)p.Y()); m->vert_pts.push_back((float)p.Z());
+    }
+  } catch (...) {
+    delete m;
+    throw;
+  }
+  g_live_meshes.fetch_add(1);
+  return m;
+}
+
 occ_status occ_tessellate_ex(occ_handle h, double deflection, double angular, occ_mesh** out) {
   return guarded([&] {
     require_out(out);
     if (!(deflection > 0)) throw BridgeError{OCC_ERR_INVALID_ARG, "deflection must be positive"};
     if (!(angular > 0)) throw BridgeError{OCC_ERR_INVALID_ARG, "angular deflection must be positive"};
-    TopoDS_Shape s = require_shape(h);
-    // OCCT keeps a triangulation on the shape and reuses any that is already as fine as
-    // requested, so a coarser request would silently return the finer mesh. Start clean.
-    BRepTools::Clean(s);
-    BRepMesh_IncrementalMesh mesher(s, deflection, false, angular, false);
-    auto* m = new occ_mesh();
-    try {
-      TopTools_IndexedMapOfShape faces, edges, verts;
-      TopExp::MapShapes(s, TopAbs_FACE, faces);
-      TopExp::MapShapes(s, TopAbs_EDGE, edges);
-      TopExp::MapShapes(s, TopAbs_VERTEX, verts);
-      for (int i = 1; i <= faces.Extent(); ++i) add_face(*m, TopoDS::Face(faces(i)));
-      for (int i = 1; i <= edges.Extent(); ++i) add_edge(*m, TopoDS::Edge(edges(i)), deflection);
-      for (int i = 1; i <= verts.Extent(); ++i) {
-        gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(verts(i)));
-        m->vert_pts.push_back((float)p.X()); m->vert_pts.push_back((float)p.Y()); m->vert_pts.push_back((float)p.Z());
-      }
-    } catch (...) {
-      delete m;
-      throw;
-    }
-    g_live_meshes.fetch_add(1);
-    *out = m;
+    *out = build_mesh(require_shape(h), deflection, angular, true);
+  });
+}
+
+occ_status occ_topology(occ_handle h, double deflection, occ_mesh** out) {
+  return guarded([&] {
+    require_out(out);
+    if (!(deflection > 0)) throw BridgeError{OCC_ERR_INVALID_ARG, "deflection must be positive"};
+    *out = build_mesh(require_shape(h), deflection, 0.5, false);
   });
 }
 

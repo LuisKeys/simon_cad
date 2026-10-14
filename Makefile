@@ -59,7 +59,7 @@ ui: build
 
 # Browser end-to-end flows: M2 (select face -> prompt -> preview -> commit -> undo), image to
 # CAD, materials, body/face modeling (align, duplicate, scale, group, extrude, inset) and visual
-# closed-loop refinement, Single/Quad views, interactive dimensions, units & grid, primary/fallback models, interactive move/rotate, shortcuts panel. Needs Chrome.
+# closed-loop refinement, Single/Quad views, interactive dimensions, units & grid, primary/fallback models, interactive move/rotate, shortcuts panel, paths, image tracing, connection loss and recovery. Needs Chrome.
 e2e: build
 	node e2e/m2.mjs
 	node e2e/image.mjs
@@ -75,6 +75,9 @@ e2e: build
 	node e2e/transform.mjs
 	node e2e/shortcuts.mjs
 	node e2e/printsim.mjs
+	node e2e/paths.mjs
+	node e2e/trace.mjs
+	node e2e/resilience.mjs
 
 # Pure frontend helpers (confidence bands, SVG geometry, ambiguity edits); needs Node >= 18.
 test-js:

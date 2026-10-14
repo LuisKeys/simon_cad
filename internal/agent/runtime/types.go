@@ -27,6 +27,9 @@ type Block struct {
 	Title string `json:"title,omitempty"`
 	// Source is the payload of an image or document (PDF) block.
 	Source *ImageSource `json:"source,omitempty"`
+	// CacheControl is a Claude prompt-cache breakpoint. It is set only on the copy of the
+	// transcript that goes on the wire (see withMessageCache), never on stored messages.
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
 }
 
 // ImageSource is a base64 image (the Messages-API wire shape).
@@ -83,6 +86,20 @@ type Request struct {
 	MaxTokens int
 	// NoThinking asks for an instant answer; the zero value keeps thinking on.
 	NoThinking bool
+	// ForceTool names a tool the model must call (structured-output requests such as a
+	// plan or a critique). Providers that cannot force a call ignore it. Claude does not
+	// allow a forced call together with extended thinking, so thinking is off for it.
+	ForceTool string
+}
+
+// truncated reports whether a stop reason means the model ran out of output tokens
+// (Claude "max_tokens", OpenAI "max_output_tokens", Ollama "length").
+func truncated(stopReason string) bool {
+	switch stopReason {
+	case "max_tokens", "max_output_tokens", "length":
+		return true
+	}
+	return false
 }
 
 // Usage counts the tokens of one or more model calls. Totals are what every caller needs;
