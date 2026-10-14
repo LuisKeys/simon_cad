@@ -16,7 +16,14 @@ type Interpretation struct {
 	Revision int       `json:"revision"`
 	// Used lists the CAD-IR nodes created from this interpretation.
 	Used []string `json:"used,omitempty"`
+	// Closed marks an interpretation that no longer needs attention: the user discarded it or
+	// the model was built another way. It stays in the store for audit, but the agent stops
+	// carrying the image tools for it and the UI hides its card.
+	Closed bool `json:"closed,omitempty"`
 }
+
+// Open reports whether the interpretation still waits for the user or the agent.
+func (i *Interpretation) Open() bool { return !i.Closed && len(i.Used) == 0 }
 
 // Report validates the current revision.
 func (i *Interpretation) Report() *Report { return Validate(i.Proposal, i.Scale) }
@@ -111,6 +118,38 @@ func (s *Store) MarkUsed(id string, nodes []string) {
 	if it, ok := s.items[id]; ok {
 		it.Used = append(it.Used[:0:0], nodes...)
 	}
+}
+
+// Close marks an interpretation as no longer needing attention.
+func (s *Store) Close(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if it, ok := s.items[id]; ok {
+		it.Closed = true
+	}
+}
+
+// CloseOpen closes every interpretation that is still open.
+func (s *Store) CloseOpen() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, it := range s.items {
+		if it.Open() {
+			it.Closed = true
+		}
+	}
+}
+
+// HasOpen reports whether any interpretation is still open.
+func (s *Store) HasOpen() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, it := range s.items {
+		if it.Open() {
+			return true
+		}
+	}
+	return false
 }
 
 type storeJSON struct {

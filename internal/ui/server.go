@@ -174,6 +174,16 @@ func (s *Server) routes() {
 		info, err := s.Svc.UploadImage(b)
 		reply(w, info, err)
 	})
+	m.HandleFunc("/api/interpretation/close", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID string `json:"id"`
+		}
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.CloseInterpretation(in.ID))
+	})
 	m.HandleFunc("/api/spec", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST the raw document (text or PDF) with ?name=", http.StatusMethodNotAllowed)

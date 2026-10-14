@@ -48,7 +48,7 @@ func (Capability) ToolSubset(reg *tools.Registry) []*tools.Tool { return reg.Sub
 // parameters, regions, references) persists once it has. The condition mirrors
 // BuildContext, so a capability that would report "nothing yet" sends no tools either.
 func (Capability) Relevant(a *app.App, images []string) bool {
-	if len(images) > 0 || len(a.Images.All()) > 0 || len(tools.ParameterValues(a.Graph)) > 0 {
+	if len(images) > 0 || len(tools.ParameterValues(a.Graph)) > 0 {
 		return true
 	}
 	vs := a.Visual

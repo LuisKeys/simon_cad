@@ -10,6 +10,7 @@ import (
 
 	"github.com/accelone/simoncad/internal/app"
 	"github.com/accelone/simoncad/internal/tools"
+	"github.com/accelone/simoncad/internal/vision"
 )
 
 const Name = "vision"
@@ -41,16 +42,22 @@ Results from image-derived tools are previews until the user commits them; if a 
 
 func (Capability) ToolSubset(reg *tools.Registry) []*tools.Tool { return reg.Subset(tools.CapVision) }
 
-// Relevant: this capability only has work to do once an image is in play. Its tool schemas
-// are among the largest in the catalog, so a project with no image never pays for them.
-// The condition mirrors BuildContext: nothing to report means nothing to act on.
+// Relevant: this capability only has work to do while an image is in play: attached to this
+// turn, or an interpretation still waiting to be used. Its tool schemas are among the largest
+// in the catalog, so a turn about anything else (a material, a fillet) never pays for them,
+// even in a project that started from an image.
 func (Capability) Relevant(a *app.App, images []string) bool {
-	return len(images) > 0 || len(a.Images.All()) > 0 || len(a.Vision.List()) > 0
+	return len(images) > 0 || a.Vision.HasOpen()
 }
 
 // BuildContext lists the open interpretations and what each still needs, in a stable order.
 func (Capability) BuildContext(a *app.App) (string, error) {
-	items := a.Vision.List()
+	var items []*vision.Interpretation
+	for _, it := range a.Vision.List() {
+		if it.Open() || len(it.Used) > 0 {
+			items = append(items, it)
+		}
+	}
 	if len(items) == 0 {
 		return "## Image interpretations\nNone yet.\n", nil
 	}

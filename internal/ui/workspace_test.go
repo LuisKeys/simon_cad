@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/app"
 	"github.com/accelone/simoncad/internal/workspace"
 )
@@ -27,6 +28,8 @@ func TestWorkspaceUIAndAgentAreConsistent(t *testing.T) {
 	}
 	bad, _ := ui.CallTool("configure_grid", json.RawMessage(`{"spacing":0}`))
 
+	// the scripted model calls workspace tools directly, without load_tool_category
+	t.Setenv(runtime.ToolLoadingEnv, runtime.ToolLoadingAll)
 	agent := newSvc(t)
 	script := []string{}
 	for _, c := range calls {

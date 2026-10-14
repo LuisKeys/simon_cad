@@ -920,17 +920,31 @@ function retriedOk(chat, i) {
   return !!last && last.ok;
 }
 
+// An interpretation card stays where the chat was when it first appeared, so later messages follow it
+// instead of it riding at the bottom for as long as the interpretation is unused.
+const cardAnchor = new Map();
+
 function renderChat(st) {
   const el = $('chat');
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-  const nodes = st.chat.filter((m, i) => !retriedOk(st.chat, i)).map((m) => {
+  const lastSeq = st.chat.length ? st.chat[st.chat.length - 1].seq : 0;
+  const cards = vision.proposalCards(st);
+  for (const c of cards) if (!cardAnchor.has(c.id)) cardAnchor.set(c.id, lastSeq);
+  const placed = (seq) => cards.filter((c) => cardAnchor.get(c.id) === seq).map((c) => c.node);
+  const nodes = [];
+  st.chat.forEach((m, i) => {
     chatSeen.add(m.seq);
-    const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
-    if (m.role === 'draft') return draftCard(m, st);
-    if (m.role === 'tool') return h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`);
-    return h('div', { class: cls }, m.text, vision.thumbs(m.images, m.docs));
+    if (!retriedOk(st.chat, i)) {
+      const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
+      if (m.role === 'draft') nodes.push(draftCard(m, st));
+      else if (m.role === 'tool') nodes.push(h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`));
+      else nodes.push(h('div', { class: cls }, m.text, vision.thumbs(m.images, m.docs)));
+    }
+    nodes.push(...placed(m.seq));
   });
-  nodes.push(...vision.proposalCards(st));
+  // anchored to a message that is gone (chat cleared, or the first card on an empty chat)
+  const seqs = new Set(st.chat.map((m) => m.seq));
+  nodes.push(...cards.filter((c) => !seqs.has(cardAnchor.get(c.id))).map((c) => c.node));
   for (const cs of st.pending) nodes.push(changeSetCard(cs));
   if (st.busy) nodes.push(h('div', { id: 'agent-state', class: 'msg system' }, st.refine_state ? refineText(st.refine_state) : agentStateText(st.agent_state)));
   el.replaceChildren(...nodes);

@@ -903,7 +903,7 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		caps := runtime.SelectCaps(s.app, images, geo.New(), vis.New(), visualcap.New())
-		rt := &runtime.Runtime{Provider: unlocking{agentProv, &s.mu}, Caps: caps, History: prior, NoThinking: !thinking,
+		rt := &runtime.Runtime{Provider: unlocking{agentProv, &s.mu}, Caps: caps, History: prior, NoThinking: !thinking, ToolLoading: runtime.InteractiveToolLoading(),
 			ImageIDs: images, Interpreter: interp, Reference: s.specContext()}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
@@ -1072,6 +1072,20 @@ func (s *Service) RetainImage(id string, keep bool) error {
 	return nil
 }
 
+// CloseInterpretation discards an image interpretation: it stays in the project history but
+// stops being offered to the user and the agent.
+func (s *Service) CloseInterpretation(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.app.Vision.Get(id); !ok {
+		return fmt.Errorf("unknown interpretation %q", id)
+	}
+	s.app.Vision.Close(id)
+	s.dirty = true
+	s.hub.Publish(Notice{Kind: "state"})
+	return nil
+}
+
 // ProposalView is an image interpretation as the panels show it.
 type ProposalView struct {
 	ID       string           `json:"id"`
@@ -1081,6 +1095,7 @@ type ProposalView struct {
 	Revision int              `json:"revision"`
 	Ready    bool             `json:"ready"`
 	Used     []string         `json:"used,omitempty"`
+	Closed   bool             `json:"closed,omitempty"`
 	Proposal *vision.Proposal `json:"proposal"`
 	Report   *vision.Report   `json:"report"`
 }
@@ -1088,7 +1103,7 @@ type ProposalView struct {
 func (s *Service) proposals() []ProposalView {
 	out := []ProposalView{}
 	for _, it := range s.app.Vision.List() {
-		v := ProposalView{ID: it.ID, ImageID: it.Proposal.ImageID, Revision: it.Revision, Used: it.Used, Proposal: it.Proposal, Report: it.Report()}
+		v := ProposalView{ID: it.ID, ImageID: it.Proposal.ImageID, Revision: it.Revision, Used: it.Used, Closed: it.Closed, Proposal: it.Proposal, Report: it.Report()}
 		v.Ready = v.Report.Ready
 		if im, ok := s.app.Images.Get(it.Proposal.ImageID); ok {
 			v.ImageW, v.ImageH = im.Width, im.Height

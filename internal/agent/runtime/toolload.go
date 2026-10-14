@@ -3,6 +3,7 @@ package runtime
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/accelone/simoncad/internal/tools"
@@ -22,6 +23,16 @@ const (
 	// itself; it never reaches App.ApplyTool.
 	loadCategoryTool = "load_tool_category"
 )
+
+// InteractiveToolLoading is the mode the chat agent runs with: SIMON_TOOL_LOADING when set,
+// otherwise progressive, so a turn pays for the everyday tools and loads the rest on demand.
+// The Runtime zero value stays "all", which keeps recorded evals and scripted tests exact.
+func InteractiveToolLoading() string {
+	if m := os.Getenv(ToolLoadingEnv); m != "" {
+		return m
+	}
+	return ToolLoadingProgressive
+}
 
 // toolLoader holds back the definitions of the tools that are not core, by category, and
 // releases a category when the model asks for it. Loading only ever adds tools, so the

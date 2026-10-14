@@ -8,6 +8,7 @@ import (
 	vis "github.com/accelone/simoncad/internal/agent/capabilities/vision"
 	visualcap "github.com/accelone/simoncad/internal/agent/capabilities/visual"
 	"github.com/accelone/simoncad/internal/agent/runtime"
+	"github.com/accelone/simoncad/internal/vision"
 )
 
 func selected(s *Service, images []string) map[string]bool {
@@ -36,16 +37,35 @@ func TestAttachingAnImageLoadsTheImageCapabilities(t *testing.T) {
 	}
 }
 
-// An image uploaded earlier in the session keeps the capabilities available, so a follow-up
-// question about it ("make that hole 5 mm") is not answered without the tools it needs.
-func TestAnUploadedImageKeepsThemLoaded(t *testing.T) {
+// An image uploaded earlier that nobody interpreted is no reason to carry the image tools: a
+// later turn about a material or a fillet must not pay for them.
+func TestAnUploadedImageAloneDoesNotKeepThemLoaded(t *testing.T) {
 	s := newSvc(t)
 	if _, err := s.UploadImage(testPNG(t)); err != nil {
 		t.Fatal(err)
 	}
-	got := selected(s, nil)
-	if !got["vision"] || !got["visual"] {
-		t.Fatalf("capabilities = %v, want the image ones kept", got)
+	if got := selected(s, nil); got["vision"] || got["visual"] {
+		t.Fatalf("capabilities = %v, want geometry only", got)
+	}
+}
+
+// An interpretation still waiting keeps the image tools available, so "make that hole 5 mm"
+// is answered with the tools it needs; closing it (discarded, or the model was built another
+// way) drops them again.
+func TestOpenInterpretationKeepsVisionLoadedUntilClosed(t *testing.T) {
+	s := newSvc(t)
+	it := s.app.Vision.Add(&vision.Proposal{})
+	if got := selected(s, nil); !got["vision"] {
+		t.Fatalf("capabilities = %v, want vision kept", got)
+	}
+	if err := s.CloseInterpretation(it.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := selected(s, nil); got["vision"] {
+		t.Fatalf("capabilities = %v, want vision dropped once closed", got)
+	}
+	if err := s.CloseInterpretation("int_9999"); err == nil {
+		t.Fatal("closing an unknown interpretation must fail")
 	}
 }
 

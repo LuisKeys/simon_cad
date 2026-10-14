@@ -777,6 +777,11 @@ func (a *App) noteInterpretations(cs *commands.ChangeSet) {
 	for id, nodes := range byInt {
 		a.Vision.MarkUsed(id, nodes)
 	}
+	// The model was built another way (by hand, or by the agent from the user's words): an
+	// interpretation nobody used stops being a pending task.
+	if len(byInt) == 0 && len(cs.Affected) > 0 && !cs.AppearanceOnly() {
+		a.Vision.CloseOpen()
+	}
 }
 
 // Commit approves a proposed ChangeSet.

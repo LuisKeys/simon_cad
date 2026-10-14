@@ -435,8 +435,7 @@ step limit (20) is hit. Validation errors are fed back so the model can correct 
 **Tool definitions and prompt cache.** Tool definitions dominate a turn's input (about 25k tokens
 for all tools) and are resent on every step, so the Claude provider marks the last tool and the
 system prompt as prompt-cache breakpoints. Each tool also has a `Category` (domain, see
-`internal/tools/categories.go`; `docs/tools.md` is grouped by it). With `SIMON_TOOL_LOADING=progressive`
-(default `all`) only the core geometry tools are sent, plus the meta-tool `load_tool_category`;
+`internal/tools/categories.go`; `docs/tools.md` is grouped by it). In the UI chat agent the default is progressive (`SIMON_TOOL_LOADING=all` sends everything; evals and the CLI keep `all`): only the core geometry tools are sent, plus the meta-tool `load_tool_category`;
 the system prompt carries an index of the held-back categories and their tool names. The runtime
 answers `load_tool_category` itself (it never reaches `App.ApplyTool`), and calling a held-back tool
 directly loads its category and asks the model to retry. Loaded categories only accumulate, so the

@@ -170,9 +170,9 @@ Primitivas:
 - **Caché de prompts de Anthropic** sobre las definiciones de herramientas y el prompt de sistema.
 - **Herramientas categorizadas** (11 categorías: primitivas, sketch, edición, transformación,
   paramétrica, componentes, apariencia, workspace, proyecto, imagen, refinamiento) y **carga bajo
-  demanda** (`SIMON_TOOL_LOADING=progressive`): solo se envían las herramientas núcleo más la
+  demanda** (`SIMON_TOOL_LOADING=progressive`, por defecto): solo se envían las herramientas núcleo más la
   meta-herramienta `load_tool_category`; las categorías cargadas se acumulan sin romper la caché.
-  Por defecto `all`.
+  En el chat de la UI es el modo por defecto; `SIMON_TOOL_LOADING=all` envía todas (evals y CLI usan `all`).
 - **Grabación y reproducción** de conversaciones (recordings) para ejecutar sin API key.
 - **Evals** grabados y en vivo.
 - **Capacidades conectables:** `geometry`, `vision`, `visual`.

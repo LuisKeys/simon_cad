@@ -661,3 +661,38 @@ func TestV1ProjectOpensUnderV2(t *testing.T) {
 		t.Fatal("nothing image-related in a v1 project")
 	}
 }
+
+func TestUnusedInterpretationClosesWhenTheModelIsBuiltAnotherWay(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	id := analyze(t, a, platePlusHoles(attachImage(t, a)))
+	if !a.Vision.HasOpen() {
+		t.Fatal("a fresh interpretation must be open")
+	}
+
+	// presentation-only edits do not count as building the model
+	mustOK(t, call(t, a, "create_box", `{"id":"plate","dx":80,"dy":60,"dz":5}`, PolicyCommit))
+	if a.Vision.HasOpen() {
+		t.Fatal("a box built by hand must close the pending interpretation")
+	}
+	it, _ := a.Vision.Get(id)
+	if !it.Closed || it.Open() {
+		t.Fatalf("interpretation should be closed, got %+v", it)
+	}
+	// a closed interpretation survives save/load
+	b, _ := json.Marshal(a.Vision)
+	if !strings.Contains(string(b), `"closed":true`) {
+		t.Fatalf("closed flag not persisted: %s", b)
+	}
+}
+
+func TestAppearanceChangeKeepsInterpretationOpen(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	mustOK(t, call(t, a, "create_box", `{"id":"plate","dx":80,"dy":60,"dz":5}`, PolicyCommit))
+	analyze(t, a, platePlusHoles(attachImage(t, a)))
+	mustOK(t, call(t, a, "set_color", `{"features":["plate"],"color":"#2255ff"}`, PolicyCommit))
+	if !a.Vision.HasOpen() {
+		t.Fatal("a color change must not close the interpretation")
+	}
+}

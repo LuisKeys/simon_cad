@@ -327,7 +327,7 @@ export function initVision(ctx) {
             h('button', { type: 'button', class: 'primary', disabled: !isReady(p) || V.busy || st.busy || used, 'data-act': 'create', onclick: () => create(p) },
               V.busy ? 'Working…' : used ? 'Already created' : 'Create & preview'),
             h('button', { type: 'button', onclick: () => correctWithAgent(p) }, 'Correct with the agent…'),
-            h('button', { type: 'button', onclick: () => { V.dismissed.add(p.id); closePanel(); ctx.refresh(); } }, 'Discard'))))));
+            h('button', { type: 'button', onclick: async () => { V.dismissed.add(p.id); closePanel(); try { await api('interpretation/close', { id: p.id }); } catch (e) { toast(e.message, 'bad'); } ctx.refresh(); } }, 'Discard'))))));
   }
 
   function correctWithAgent(p) {
@@ -386,12 +386,14 @@ export function initVision(ctx) {
 
   // ---- chat integration -----------------------------------------------------------------
 
+  /** The open interpretations as { id, node }: the chat places each one where it first appeared. */
   function proposalCards(st) {
-    return (st.proposals ?? []).filter((p) => !(p.used ?? []).length && !V.dismissed.has(p.id)).map((p) => {
+    return (st.proposals ?? []).filter((p) => !(p.used ?? []).length && !p.closed && !V.dismissed.has(p.id)).map((p) => {
       const s = status(p);
-      return h('div', { class: 'cs interp-card' },
+      const node = h('div', { class: 'cs interp-card' },
         h('div', { class: 'title' }, h('span', {}, `Image interpretation ${p.id}`), h('span', { class: `badge ${s.cls}` }, s.text)),
         h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => openPanel(p.id) }, 'Review interpretation')));
+      return { id: p.id, node };
     });
   }
 
@@ -425,7 +427,7 @@ export function initVision(ctx) {
       if (V.open && !find(st, V.open)) closePanel();
     }
     for (const p of st.proposals ?? []) {
-      if ((p.used ?? []).length || V.dismissed.has(p.id) || V.seen.has(p.id)) continue;
+      if ((p.used ?? []).length || p.closed || V.dismissed.has(p.id) || V.seen.has(p.id)) continue;
       V.seen.add(p.id);
       if (!V.open) { V.open = p.id; V.error = ''; }
     }
