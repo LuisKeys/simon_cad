@@ -25,7 +25,7 @@ export const SECTIONS = [
     { keys: [['Right-click']], label: 'Context menu' },
   ] },
   { title: 'View & camera', rows: [
-    { keys: [['F']], label: 'Fit the active view' },
+    { keys: [['F']], label: 'Fit all views' },
     { keys: [['Wheel']], label: 'Zoom' },
     { keys: [['Left-drag']], label: 'Orbit (perspective) · pan (Top, Front…)' },
     { keys: [['Middle-drag'], ['Right-drag']], label: 'Pan' },

@@ -369,7 +369,7 @@ export class Viewport {
     return box;
   }
 
-  /** Fit to scene in the active view only (each view fits independently). Overlays that
+  /** Fit to scene in every view at once (all four in multi-view). Overlays that
    *  annotate the model (the dimensions) are framed with it, never counted as model bounds. */
   fit() {
     const box = this.bounds();
@@ -377,7 +377,7 @@ export class Viewport {
     this._updateHelpers(box);
     const framed = box.clone();
     for (const o of this.fitOverlays) if (o.visible && o.children.length) framed.expandByObject(o);
-    this.layout.active.fit(framed);
+    for (const p of this.layout.panes) p.fit(framed);
     this.layout.changed();
   }
 
