@@ -1527,6 +1527,7 @@ document.addEventListener('keydown', (e) => {
     else if (!$('formdlg').hidden) $('fd-cancel').click();
     else if (!$('palette').hidden) palette.close();
     else if (!$('dialog').hidden) $('dialog-cancel').click();
+    else if (!$('interp').hidden) $('interp').querySelector('[aria-label=Close]')?.click();
     else if (vp.boxMode) toggleBoxSelect();
     else if (vp.measure.on) toggleMeasure();
     else if (S.selection?.selectors?.length) api('select', { selectors: [] }).then(applySelection).catch(() => {});

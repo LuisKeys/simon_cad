@@ -410,6 +410,8 @@ export function initVision(ctx) {
     const f = st.features ?? { images: true, documents: false };
     $('btn-from-image').hidden = !f.images;
     $('file-input').accept = [f.images ? OK_TYPES.join(',') : '', TEXT_ACCEPT, f.documents ? '.pdf,application/pdf' : ''].filter(Boolean).join(',');
+    const hint = $('drop-hint').querySelector('small');
+    if (hint) hint.textContent = [f.images ? 'Images (PNG, JPEG, WebP)' : '', 'text specs (.txt, .md, .json, .csv)', f.documents ? 'PDF' : ''].filter(Boolean).join(' \u00b7 ');
     $('btn-attach').title = (f.images ? 'Attach an image or a text document' : 'Attach a text document') +
       (f.documents ? ' (or PDF)' : '') + ' with specifications (or drop / paste one anywhere). Documents are remembered until Clear.' +
       (f.images ? '' : ' Images are unavailable: ' + (f.image_reason || 'no vision model is configured.'));

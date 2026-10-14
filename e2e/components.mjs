@@ -31,7 +31,7 @@ const url = await new Promise((res, rej) => {
 const browser = await chromium.launch({ executablePath: chrome, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 let failed = false;
 try {
-  const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
@@ -49,7 +49,7 @@ try {
     // Creating or detaching a component moves geometry between projects, so it is a
     // multi-command ChangeSet: it is proposed for review rather than auto-committed.
     for (const cs of (await state()).pending) {
-      const c = await api(`changeset/${cs.id}/commit`);
+      const c = await api(`changeset/${cs.id}/commit`, {});
       assert.ok(c.id || c.ok !== false, `commit ${cs.id}: ${c.error}`);
     }
     return o;

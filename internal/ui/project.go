@@ -122,6 +122,9 @@ func (s *Service) findProject(p string) string {
 func (s *Service) Save(dir string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return "", err
+	}
 	if dir == "" {
 		dir = s.path
 	}
@@ -175,6 +178,9 @@ func (s *Service) Export(format, path string) (Outcome, error) {
 	args, _ := json.Marshal(map[string]any{"path": path})
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return Outcome{}, err
+	}
 	o := s.app.ApplyTool("export_"+format, args, app.PolicyAuto)
 	out := Outcome{OK: o.OK, Error: o.Error, Data: o.Data}
 	return out, nil

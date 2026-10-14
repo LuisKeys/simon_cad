@@ -262,3 +262,29 @@ func TestRoundPrimitiveFeatures(t *testing.T) {
 		t.Fatalf("volume %v want %v", got, want)
 	}
 }
+
+// A node that names its target only in parameters (Dependencies left empty) must still be
+// rebuilt when the target changes: the cache key has to follow every node the builder reads.
+func TestParameterReferencesCountAsDependencies(t *testing.T) {
+	_, e := setup(t)
+	h := hole("h", "plate", 3.2, []any{10.0, 10.0})
+	h.Dependencies = nil
+	g := cadir.NewGraph()
+	g.Nodes = []*cadir.Node{h, plate("plate", 50, 50, 4)} // declared before its target: order must follow the reference
+	m, err := e.Rebuild(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := m.Failed(); len(f) != 0 {
+		t.Fatalf("failed: %v", f)
+	}
+	before := m.Volume()
+	g.Get("plate").Parameters["dz"] = 8.0
+	m, err = e.Rebuild(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Volume(); near(got, before) {
+		t.Fatalf("stale geometry after editing the target: volume still %v", got)
+	}
+}

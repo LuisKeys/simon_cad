@@ -180,3 +180,23 @@ func TestEventStreamSendsHeartbeats(t *testing.T) {
 		}
 	}
 }
+
+func TestMutatingRoutesRequirePostAndPagesCarrySecurityHeaders(t *testing.T) {
+	srv, ts := testServer(t)
+	for _, p := range []string{"/api/undo", "/api/delete", "/api/chat/clear", "/api/project/save"} {
+		if code, _ := call(t, ts, srv.Token, "GET", p, ""); code != http.StatusMethodNotAllowed {
+			t.Errorf("GET %s: %d, want 405", p, code)
+		}
+	}
+	if code, _ := call(t, ts, srv.Token, "GET", "/api/settings", ""); code != http.StatusOK {
+		t.Errorf("GET /api/settings: %d", code)
+	}
+	res, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.Header.Get("X-Frame-Options") != "DENY" || !strings.Contains(res.Header.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		t.Errorf("missing security headers: %v", res.Header)
+	}
+}

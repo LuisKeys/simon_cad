@@ -44,6 +44,9 @@ func (s *Service) AddSpec(name string, data []byte) (Spec, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return Spec{}, err
+	}
 	total, kept := len(text), s.specs[:0:0]
 	for _, sp := range s.specs {
 		if sp.Name != name {

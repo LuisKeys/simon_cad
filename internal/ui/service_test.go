@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -527,6 +528,27 @@ func TestSelectionNoticeCarriesTheSelection(t *testing.T) {
 			return
 		case <-time.After(3 * time.Second):
 			t.Fatal("no selection notice")
+		}
+	}
+}
+
+// While an agent turn runs (the lock is released during model calls) nothing else may change
+// the state it works on.
+func TestStateChangingCallsAreRefusedWhileAgentIsBusy(t *testing.T) {
+	s := newSvc(t)
+	s.mu.Lock()
+	s.busy = true
+	s.mu.Unlock()
+	checks := map[string]error{}
+	_, checks["save"] = s.Save(t.TempDir())
+	_, checks["export"] = s.Export("stl", filepath.Join(t.TempDir(), "x.stl"))
+	_, checks["selection"] = s.SetSelection(nil)
+	_, checks["spec"] = s.AddSpec("a.txt", []byte("hello"))
+	_, checks["image"] = s.UploadImage([]byte("x"))
+	checks["level"] = s.SetLevel(LevelAuto)
+	for name, err := range checks {
+		if err != ErrBusy {
+			t.Errorf("%s while busy: %v, want ErrBusy", name, err)
 		}
 	}
 }

@@ -55,7 +55,13 @@ func queryTools() []*Tool {
 			Description: "Export the current model to a STEP file at `path` (does not change the model).",
 			Capability:  capGeometry,
 			Schema:      object(props{"path": text("Output file path, e.g. out/plate.step")}, "path"),
-			Query:       func(env Env, a Args) (any, error) { return env.Export("step", a.Str("path"), 0) },
+			Query: func(env Env, a Args) (any, error) {
+				p, err := env.ResolveIOPath(a.Str("path"), true)
+				if err != nil {
+					return nil, err
+				}
+				return env.Export("step", p, 0)
+			},
 		},
 		{
 			Name:        "export_stl",
@@ -64,7 +70,11 @@ func queryTools() []*Tool {
 			Schema: object(props{"path": text("Output file path, e.g. out/plate.stl"),
 				"deflection_mm": map[string]any{"type": "number", "description": "Mesh deflection in mm (default 0.05)", "exclusiveMinimum": 0.0, "maximum": 5.0}}, "path"),
 			Query: func(env Env, a Args) (any, error) {
-				return env.Export("stl", a.Str("path"), a.NumOr("deflection_mm", 0.05))
+				p, err := env.ResolveIOPath(a.Str("path"), true)
+				if err != nil {
+					return nil, err
+				}
+				return env.Export("stl", p, a.NumOr("deflection_mm", 0.05))
 			},
 		},
 	}

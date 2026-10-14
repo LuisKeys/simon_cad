@@ -61,6 +61,10 @@ func (e toolEnv) Export(format, path string, deflection float64) (map[string]any
 	return e.a.export(format, path, deflection)
 }
 
+func (e toolEnv) ResolveIOPath(path string, write bool) (string, error) {
+	return e.a.resolveIOPath(path, write)
+}
+
 func (a *App) export(format, path string, deflection float64) (map[string]any, error) {
 	m, err := a.Model()
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/accelone/simoncad/internal/geometry/bridge"
 )
@@ -16,6 +17,14 @@ var ErrReleased = errors.New("shape already released")
 
 // ErrKernelClosed is returned by operations on a kernel that has been closed.
 var ErrKernelClosed = errors.New("the geometry kernel is closed")
+
+// ErrKernelStuck is returned when an OCCT operation did not finish within OpTimeout. The
+// worker thread cannot be interrupted, so the call is abandoned and the kernel refuses new
+// work until that operation returns (if it ever does).
+var ErrKernelStuck = errors.New("the geometry kernel is stuck on a long-running operation")
+
+// OpTimeout bounds how long one kernel operation may run before it is abandoned.
+var OpTimeout = 5 * time.Minute
 
 // Props are the mass/bounding properties of a shape (millimetres).
 type Props = bridge.Props
@@ -42,6 +51,8 @@ type Kernel struct {
 	// Close waits for work in flight and nothing is ever sent on the closed jobs channel.
 	mu     sync.RWMutex
 	closed bool
+	// stuck is set while an abandoned (timed out) operation still occupies the worker.
+	stuck atomic.Bool
 }
 
 // New starts a kernel worker.
@@ -67,20 +78,27 @@ func (k *Kernel) Close() {
 		close(k.jobs)
 	}
 	k.mu.Unlock()
+	if k.stuck.Load() {
+		return // the worker is wedged in OCCT: do not block shutdown on it
+	}
 	<-k.done
 }
 
 // Version returns the OCCT version in use.
 func (k *Kernel) Version() string {
 	var v string
-	k.run(func() { v = bridge.Version() })
+	if k.run(func() { v = bridge.Version() }) != nil {
+		return ""
+	}
 	return v
 }
 
 // LiveShapes reports shapes not yet released (leak detection).
 func (k *Kernel) LiveShapes() int64 {
 	var n int64
-	k.run(func() { n = bridge.LiveHandles() })
+	if k.run(func() { n = bridge.LiveHandles() }) != nil {
+		return 0
+	}
 	return n
 }
 
@@ -92,10 +110,46 @@ func (k *Kernel) run(fn func()) error {
 	if k.closed {
 		return ErrKernelClosed
 	}
+	if k.stuck.Load() {
+		return ErrKernelStuck
+	}
 	d := make(chan struct{})
-	k.jobs <- func() { fn(); close(d) }
-	<-d
-	return nil
+	var abandoned atomic.Bool
+	job := func() {
+		fn()
+		close(d)
+		if abandoned.Load() {
+			k.stuck.Store(false) // the abandoned operation finally returned
+		}
+	}
+	timer := time.NewTimer(OpTimeout)
+	defer timer.Stop()
+	select {
+	case k.jobs <- job:
+	case <-timer.C:
+		return ErrKernelStuck
+	}
+	// fn may still write the caller's variables after a timeout: on that error they must not be read.
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(OpTimeout)
+	select {
+	case <-d:
+		return nil
+	case <-timer.C:
+		abandoned.Store(true)
+		k.stuck.Store(true)
+		select {
+		case <-d:
+			k.stuck.Store(false)
+		default:
+		}
+		return ErrKernelStuck
+	}
 }
 
 func (k *Kernel) wrap(fn func() (bridge.Handle, error)) (*Shape, error) {
@@ -427,7 +481,9 @@ func (s *Shape) Topology(deflection float64) (*Mesh, error) {
 // LiveMeshes reports native meshes not yet freed (always 0 outside a Tessellate call).
 func (k *Kernel) LiveMeshes() int64 {
 	var n int64
-	k.run(func() { n = bridge.LiveMeshes() })
+	if k.run(func() { n = bridge.LiveMeshes() }) != nil {
+		return 0
+	}
 	return n
 }
 

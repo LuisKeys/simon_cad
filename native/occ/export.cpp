@@ -2,6 +2,7 @@
 #include <mutex>
 
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepTools.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
 #include <Message_PrinterOStream.hxx>
@@ -44,6 +45,9 @@ occ_status occ_export_stl(occ_handle h, const char* path, double deflection, int
     if (!path) throw BridgeError{OCC_ERR_INVALID_ARG, "null path"};
     if (!(deflection > 0)) throw BridgeError{OCC_ERR_INVALID_ARG, "deflection must be positive"};
     TopoDS_Shape s = require_shape(h);
+    // Drop any triangulation left by an earlier (coarser or finer) meshing: BRepMesh reuses
+    // it when it is "good enough", which made the same model export different STLs.
+    BRepTools::Clean(s);
     BRepMesh_IncrementalMesh mesh(s, deflection, false, 0.5, true);
     StlAPI_Writer w;
     w.ASCIIMode() = (binary == 0);

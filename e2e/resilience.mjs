@@ -31,7 +31,7 @@ const url = await urlP;
 const browser = await chromium.launch({ executablePath: chrome, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 let failed = false;
 try {
-  const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 
@@ -92,7 +92,7 @@ if (!failed) {
   const u = await a.url;
   const b2 = await chromium.launch({ executablePath: chrome, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
-    const pg = await (await b2.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+    const pg = await (await b2.newContext({ bypassCSP: true, viewport: { width: 1280, height: 800 } })).newPage();
     await pg.goto(u);
     await pg.waitForSelector('#tree');
     const tok = await pg.evaluate(() => document.querySelector('meta[name="simon-token"]').content);
@@ -103,7 +103,7 @@ if (!failed) {
     writeFileSync(pj, readFileSync(pj, 'utf8').replace(/"occt_version": "[^"]*"/, '"occt_version": "6.0.0"'));
     const c = start(proj);
     const u2 = await c.url;
-    const pg2 = await (await b2.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+    const pg2 = await (await b2.newContext({ bypassCSP: true, viewport: { width: 1280, height: 800 } })).newPage();
     await pg2.goto(u2);
     await pg2.waitForSelector('#toast.warn:not([hidden])', { timeout: 10000 });
     assert.match(await pg2.locator('#toast').textContent(), /saved with OpenCASCADE 6\.0\.0/);

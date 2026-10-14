@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"math"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
@@ -512,4 +515,57 @@ func TestCloseWhileInUse(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	k.Close()
 	wg.Wait()
+}
+
+func TestHungOperationIsAbandonedAndKernelRecovers(t *testing.T) {
+	old := OpTimeout
+	OpTimeout = 50 * time.Millisecond
+	defer func() { OpTimeout = old }()
+	k := New()
+	defer k.Close()
+	release := make(chan struct{})
+	if err := k.run(func() { <-release }); !errors.Is(err, ErrKernelStuck) {
+		t.Fatalf("a hung operation must time out, got %v", err)
+	}
+	if err := k.run(func() {}); !errors.Is(err, ErrKernelStuck) {
+		t.Fatalf("a stuck kernel must fail fast, got %v", err)
+	}
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for k.stuck.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := k.run(func() {}); err != nil {
+		t.Fatalf("the kernel must recover once the operation returns: %v", err)
+	}
+}
+
+// An STL must depend only on the shape and the deflection, not on how it was meshed before.
+func TestSTLExportIsDeterministic(t *testing.T) {
+	k := New()
+	defer k.Close()
+	mk := func() *Shape {
+		s, err := k.Sphere(10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	dir := t.TempDir()
+	fresh, reused := mk(), mk()
+	defer fresh.Release()
+	defer reused.Release()
+	if err := reused.ExportSTL(filepath.Join(dir, "fine.stl"), 0.01); err != nil {
+		t.Fatal(err)
+	}
+	for name, s := range map[string]*Shape{"a.stl": fresh, "b.stl": reused} {
+		if err := s.ExportSTL(filepath.Join(dir, name), 0.5); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, _ := os.ReadFile(filepath.Join(dir, "a.stl"))
+	b, _ := os.ReadFile(filepath.Join(dir, "b.stl"))
+	if len(a) == 0 || !bytes.Equal(a, b) {
+		t.Fatalf("STL differs after a previous finer meshing (%d vs %d bytes)", len(a), len(b))
+	}
 }

@@ -29,6 +29,9 @@ func imageInfo(im *vision.Image) ImageInfo {
 func (s *Service) UploadImage(data []byte) (ImageInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return ImageInfo{}, err
+	}
 	im, err := s.app.Images.Put(data)
 	if err != nil {
 		return ImageInfo{}, err

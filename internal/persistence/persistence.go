@@ -251,7 +251,10 @@ func Save(dir string, p *Project) error {
 	}
 	var evs []byte
 	for _, e := range p.Events {
-		line, _ := json.Marshal(e)
+		line, err := json.Marshal(e)
+		if err != nil {
+			return fmt.Errorf("events: %w", err)
+		}
 		evs = append(append(evs, line...), '\n')
 	}
 	pending = append(pending, pendingFile{filepath.Join(dir, "events.jsonl"), evs})

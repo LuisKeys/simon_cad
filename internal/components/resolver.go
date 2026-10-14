@@ -234,7 +234,10 @@ func frameKey(projectID, contentHash string, overrides map[string]any) string {
 	if len(overrides) == 0 {
 		return projectID + "@" + contentHash
 	}
-	b, _ := json.Marshal(overrides) // map keys are sorted by encoding/json
+	b, err := json.Marshal(overrides) // map keys are sorted by encoding/json
+	if err != nil {
+		b = []byte(fmt.Sprintf("%#v", overrides)) // never let unmarshalable overrides share one key
+	}
 	sum := sha256.Sum256(b)
 	return projectID + "@" + contentHash + "#" + hex.EncodeToString(sum[:8])
 }

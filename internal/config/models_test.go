@@ -73,7 +73,8 @@ func TestPrimaryAndFallbackAreIndependent(t *testing.T) {
 		t.Fatalf("local models are never priced: %+v", got.Providers[ProviderOllama])
 	}
 	fo := got.Fallback.Providers[ProviderOpenAI]
-	if !got.Fallback.Enabled || got.Fallback.Migrated || got.Fallback.Consent != ConsentAllow || fo.APIKey != "sk-fallback" ||
+	if !got.Fallback.Enabled || got.Fallback.Migrated || got.Fallback.Consent != ConsentAllow || fo.APIKey != "" || !fo.APIKeySet ||
+		ModelConfigFor(SlotFallback, ProviderOpenAI).APIKey != "sk-fallback" ||
 		fo.Model != "gpt-big" || fo.InputPrice != "10" || fo.Currency != "EUR" {
 		t.Fatalf("fallback not persisted: %+v %+v", got.Fallback, fo)
 	}
@@ -166,5 +167,39 @@ func TestOllamaContextLength(t *testing.T) {
 	}
 	if ModelConfigFor(SlotPrimary, ProviderOpenAI).NumCtx != 0 {
 		t.Fatal("cloud models have no window setting")
+	}
+}
+
+func TestAPIKeyIsWriteOnly(t *testing.T) {
+	clean(t)
+	s := Current()
+	ps := s.Providers[ProviderClaude]
+	ps.APIKey, ps.Model = "sk-secret", "claude-x"
+	s.Providers[ProviderClaude] = ps
+	s.Provider = ProviderClaude
+	if err := Save(s); err != nil {
+		t.Fatal(err)
+	}
+	got := Current().Providers[ProviderClaude]
+	if got.APIKey != "" || !got.APIKeySet {
+		t.Fatalf("the key must not be returned: %+v", got)
+	}
+	// saving what the client got back (empty key) keeps the stored one
+	s = Current()
+	if err := Save(s); err != nil {
+		t.Fatal(err)
+	}
+	if k := ModelConfigFor(SlotPrimary, ProviderClaude).APIKey; k != "sk-secret" {
+		t.Fatalf("an empty key must keep the stored one, got %q", k)
+	}
+	s = Current()
+	ps = s.Providers[ProviderClaude]
+	ps.ClearAPIKey = true
+	s.Providers[ProviderClaude] = ps
+	if err := Save(s); err != nil {
+		t.Fatal(err)
+	}
+	if k := ModelConfigFor(SlotPrimary, ProviderClaude).APIKey; k != "" {
+		t.Fatalf("clear must remove the key, got %q", k)
 	}
 }

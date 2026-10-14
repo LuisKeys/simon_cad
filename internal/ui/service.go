@@ -161,9 +161,19 @@ func (s *Service) SetLevel(level string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
+	}
 	s.level = level
 	s.hub.Publish(Notice{Kind: "state"})
 	return nil
+}
+
+// Busy reports whether an agent turn is running.
+func (s *Service) Busy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.busy
 }
 
 func (s *Service) guard() error {

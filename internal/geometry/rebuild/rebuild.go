@@ -206,7 +206,7 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 	}
 
 	// Upstream status: failures propagate with a cause chain.
-	deps := cadir.EffectiveDeps(n)
+	deps := g.DepsOf(n)
 	for _, d := range deps {
 		up := m.Nodes[d]
 		if up == nil {

@@ -455,6 +455,21 @@ func Sweep(sp SweepSpec) (Handle, error) {
 	if len(sp.Sections) == 0 || len(sp.Contours) == 0 {
 		return 0, fmt.Errorf("%w: sweep needs sections and a contour", ErrKernel)
 	}
+	// The C++ side indexes PerSection by section and reads n points from each polygon: a
+	// mismatch would read past the buffer, so reject it here.
+	for _, c := range sp.Contours {
+		if c.PerSection == nil {
+			continue
+		}
+		if len(c.PerSection) != len(sp.Sections) {
+			return 0, fmt.Errorf("%w: a contour has %d per-section polygons for %d sections", ErrKernel, len(c.PerSection), len(sp.Sections))
+		}
+		for _, poly := range c.PerSection {
+			if len(poly) == 0 || len(poly) != len(c.PerSection[0]) {
+				return 0, fmt.Errorf("%w: per-section polygons must be non-empty and of equal length", ErrKernel)
+			}
+		}
+	}
 	secs := make([]C.occ_section, len(sp.Sections))
 	for i, s := range sp.Sections {
 		for k := 0; k < 3; k++ {

@@ -65,6 +65,9 @@ func (s *Service) Pick(p PickRequest) (SelectionView, error) {
 func (s *Service) SetSelection(raw []string) (SelectionView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return SelectionView{}, err
+	}
 	return s.setSelection(raw)
 }
 

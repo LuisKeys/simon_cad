@@ -495,10 +495,15 @@ func ParseSVG(data []byte) (*SVG, error) {
 				if !sawSVG {
 					sawSVG = true
 					if vb := strings.Fields(strings.ReplaceAll(attr(t.Attr, "viewBox"), ",", " ")); len(vb) == 4 {
-						x0, _ := strconv.ParseFloat(vb[0], 64)
-						y0, _ := strconv.ParseFloat(vb[1], 64)
-						w, _ := strconv.ParseFloat(vb[2], 64)
-						h, _ := strconv.ParseFloat(vb[3], 64)
+						var v [4]float64
+						for i := range v {
+							f, perr := strconv.ParseFloat(vb[i], 64)
+							if perr != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+								return nil, fmt.Errorf("svg: invalid viewBox %q", attr(t.Attr, "viewBox"))
+							}
+							v[i] = f
+						}
+						x0, y0, w, h := v[0], v[1], v[2], v[3]
 						out.Width, out.Height = w, h
 						stack[len(stack)-1].tf = stack[len(stack)-1].tf.mul(affine{1, 0, 0, 1, -x0, -y0})
 					} else {

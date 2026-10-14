@@ -205,11 +205,41 @@ func (g *Graph) Get(id string) *Node {
 func (g *Graph) Dependents(id string) []string {
 	var out []string
 	for _, n := range g.Nodes {
-		for _, d := range EffectiveDeps(n) {
+		for _, d := range g.DepsOf(n) {
 			if d == id {
 				out = append(out, n.ID)
 				break
 			}
+		}
+	}
+	return out
+}
+
+// nodeRefParams are the parameters through which a builder reads another node's geometry or
+// parameters (Ctx.Bodies / ParamsOf / NodeOf). A node that names another one there depends on
+// it even when its Dependencies list forgot to say so; without it the rebuild cache would key
+// on the node's own parameters only and keep serving a stale shape after the upstream change.
+var nodeRefParams = []string{"target", "tool", "source", "sketch", "path", "profile"}
+
+// DepsOf is EffectiveDeps plus the nodes of g that n names in nodeRefParams. Unlike
+// EffectiveDeps it knows the graph, so a value that is not a node is ignored rather than
+// reported as a missing dependency.
+func (g *Graph) DepsOf(n *Node) []string {
+	out := EffectiveDeps(n)
+	for _, k := range nodeRefParams {
+		id, _ := n.Parameters[k].(string)
+		if id == "" || id == n.ID || g.Get(id) == nil {
+			continue
+		}
+		dup := false
+		for _, d := range out {
+			if d == id {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, id)
 		}
 	}
 	return out
@@ -262,7 +292,7 @@ func (g *Graph) TopoOrder() ([]*Node, error) {
 	indeg := make([]int, len(g.Nodes))
 	out := make([][]int, len(g.Nodes))
 	for i, n := range g.Nodes {
-		for _, d := range EffectiveDeps(n) {
+		for _, d := range g.DepsOf(n) {
 			j, ok := idx[d]
 			if !ok {
 				return nil, fmt.Errorf("node %q depends on unknown node %q", n.ID, d)

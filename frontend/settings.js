@@ -53,7 +53,12 @@ const srow = (id, label, ctl) => h('div', { class: 'srow' }, h('label', { for: i
 function modelFields(slot, providers, models, current, defaultCurrency, onProvider) {
   const id = (f) => `set-${slot}-${f}`;
   const provider = sel(id('provider'), providers, current, () => { fill(); onProvider?.(); });
+  // The server never sends a stored key back: an empty field keeps it, "Clear" removes it.
   const key = h('input', { id: id('key'), type: 'password', autocomplete: 'off', spellcheck: 'false' });
+  const clearKey = h('button', { type: 'button', class: 'linkbtn', onclick: () => {
+    key.value = ''; models[shown].clearApiKey = true; models[shown].apiKeySet = false; key.placeholder = '';
+    clearKey.hidden = true;
+  } }, 'Clear');
   const reveal = h('button', { type: 'button', class: 'linkbtn', 'aria-label': 'Show API key', onclick: () => {
     key.type = key.type === 'password' ? 'text' : 'password';
     reveal.textContent = key.type === 'password' ? 'Show' : 'Hide';
@@ -70,7 +75,7 @@ function modelFields(slot, providers, models, current, defaultCurrency, onProvid
   const cachedPrice = text(id('price-cached'), { inputmode: 'decimal', placeholder: 'Per 1M cached input tokens — empty = full input price' });
   const currency = text(id('currency'), { maxlength: '8', placeholder: defaultCurrency || 'USD' });
   const rows = {
-    key: h('div', { class: 'srow' }, h('label', { for: id('key') }, 'API Key'), h('div', { class: 'row' }, key, reveal)),
+    key: h('div', { class: 'srow' }, h('label', { for: id('key') }, 'API Key'), h('div', { class: 'row' }, key, reveal, clearKey)),
     effort: srow(id('effort'), 'Reasoning Effort', effort),
     ctx: srow(id('ctx'), 'Context window', ctxLen),
     // Local models cost nothing per token: no price is asked for, none is invented.
@@ -91,7 +96,7 @@ function modelFields(slot, providers, models, current, defaultCurrency, onProvid
     const p = models[shown];
     p.model = model.value.trim(); p.baseUrl = base.value.trim();
     if (shown !== 'ollama') {
-      p.apiKey = key.value;
+      if (key.value) { p.apiKey = key.value; p.clearApiKey = false; }
       p.inputPrice = inPrice.value.trim(); p.outputPrice = outPrice.value.trim();
       p.cachedInputPrice = cachedPrice.value.trim(); p.currency = currency.value.trim();
     }
@@ -103,7 +108,9 @@ function modelFields(slot, providers, models, current, defaultCurrency, onProvid
     shown = provider.value;
     const p = models[shown] ?? (models[shown] = {});
     model.value = p.model ?? ''; base.value = p.baseUrl ?? '';
-    key.value = p.apiKey ?? ''; key.type = 'password'; reveal.textContent = 'Show';
+    key.value = p.apiKey ?? ''; key.type = 'password';
+    key.placeholder = p.apiKeySet ? '\u2022\u2022\u2022\u2022 saved \u2014 type to replace' : '';
+    clearKey.hidden = !p.apiKeySet; reveal.textContent = 'Show';
     effort.value = p.reasoningEffort ?? '';
     ctxLen.value = p.contextLength ?? '';
     inPrice.value = p.inputPrice ?? ''; outPrice.value = p.outputPrice ?? '';
@@ -276,7 +283,7 @@ export async function openSettings({ toast, onTheme, onViewport, onRender, works
     show(panels[i].id); panels[i].tab.focus();
   });
   el.replaceChildren(form);
-  el.addEventListener('mousedown', (e) => { if (e.target === el) close(true); }, { once: true });
+  el.onmousedown = (e) => { if (e.target === el) close(true); }; // assigned, not added: a stale listener from a closed dialog would revert the theme
   el.hidden = false;
   primary.fill(); fallback.fill(); hints();
   show(panels.some((p) => p.id === lastTab) ? lastTab : panels[0].id);

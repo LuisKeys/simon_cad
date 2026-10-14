@@ -58,7 +58,11 @@ const (
 // ProviderSettings is the configuration of one provider. APIKey is unused for Ollama and
 // ReasoningEffort only applies to OpenAI.
 type ProviderSettings struct {
-	APIKey          string `json:"apiKey"`
+	// APIKey is write-only: the server never returns it (see APIKeySet). On save an empty
+	// value keeps the stored key; ClearAPIKey removes it.
+	APIKey          string `json:"apiKey,omitempty"`
+	APIKeySet       bool   `json:"apiKeySet"`
+	ClearAPIKey     bool   `json:"clearApiKey,omitempty"`
 	Model           string `json:"model"`
 	BaseURL         string `json:"baseUrl"`
 	ReasoningEffort string `json:"reasoningEffort"`
@@ -260,7 +264,7 @@ func Current() Settings {
 
 // providerView renders a model configuration for the Settings screen.
 func providerView(mc ModelConfig) ProviderSettings {
-	ps := ProviderSettings{APIKey: mc.APIKey, Model: mc.Model, BaseURL: mc.BaseURL, ReasoningEffort: mc.ReasoningEffort}
+	ps := ProviderSettings{APIKeySet: mc.APIKey != "", Model: mc.Model, BaseURL: mc.BaseURL, ReasoningEffort: mc.ReasoningEffort}
 	if ps.BaseURL == "" {
 		ps.BaseURL = DefaultBaseURL(mc.Provider)
 	}
@@ -374,7 +378,11 @@ func slotValues(next map[string]string, prefix, p string, ps ProviderSettings) e
 		return fmt.Errorf("%s base URL must start with http:// or https://", p)
 	}
 	if k.key != "" {
-		next[prefix+k.key] = strings.TrimSpace(ps.APIKey)
+		if v := strings.TrimSpace(ps.APIKey); v != "" {
+			next[prefix+k.key] = v
+		} else if ps.ClearAPIKey {
+			next[prefix+k.key] = ""
+		}
 	}
 	next[prefix+k.model] = strings.TrimSpace(ps.Model)
 	next[prefix+k.baseURL] = strings.TrimSpace(ps.BaseURL)

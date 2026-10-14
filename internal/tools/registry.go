@@ -62,6 +62,10 @@ type Env interface {
 	WorkspaceDefaults() workspace.Settings
 	// Export writes the current model ("step" or "stl") and returns a summary.
 	Export(format, path string, deflection float64) (map[string]any, error)
+	// ResolveIOPath validates a file path chosen by the model and returns the path to use.
+	// Tools must never touch a model-supplied path without it: a prompt injection in an
+	// attachment must not be able to read or overwrite files outside the project/output dirs.
+	ResolveIOPath(path string, write bool) (string, error)
 	// Visual is the visual-refinement state (not CAD state); Render draws standard views
 	// offscreen into it; SilhouetteAgainstReference scores a render against its reference.
 	Visual() *visual.State

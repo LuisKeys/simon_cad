@@ -36,7 +36,7 @@ An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/se
 ## `project.json`
 
 ```json
-{ "schema_version": 3, "id": "prj_9f31c4a0b72e", "name": "servo_bracket", "units": "mm",
+{ "schema_version": 4, "id": "prj_9f31c4a0b72e", "name": "servo_bracket", "units": "mm",
   "occt_version": "7.8.1", "created": "2026-01-02T03:04:05Z",
   "reusable": true, "description": "the bracket a servo bolts to", "tags": ["robotics"],
   "component_version": 4 }

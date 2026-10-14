@@ -232,9 +232,11 @@ func progressLabel(s Step) string {
 
 func correctingLabel(p *Plan, rep *Report) string {
 	for _, is := range rep.Issues {
-		if is.Step > 0 {
-			d := strings.TrimRight(p.Steps[is.Step-1].Description, ".")
-			return fmt.Sprintf("Correcting step %d (%s)…", is.Step, strings.ToLower(d[:1])+d[1:])
+		if is.Step > 0 && is.Step <= len(p.Steps) {
+			if d := strings.TrimRight(p.Steps[is.Step-1].Description, "."); d != "" {
+				return fmt.Sprintf("Correcting step %d (%s)…", is.Step, strings.ToLower(d[:1])+d[1:])
+			}
+			return fmt.Sprintf("Correcting step %d…", is.Step)
 		}
 	}
 	return "Correcting the model…"

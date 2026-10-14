@@ -111,6 +111,10 @@ func loadTraceSource(env Env, a Args) (*traceSource, error) {
 		default:
 			return nil, fmt.Errorf("path must be a .png, .jpg or .svg file (got %q)", filepath.Ext(p))
 		}
+		p, err := env.ResolveIOPath(p, false)
+		if err != nil {
+			return nil, err
+		}
 		st, err := os.Stat(p)
 		if err != nil {
 			return nil, fmt.Errorf("cannot read %s: %v", p, err)

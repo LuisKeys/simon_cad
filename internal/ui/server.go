@@ -2,6 +2,9 @@ package ui
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,6 +13,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -57,13 +61,39 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			if tok == "" {
 				tok = r.URL.Query().Get("token") // EventSource cannot set headers
 			}
-			if tok != s.Token {
+			if subtle.ConstantTimeCompare([]byte(tok), []byte(s.Token)) != 1 {
 				http.Error(w, "missing or bad token", http.StatusForbidden)
 				return
 			}
+			if !readOnlyRoute(r.URL.Path) && r.Method != http.MethodPost {
+				w.Header().Set("Allow", http.MethodPost)
+				http.Error(w, "this route changes state: use POST", http.StatusMethodNotAllowed)
+				return
+			}
 		}
+		h := w.Header()
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// readOnlyRoutes may be fetched with GET; every other /api/ route changes state (or runs a
+// job) and only answers POST, so a cross-site GET (an <img>, a link) can never trigger it.
+var readOnlyRoutes = []string{
+	"/api/state", "/api/scene", "/api/events", "/api/settings", "/api/visual", "/api/visual/diff",
+	"/api/materials", "/api/palette", "/api/printsim/info", "/api/compare", "/api/project/list", "/api/components",
+	"/api/render/", "/api/image/", "/api/materials/", "/api/printsim/result/",
+}
+
+func readOnlyRoute(path string) bool {
+	for _, r := range readOnlyRoutes {
+		if path == r || (strings.HasSuffix(r, "/") && strings.HasPrefix(path, r)) {
+			return true
+		}
+	}
+	return strings.HasPrefix(path, "/api/changeset/") && strings.HasSuffix(path, "/preview")
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -319,6 +349,10 @@ func (s *Server) routes() {
 		var in config.Settings
 		if err := decode(r, &in); err != nil {
 			fail(w, err)
+			return
+		}
+		if s.Svc.Busy() { // the model and workspace settings must not change in the middle of a turn
+			fail(w, ErrBusy)
 			return
 		}
 		if err := config.Save(in); err != nil {
@@ -649,6 +683,7 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(p, ".html"):
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		b = []byte(strings.ReplaceAll(string(b), "__SIMON_TOKEN__", s.Token))
+		w.Header().Set("Content-Security-Policy", csp(b))
 	case strings.HasSuffix(p, ".js"), strings.HasSuffix(p, ".mjs"):
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	case strings.HasSuffix(p, ".css"):
@@ -657,4 +692,18 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(b)
+}
+
+var inlineScript = regexp.MustCompile(`(?s)<script(?:\s[^>]*)?>(.+?)</script>`)
+
+// csp allows the page's own scripts plus its inline ones by hash, and nothing from elsewhere.
+func csp(page []byte) string {
+	hashes := ""
+	for _, m := range inlineScript.FindAllSubmatch(page, -1) {
+		sum := sha256.Sum256(m[1])
+		hashes += " 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	}
+	return "default-src 'self'; script-src 'self'" + hashes + "; style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; " +
+		"object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 }
