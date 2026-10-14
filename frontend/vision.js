@@ -418,6 +418,12 @@ export function initVision(ctx) {
   function onState(st) {
     renderSpecs(st);
     renderFeatures(st);
+    // Proposals already present when a project is loaded are history, not news: do not pop them open.
+    if (V.project !== st.name) {
+      V.project = st.name;
+      for (const p of st.proposals ?? []) V.seen.add(p.id);
+      if (V.open && !find(st, V.open)) closePanel();
+    }
     for (const p of st.proposals ?? []) {
       if ((p.used ?? []).length || V.dismissed.has(p.id) || V.seen.has(p.id)) continue;
       V.seen.add(p.id);
