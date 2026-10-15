@@ -92,6 +92,7 @@ type Frame struct {
 	Index     int              `json:"index"` // number of ChangeSets applied (0 = empty)
 	Total     int              `json:"total"`
 	ChangeSet *ChangeSetCard   `json:"changeset,omitempty"`
+	Chat      *app.StepChat    `json:"chat,omitempty"` // the conversation behind this step, replayed in the chat panel
 	Scene     *rendering.Delta `json:"scene"`
 }
 
@@ -120,6 +121,9 @@ func (s *Service) PlaybackFrame(i int, known map[string]string) (*Frame, error) 
 	if i > 0 {
 		c := app.CardOf(sets[i-1])
 		f.ChangeSet = &c
+		if sc := s.app.PlaybackScript(); i-1 < len(sc) {
+			f.Chat = &sc[i-1]
+		}
 	}
 	return f, nil
 }

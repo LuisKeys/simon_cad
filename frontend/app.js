@@ -888,14 +888,18 @@ const cardAnchor = new Map();
 
 function renderChat(st) {
   const el = $('chat');
-  const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+  const playing = S.playing && S.playChat;
+  // during playback the replayed conversation stands in for the real one (see playDesign)
+  if (playing) st = { ...st, chat: S.playChat, pending: [], busy: S.playBusy, refine_state: null, agent_state: S.playState };
+  el.classList.toggle('replaying', !!playing);
+  const stick = playing || el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
   const lastSeq = st.chat.length ? st.chat[st.chat.length - 1].seq : 0;
-  const cards = vision.proposalCards(st);
+  const cards = playing ? [] : vision.proposalCards(st);
   for (const c of cards) if (!cardAnchor.has(c.id)) cardAnchor.set(c.id, lastSeq);
   const placed = (seq) => cards.filter((c) => cardAnchor.get(c.id) === seq).map((c) => c.node);
   const nodes = [];
   st.chat.forEach((m, i) => {
-    chatSeen.add(m.seq);
+    if (!playing) chatSeen.add(m.seq); // replayed seqs are not real messages
     if (!retriedOk(st.chat, i)) {
       const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
       if (m.role === 'draft') nodes.push(draftCard(m, st));
@@ -1134,21 +1138,49 @@ $('prompt').addEventListener('input', autosize);
 
 // ---- playback ------------------------------------------------------------------------
 
+// Playback also replays the conversation behind each step in the chat panel (S.playChat stands in
+// for the real chat, which is never touched): the prompt, the agent's tool calls, then its answer.
+// Pauses (ms) are paced for a person watching a demo.
+const PLAY_PACE = { frame: 375, user: 900, tool: 300, agent: 1400, typing: 1200 };
+
 async function playDesign() {
   if (S.playing || !S.state?.frames) return;
   S.playing = true;
+  S.playAbort = false;
+  S.playChat = [];
+  S.playBusy = false;
   clearPreview();
   vp.clear();
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const show = () => renderChat(S.state);
+  const say = async (l) => {
+    const m = { seq: S.playChat.length + 1, role: l.role, text: l.text, tool: l.tool, ok: l.ok, images: l.images };
+    S.playChat.push(m);
+    if (l.role === 'agent') { // the answer is typed out
+      S.playBusy = false;
+      const step = Math.max(1, Math.ceil(l.text.length / (PLAY_PACE.typing / 30)));
+      for (let n = 0; n < l.text.length && !S.playAbort; n += step) { m.text = l.text.slice(0, n); show(); await wait(30); }
+      m.text = l.text;
+    } else if (l.role === 'user') S.playBusy = true;
+    show();
+    await wait(PLAY_PACE[l.role] ?? PLAY_PACE.tool);
+  };
   try {
-    for (let i = 0; i <= S.state.frames; i++) {
+    for (let i = 0; i <= S.state.frames && !S.playAbort; i++) {
       const f = await api('playback', { index: i, known: vp.known });
+      S.playState = { state: 'EXECUTING', message: 'Executing…', step: i, total: f.total };
+      for (const l of f.chat?.before ?? []) { if (S.playAbort) break; await say(l); }
+      if (S.playAbort) break;
       vp.applyDelta(f.scene);
-      $('hud').textContent = i === 0 ? 'Playback…' : `${i}/${f.total} · ${f.changeset?.intent ?? ''}`;
+      $('hud').textContent = i === 0 ? 'Playback… (Esc to stop)' : `${i}/${f.total} · ${f.changeset?.intent ?? ''}`;
       if (i > 0) vp.fitAll();
-      await new Promise((r) => setTimeout(r, 375));
+      await wait(PLAY_PACE.frame);
+      for (const l of f.chat?.after ?? []) { if (S.playAbort) break; await say(l); }
     }
   } catch (e) { toast(e.message, 'bad'); }
   S.playing = false;
+  S.playChat = null;
+  S.playBusy = false;
   vp.clear();
   await refresh();
 }
@@ -1261,7 +1293,9 @@ function triggerAction(a, sel, anchor) {
         { sep: true },
         ...layoutMenuItems(),
         { sep: true },
-        { label: 'Play design', icon: 'play', data: { view: 'play' }, disabled: !S.state?.frames || S.playing, run: playDesign }]);
+        S.playing
+          ? { label: 'Stop playback', icon: 'play', data: { view: 'play' }, run: () => { S.playAbort = true; } }
+          : { label: 'Play design', icon: 'play', data: { view: 'play' }, disabled: !S.state?.frames, run: playDesign }]);
     default:
       return a.run?.(actionEnv, a, { currentTarget: anchor });
   }
@@ -1523,6 +1557,7 @@ document.addEventListener('keydown', (e) => {
   } else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); palette.toggle(); }
   else if (e.key === 'Escape') {
     if (!$('ctxmenu').hidden) $('ctxmenu').hidden = true;
+    else if (S.playing) S.playAbort = true;
     else if (!$('confirm').hidden) $('confirm-cancel').click();
     else if (!$('formdlg').hidden) $('fd-cancel').click();
     else if (!$('palette').hidden) palette.close();

@@ -11,6 +11,7 @@ import (
 	"github.com/accelone/simoncad/internal/dimensions"
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
+	"github.com/accelone/simoncad/internal/persistence"
 	"github.com/accelone/simoncad/internal/tools"
 	"github.com/accelone/simoncad/internal/transform"
 )
@@ -108,4 +109,107 @@ func (a *App) ModelAfter(n int) (*rebuild.Model, error) {
 		return nil, err
 	}
 	return a.Engine.Rebuild(g)
+}
+
+// ChatLine is one conversation row replayed alongside playback, shaped like a chat message.
+type ChatLine struct {
+	Role   string   `json:"role"` // user | agent | tool | system
+	Text   string   `json:"text"`
+	Tool   string   `json:"tool,omitempty"`
+	OK     bool     `json:"ok"`
+	Images []string `json:"images,omitempty"`
+}
+
+// StepChat is the conversation around one playback frame: Before plays out ahead of the
+// geometry (the prompt that started it, the agent's tool calls up to and including the one
+// that produced it), After follows it (trailing calls and the agent's answer, on the last
+// frame of its prompt).
+type StepChat struct {
+	Before []ChatLine `json:"before"`
+	After  []ChatLine `json:"after,omitempty"`
+}
+
+// PlaybackScript reconstructs, from the agent history, the conversation behind each committed
+// ChangeSet (one StepChat per playback frame, oldest first). A ChangeSet the agent did not
+// make is a manual edit. Prompts that committed nothing are skipped.
+func (a *App) PlaybackScript() []StepChat {
+	sets := a.committedInOrder()
+	calls := a.AH.ToolCalls
+	callAt := make(map[string]int, len(calls))
+	for i, tc := range calls {
+		callAt[tc.ID] = i
+	}
+	committed := make(map[string]bool, len(sets))
+	for _, cs := range sets {
+		committed[cs.ID] = true
+	}
+	prompts := make(map[string]persistence.Prompt, len(a.AH.Prompts))
+	for _, p := range a.AH.Prompts {
+		prompts[p.ID] = p
+	}
+	agentCall := func(cs *commands.ChangeSet) (int, bool) {
+		i, ok := callAt[cs.Provenance.ToolCallID]
+		return i, ok && calls[i].Actor == cadir.CreatedByAgent && calls[i].PromptID != ""
+	}
+	// line renders a tool call the way the live chat showed it: the ChangeSet's explanation, or the error.
+	line := func(tc persistence.ToolCall) ChatLine {
+		l := ChatLine{Role: "tool", Tool: tc.Name, OK: tc.Status == "ok", Text: tc.Error}
+		if tc.Error == "" && tc.ChangeSetID != "" {
+			if cs, ok := a.Mgr.Get(tc.ChangeSetID); ok {
+				l.Text = cs.Explanation
+			}
+		}
+		return l
+	}
+	// between lists the prompt's other agent calls in (from, to): failures, queries, uncommitted proposals.
+	between := func(prompt string, from, to int) []ChatLine {
+		var out []ChatLine
+		for i := from + 1; i < to; i++ {
+			tc := calls[i]
+			if tc.PromptID == prompt && tc.Actor == cadir.CreatedByAgent && !committed[tc.ChangeSetID] {
+				out = append(out, line(tc))
+			}
+		}
+		return out
+	}
+
+	script := make([]StepChat, len(sets))
+	prev, last := "", -1 // the prompt being played and its last call shown
+	for f, cs := range sets {
+		i, ok := agentCall(cs)
+		if !ok {
+			script[f].Before = []ChatLine{{Role: "system", Text: "Manual edit — " + cs.Intent, OK: true}}
+			continue
+		}
+		tc := calls[i]
+		if tc.PromptID != prev {
+			p := prompts[tc.PromptID]
+			script[f].Before = append(script[f].Before, ChatLine{Role: "user", Text: p.Text, OK: true, Images: p.Images})
+			prev, last = tc.PromptID, -1
+			for j := range calls { // replay from the prompt's first call
+				if calls[j].PromptID == prev {
+					last = j - 1
+					break
+				}
+			}
+		}
+		script[f].Before = append(script[f].Before, between(prev, last, i)...)
+		script[f].Before = append(script[f].Before, line(tc))
+		last = i
+		// the last frame of the prompt closes its turn
+		more := false
+		for _, n := range sets[f+1:] {
+			if j, ok := agentCall(n); ok && calls[j].PromptID == prev {
+				more = true
+				break
+			}
+		}
+		if !more {
+			script[f].After = between(prev, i, len(calls))
+			if s := prompts[prev].Summary; s != "" {
+				script[f].After = append(script[f].After, ChatLine{Role: "agent", Text: s, OK: true})
+			}
+		}
+	}
+	return script
 }

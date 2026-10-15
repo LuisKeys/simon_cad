@@ -109,9 +109,23 @@ try {
   await page.click('li[data-axis=""]');
   await page.click('#act-view');
   await page.click('li[data-view="play"]');
+  // Playback replays the conversation too: the manual plate, then the prompt, the agent's call and its answer.
+  await page.waitForFunction(() => document.querySelector('#chat.replaying .msg.system')?.textContent.startsWith('Manual edit'), null, { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('#chat.replaying .msg.user')?.textContent === 'Add four M3 holes here', null, { timeout: 15000 });
   await page.waitForFunction(() => document.querySelector('#hud').textContent.includes('2/2'), null, { timeout: 15000 });
+  await page.waitForFunction(() => /^I proposed four/.test(document.querySelector('#chat.replaying .msg.agent')?.textContent ?? ''), null, { timeout: 15000 });
+  await page.screenshot({ path: join(shots, '5-playback-chat.png') });
   await page.waitForFunction(() => !/\d\/\d|Playback/.test(document.querySelector('#hud').textContent) && window.simonViewport.bodies.size === 1, null, { timeout: 15000 });
+  assert.equal(await page.locator('#chat.replaying').count(), 0, 'the real chat is back after playback');
+  assert.ok((await page.locator('#chat .msg.tool').count()) >= 1, 'the real chat keeps its tool rows');
   await page.screenshot({ path: join(shots, '5-after-playback.png') });
+
+  // Esc stops a playback midway.
+  await page.click('#act-view');
+  await page.click('li[data-view="play"]');
+  await page.waitForSelector('#chat.replaying');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('#chat.replaying') && window.simonViewport.bodies.size === 1, null, { timeout: 15000 });
 
   assert.deepEqual(errors, [], 'no browser errors: ' + errors.join(' | '));
   console.log('e2e M2 flow OK; screenshots in out/e2e/');
