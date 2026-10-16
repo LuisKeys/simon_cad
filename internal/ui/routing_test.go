@@ -304,3 +304,39 @@ func TestConsentRequestIsAConflictWithItsDetails(t *testing.T) {
 		t.Fatalf("a declined fallback is a plain error: %d", rec.Code)
 	}
 }
+
+// A conversation that moved to the frontier fallback (an image was attached) stays there for
+// the follow-up prompts that carry nothing, until the chat is cleared.
+func TestConversationStaysOnTheFrontierModel(t *testing.T) {
+	s := newSvc(t)
+	info, _ := s.UploadImage(testPNG(t))
+	ollama := identified{&capProvider{name: "ollama:qwen3", caps: textCaps}, "ollama", "qwen3"}
+	cloud := identified{&capProvider{name: "openai:gpt-x", caps: allCaps}, "openai", "gpt-x"}
+	s.NewProvider = func() (runtime.Provider, error) { return ollama, nil }
+	s.NewRouter = func() *runtime.Router { return &runtime.Router{Fallbacks: []runtime.Provider{cloud}} }
+	if err := s.AuthorizeFallback(true, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []struct {
+		text   string
+		images []string
+	}{{"Model this.", []string{info.ID}}, {"Include the three holes.", nil}, {"Make it steel.", nil}} {
+		if err := s.PromptWith(p.text, false, p.images); err != nil {
+			t.Fatal(err)
+		}
+		waitIdle(t, s)
+	}
+	if len(ollama.reqs) != 0 || len(cloud.reqs) != 3 {
+		t.Fatalf("every turn must run on the frontier model: local %d, cloud %d", len(ollama.reqs), len(cloud.reqs))
+	}
+	if err := s.ClearChat(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PromptWith("A new idea.", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, s)
+	if len(ollama.reqs) != 1 {
+		t.Fatal("a cleared conversation starts on the primary again")
+	}
+}

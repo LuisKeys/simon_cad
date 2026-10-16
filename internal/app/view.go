@@ -151,7 +151,8 @@ type StepChat struct {
 
 // PlaybackScript reconstructs, from the agent history, the conversation behind each committed
 // ChangeSet (one StepChat per playback frame, oldest first). A ChangeSet the agent did not
-// make is a manual edit. Prompts that committed nothing are skipped.
+// make is a manual edit. Prompts that committed nothing (questions, image interpretations,
+// material searches) play out in full ahead of the next frame, or after the last one.
 func (a *App) PlaybackScript() []StepChat {
 	sets := a.committedInOrder()
 	calls := a.AH.ToolCalls
@@ -193,18 +194,56 @@ func (a *App) PlaybackScript() []StepChat {
 		return out
 	}
 
+	userLine := func(p persistence.Prompt) ChatLine {
+		return ChatLine{Role: "user", Text: p.Text, OK: true, Images: p.Images, Docs: a.PromptDocs(p)}
+	}
+	// framed are the prompts that produced a frame; the others are played whole by idleUpTo.
+	framed := map[string]bool{}
+	for _, cs := range sets {
+		if i, ok := agentCall(cs); ok {
+			framed[calls[i].PromptID] = true
+		}
+	}
+	next := 0 // the first prompt not yet played
+	// idleUpTo plays, in order, the prompts before n that produced no frame: the prompt, its
+	// calls and its answer.
+	idleUpTo := func(n int) []ChatLine {
+		var out []ChatLine
+		for ; next < n; next++ {
+			p := a.AH.Prompts[next]
+			if framed[p.ID] {
+				continue
+			}
+			out = append(out, userLine(p))
+			out = append(out, between(p.ID, -1, len(calls))...)
+			if p.Summary != "" {
+				out = append(out, ChatLine{Role: "agent", Text: p.Summary, OK: true})
+			}
+		}
+		return out
+	}
+	promptAt := make(map[string]int, len(a.AH.Prompts))
+	for i, p := range a.AH.Prompts {
+		promptAt[p.ID] = i
+	}
+
 	script := make([]StepChat, len(sets))
 	prev, last := "", -1 // the prompt being played and its last call shown
 	for f, cs := range sets {
 		i, ok := agentCall(cs)
 		if !ok {
-			script[f].Before = []ChatLine{{Role: "system", Text: "Manual edit — " + cs.Intent, OK: true}}
+			n := next // the prompts sent before the edit was made
+			for n < len(a.AH.Prompts) && a.AH.Prompts[n].Time <= cs.Time {
+				n++
+			}
+			script[f].Before = append(idleUpTo(n), ChatLine{Role: "system", Text: "Manual edit — " + cs.Intent, OK: true})
 			continue
 		}
 		tc := calls[i]
 		if tc.PromptID != prev {
 			p := prompts[tc.PromptID]
-			script[f].Before = append(script[f].Before, ChatLine{Role: "user", Text: p.Text, OK: true, Images: p.Images, Docs: a.PromptDocs(p)})
+			script[f].Before = append(idleUpTo(promptAt[p.ID]), userLine(p))
+			next = max(next, promptAt[p.ID]+1)
 			prev, last = tc.PromptID, -1
 			for j := range calls { // replay from the prompt's first call
 				if calls[j].PromptID == prev {
@@ -230,6 +269,9 @@ func (a *App) PlaybackScript() []StepChat {
 				script[f].After = append(script[f].After, ChatLine{Role: "agent", Text: s, OK: true})
 			}
 		}
+	}
+	if n := len(script); n > 0 {
+		script[n-1].After = append(script[n-1].After, idleUpTo(len(a.AH.Prompts))...)
 	}
 	return script
 }

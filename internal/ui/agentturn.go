@@ -52,7 +52,9 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 	// fallback model once if the primary becomes unavailable.
 	router := s.router(prov)
 	// The whole request runs on the fallback (frontier) model when something is attached
-	// (an image or a document) and the primary is local, or when the prompt asks for it.
+	// (an image or a document) and the primary is local, when the prompt asks for it, or
+	// when an earlier turn of this conversation already ran there: a conversation never
+	// drops from the frontier model back to the local one (until Clear).
 	// Without a usable fallback the request stays on the primary, as before.
 	reason, asked := "", runtime.WantsFrontier(text)
 	switch {
@@ -62,6 +64,8 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		reason = "an image is attached"
 	case len(s.specs) > 0:
 		reason = "a document is attached"
+	case s.frontier:
+		reason = "the conversation runs on the frontier model"
 	}
 	agentProv, onFallback, err := router.AgentOnFallback(reason, asked)
 	if err != nil {
@@ -155,6 +159,9 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 			s.say("agent", res.Final, "", true, "")
 		}
 		// Usage is reported even when the turn failed: the tokens were spent either way.
+		if runtime.IsLocal(prov) && !runtime.IsLocal(agentProv) { // ran on the cloud fallback
+			s.frontier = true
+		}
 		s.recordUsage(res.Usage)
 		s.endRoutes(res.Usage)
 		s.sayUsage(res.Usage)

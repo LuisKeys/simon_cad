@@ -1,7 +1,7 @@
 // Simon CAD UI: panels over the ui.Service API. Every mutation here is a call that ends in
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
-import { api, apiBytes, subscribe, h, materialUrl } from './api.js';
+import { api, apiBytes, subscribe, h, materialUrl, imageUrl } from './api.js';
 import { toast } from './toast.js';
 import { $ } from './dom.js';
 import { showMenu } from './menu.js';
@@ -1169,6 +1169,9 @@ async function playDesign() {
   // the composer is borrowed for the replay: whatever the user had typed comes back afterwards
   const prompt = $('prompt');
   const draft = prompt.value;
+  // and so are the attachment chips: each replayed prompt shows the images and documents it was sent with
+  const chipRows = [$('attachments'), $('specs')];
+  const chipsKept = chipRows.map((r) => [...r.childNodes]);
   prompt.readOnly = true;
   prompt.value = '';
   autosize();
@@ -1192,7 +1195,14 @@ async function playDesign() {
     if (Math.random() < 0.04) d += 250 + Math.random() * 450;
     return d;
   };
-  const typePrompt = async (text) => {
+  const showAttached = (images = [], docs = []) => {
+    $('attachments').replaceChildren(...images.map((id) => h('span', { class: 'chip attach ready' },
+      h('img', { src: imageUrl(id), alt: '' }), h('span', { class: 'fname' }, 'attached image'))));
+    $('specs').replaceChildren(...docs.map((d) => h('span', { class: 'chip spec' },
+      h('span', { class: 'ficon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'fname' }, d.name))));
+  };
+  const typePrompt = async (text, images, docs) => {
+    showAttached(images, docs);
     const avg = Math.min(PLAY_PACE.promptMax, Math.max(PLAY_PACE.promptMin, text.length * PLAY_PACE.promptPerChar)) / Math.max(1, text.length);
     for (let n = 1; n <= text.length && !S.playAbort; n++) {
       prompt.value = text.slice(0, n);
@@ -1207,13 +1217,14 @@ async function playDesign() {
     await wait(PLAY_PACE.enter);
     $('send').classList.remove('pressed');
     prompt.value = '';
+    showAttached();
     autosize();
   };
   const say = async (l) => {
     const m = { seq: S.playChat.length + 1, role: l.role, text: l.text ?? '', tool: l.tool, ok: l.ok, images: l.images, docs: l.docs };
     S.playChat.push(m);
     if (l.role === 'user') {
-      await typePrompt(m.text);
+      await typePrompt(m.text, m.images, m.docs);
       if (S.playAbort) return;
       status.hidden = false;
     }
@@ -1256,6 +1267,7 @@ async function playDesign() {
   $('send').classList.remove('pressed');
   prompt.readOnly = false;
   prompt.value = draft;
+  chipRows.forEach((r, i) => r.replaceChildren(...chipsKept[i]));
   autosize();
   el.classList.remove('replaying');
   el.replaceChildren();

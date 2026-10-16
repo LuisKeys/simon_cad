@@ -74,6 +74,7 @@ func (s *Service) ClearChat() error {
 		return err
 	}
 	s.chat = nil
+	s.frontier = false
 	s.detachSpecs()
 	s.hub.Publish(Notice{Kind: "state"})
 	return nil
