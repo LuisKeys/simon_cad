@@ -28,6 +28,7 @@ import { initTracePanel } from './vectorize-panel.js';
 import { initShortcuts } from './shortcuts.js';
 import { isToggleKey } from './shortcuts-model.js';
 import { initPrintSim } from './printsim-panel.js';
+import { markdown } from './markdown.js';
 
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
   openNode: null, renaming: null, histSel: null, histOpen: getPref('history', true) };
@@ -891,6 +892,8 @@ function chatNode(m, st) {
   if (m.role === 'draft') return draftCard(m, st);
   const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
   if (m.role === 'tool') return h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`);
+  // the agent answers in Markdown; everything else (the user's own words included) shows as typed
+  if (m.role === 'agent') return h('div', { class: `${cls} md` }, markdown(m.text), vision.thumbs(m.images, m.docs));
   return h('div', { class: cls }, m.text, vision.thumbs(m.images, m.docs));
 }
 
@@ -1222,12 +1225,14 @@ async function playDesign() {
     } else { // the answer is typed out
       const typed = h('span', {}, '');
       const rest = h('span', { class: 'typing-rest' }, m.text);
-      el.insertBefore(h('div', { class: 'msg agent' }, typed, rest, vision.thumbs(m.images)), status);
+      const node = h('div', { class: 'msg agent' }, typed, rest, vision.thumbs(m.images));
+      el.insertBefore(node, status);
       toBottom();
       await typeOut(m.text, PLAY_PACE.typingPerChar, PLAY_PACE.typingMin, PLAY_PACE.typingMax, (n) => {
         typed.textContent = m.text.slice(0, n);
         rest.textContent = m.text.slice(n);
       });
+      node.replaceWith(chatNode(m, S.state)); // typed as raw text, then shown formatted like the live chat
     }
     await wait(PLAY_PACE[l.role] ?? PLAY_PACE.tool);
   };
