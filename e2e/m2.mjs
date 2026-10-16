@@ -108,15 +108,20 @@ try {
   await page.click('#act-section');
   await page.click('li[data-axis=""]');
   await page.click('#act-view');
+  await page.evaluate(() => { document.querySelector('#prompt').value = 'my draft'; });
   await page.click('li[data-view="play"]');
-  // Playback replays the conversation too: the manual plate, then the prompt, the agent's call and its answer.
+  // Playback replays the conversation too: the manual plate, then the prompt (typed into the composer and
+  // sent), the agent's call and its answer.
   await page.waitForFunction(() => document.querySelector('#chat.replaying .msg.system')?.textContent.startsWith('Manual edit'), null, { timeout: 15000 });
+  await page.waitForFunction(() => /^Add four/.test(document.querySelector('#prompt').value) && !document.querySelector('#chat.replaying .msg.user'), null, { timeout: 15000 });
   await page.waitForFunction(() => document.querySelector('#chat.replaying .msg.user')?.textContent === 'Add four M3 holes here', null, { timeout: 15000 });
   await page.waitForFunction(() => document.querySelector('#hud').textContent.includes('2/2'), null, { timeout: 15000 });
   await page.waitForFunction(() => /^I proposed four/.test(document.querySelector('#chat.replaying .msg.agent')?.textContent ?? ''), null, { timeout: 15000 });
   await page.screenshot({ path: join(shots, '5-playback-chat.png') });
   await page.waitForFunction(() => !/\d\/\d|Playback/.test(document.querySelector('#hud').textContent) && window.simonViewport.bodies.size === 1, null, { timeout: 15000 });
   assert.equal(await page.locator('#chat.replaying').count(), 0, 'the real chat is back after playback');
+  assert.equal(await page.inputValue('#prompt'), 'my draft', 'the composer gets its draft back after playback');
+  await page.fill('#prompt', '');
   assert.ok((await page.locator('#chat .msg.tool').count()) >= 1, 'the real chat keeps its tool rows');
   await page.screenshot({ path: join(shots, '5-after-playback.png') });
 

@@ -886,26 +886,26 @@ function retriedOk(chat, i) {
 // instead of it riding at the bottom for as long as the interpretation is unused.
 const cardAnchor = new Map();
 
+// One chat message as a node (shared by the live chat and the playback replay).
+function chatNode(m, st) {
+  if (m.role === 'draft') return draftCard(m, st);
+  const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
+  if (m.role === 'tool') return h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`);
+  return h('div', { class: cls }, m.text, vision.thumbs(m.images, m.docs));
+}
+
 function renderChat(st) {
+  if (S.playing && S.playChat) return; // playback owns the chat panel while it runs (see playDesign)
   const el = $('chat');
-  const playing = S.playing && S.playChat;
-  // during playback the replayed conversation stands in for the real one (see playDesign)
-  if (playing) st = { ...st, chat: S.playChat, pending: [], busy: S.playBusy, refine_state: null, agent_state: S.playState };
-  el.classList.toggle('replaying', !!playing);
-  const stick = playing || el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+  const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
   const lastSeq = st.chat.length ? st.chat[st.chat.length - 1].seq : 0;
-  const cards = playing ? [] : vision.proposalCards(st);
+  const cards = vision.proposalCards(st);
   for (const c of cards) if (!cardAnchor.has(c.id)) cardAnchor.set(c.id, lastSeq);
   const placed = (seq) => cards.filter((c) => cardAnchor.get(c.id) === seq).map((c) => c.node);
   const nodes = [];
   st.chat.forEach((m, i) => {
-    if (!playing) chatSeen.add(m.seq); // replayed seqs are not real messages
-    if (!retriedOk(st.chat, i)) {
-      const cls = `msg ${m.role}${m.role === 'tool' && !m.ok ? ' bad' : ''}`;
-      if (m.role === 'draft') nodes.push(draftCard(m, st));
-      else if (m.role === 'tool') nodes.push(h('div', { class: cls }, `${m.ok ? '✓' : '✗'} ${m.tool}${m.text ? ' — ' + m.text : ''}`));
-      else nodes.push(h('div', { class: cls }, m.text, vision.thumbs(m.images, m.docs)));
-    }
+    chatSeen.add(m.seq);
+    if (!retriedOk(st.chat, i)) nodes.push(chatNode(m, st));
     nodes.push(...placed(m.seq));
   });
   // anchored to a message that is gone (chat cleared, or the first card on an empty chat)
@@ -1111,6 +1111,7 @@ async function compareCheckpoint(c) {
 
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (S.playing) return; // the composer is a prop of the replay while it runs
   const text = $('prompt').value.trim();
   if (!text) return;
   if (vision.uploading()) { toast('Wait until the attachments finish uploading.', 'bad'); return; }
@@ -1138,31 +1139,95 @@ $('prompt').addEventListener('input', autosize);
 
 // ---- playback ------------------------------------------------------------------------
 
-// Playback also replays the conversation behind each step in the chat panel (S.playChat stands in
-// for the real chat, which is never touched): the prompt, the agent's tool calls, then its answer.
+// Playback also replays the conversation behind each step in the chat panel, which it owns while it
+// runs (renderChat leaves it alone; the real chat is never touched): the prompt, the agent's tool calls,
+// then its answer. Each prompt is first typed into the composer and sent with a simulated Enter. Messages are only ever appended, never re-rendered, so nothing flickers; the answer
+// is laid out at full size from the start (the untyped rest is invisible) so typing never reflows it.
 // Pauses (ms) are paced for a person watching a demo.
-const PLAY_PACE = { frame: 375, user: 900, tool: 300, agent: 1400, typing: 1200 };
+const PLAY_PACE = { frame: 450, user: 1000, tool: 400, agent: 1600, typingPerChar: 18, typingMin: 700, typingMax: 3500,
+  promptPerChar: 45, promptMin: 600, promptMax: 4000, beforeEnter: 450, enter: 180 };
 
 async function playDesign() {
   if (S.playing || !S.state?.frames) return;
   S.playing = true;
   S.playAbort = false;
   S.playChat = [];
-  S.playBusy = false;
   clearPreview();
   vp.clear();
+  const el = $('chat');
+  const status = h('div', { class: 'msg system', hidden: true });
+  el.classList.add('replaying');
+  el.replaceChildren(status);
+  el.scrollTop = 0;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const show = () => renderChat(S.state);
+  const frame = () => new Promise((r) => requestAnimationFrame(r));
+  const toBottom = () => { el.scrollTop = el.scrollHeight; };
+  // the composer is borrowed for the replay: whatever the user had typed comes back afterwards
+  const prompt = $('prompt');
+  const draft = prompt.value;
+  prompt.readOnly = true;
+  prompt.value = '';
+  autosize();
+  // reveals text over time, one animation frame at a time (never a fixed character step, so it stays smooth)
+  const typeOut = async (text, perChar, min, max, put) => {
+    const dur = Math.min(max, Math.max(min, text.length * perChar));
+    const t0 = performance.now();
+    for (let n = 0; n < text.length && !S.playAbort;) {
+      await frame();
+      n = Math.min(text.length, Math.ceil(text.length * (performance.now() - t0) / dur));
+      put(n);
+    }
+    put(text.length);
+  };
+  // a person types unevenly: each key gets a jittered delay around the average, a little longer after a
+  // space and longer still after punctuation, with the odd pause to think; the total stays near the paced length
+  const keyDelay = (avg, ch) => {
+    let d = avg * (0.45 + Math.random() * 1.1);
+    if (ch === ' ') d *= 1.6;
+    else if (/[.,;:!?]/.test(ch)) d *= 3;
+    if (Math.random() < 0.04) d += 250 + Math.random() * 450;
+    return d;
+  };
+  const typePrompt = async (text) => {
+    const avg = Math.min(PLAY_PACE.promptMax, Math.max(PLAY_PACE.promptMin, text.length * PLAY_PACE.promptPerChar)) / Math.max(1, text.length);
+    for (let n = 1; n <= text.length && !S.playAbort; n++) {
+      prompt.value = text.slice(0, n);
+      autosize();
+      prompt.scrollTop = prompt.scrollHeight;
+      await wait(keyDelay(avg, text[n - 1]));
+    }
+    prompt.value = text;
+    if (S.playAbort) return;
+    await wait(PLAY_PACE.beforeEnter);
+    $('send').classList.add('pressed'); // Enter
+    await wait(PLAY_PACE.enter);
+    $('send').classList.remove('pressed');
+    prompt.value = '';
+    autosize();
+  };
   const say = async (l) => {
-    const m = { seq: S.playChat.length + 1, role: l.role, text: l.text, tool: l.tool, ok: l.ok, images: l.images };
+    const m = { seq: S.playChat.length + 1, role: l.role, text: l.text ?? '', tool: l.tool, ok: l.ok, images: l.images };
     S.playChat.push(m);
-    if (l.role === 'agent') { // the answer is typed out
-      S.playBusy = false;
-      const step = Math.max(1, Math.ceil(l.text.length / (PLAY_PACE.typing / 30)));
-      for (let n = 0; n < l.text.length && !S.playAbort; n += step) { m.text = l.text.slice(0, n); show(); await wait(30); }
-      m.text = l.text;
-    } else if (l.role === 'user') S.playBusy = true;
-    show();
+    if (l.role === 'user') {
+      await typePrompt(m.text);
+      if (S.playAbort) return;
+      status.hidden = false;
+    }
+    else if (l.role === 'agent') status.hidden = true;
+    status.textContent = agentStateText(S.playState);
+    if (l.role !== 'agent') {
+      el.insertBefore(chatNode(m, S.state), status);
+      toBottom();
+    } else { // the answer is typed out
+      const typed = h('span', {}, '');
+      const rest = h('span', { class: 'typing-rest' }, m.text);
+      el.insertBefore(h('div', { class: 'msg agent' }, typed, rest, vision.thumbs(m.images)), status);
+      toBottom();
+      await typeOut(m.text, PLAY_PACE.typingPerChar, PLAY_PACE.typingMin, PLAY_PACE.typingMax, (n) => {
+        typed.textContent = m.text.slice(0, n);
+        rest.textContent = m.text.slice(n);
+      });
+    }
     await wait(PLAY_PACE[l.role] ?? PLAY_PACE.tool);
   };
   try {
@@ -1180,7 +1245,12 @@ async function playDesign() {
   } catch (e) { toast(e.message, 'bad'); }
   S.playing = false;
   S.playChat = null;
-  S.playBusy = false;
+  $('send').classList.remove('pressed');
+  prompt.readOnly = false;
+  prompt.value = draft;
+  autosize();
+  el.classList.remove('replaying');
+  el.replaceChildren();
   vp.clear();
   await refresh();
 }
