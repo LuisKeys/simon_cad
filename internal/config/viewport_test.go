@@ -11,14 +11,14 @@ func TestViewportDefaultsAndPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := ViewportSettings{ShowAxes: true, ShowLabels: true, AxisOpacity: 70,
-		ShowGizmo: true, GizmoSize: GizmoMedium, GizmoPosition: GizmoBottomLeft}
+		ShowGizmo: true, GizmoSize: GizmoMedium, GizmoPosition: GizmoBottomLeft, ShowPlaybackStatus: true}
 	cur := Current()
 	if cur.Viewport == nil || *cur.Viewport != want {
 		t.Fatalf("defaults: %+v", cur.Viewport)
 	}
 	// Each switch is independent, and "off" survives a reload instead of falling back to on.
 	next := ViewportSettings{ShowAxes: false, ShowLabels: true, AxisOpacity: 0,
-		ShowGizmo: true, GizmoSize: GizmoLarge, GizmoPosition: GizmoTopLeft}
+		ShowGizmo: true, GizmoSize: GizmoLarge, GizmoPosition: GizmoTopLeft, ShowPlaybackStatus: false}
 	cur.Viewport = &next
 	if err := Save(cur); err != nil {
 		t.Fatal(err)

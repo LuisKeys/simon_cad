@@ -214,7 +214,8 @@ export async function openSettings({ toast, onTheme, onViewport, onRender, works
       srow('set-axis-opacity', 'Axis Opacity', h('div', { class: 'row' }, opacity, opacityOut)),
       srow('set-gizmo', 'Show Axis Gizmo', check('set-gizmo', 'showGizmo')),
       srow('set-gizmo-size', 'Axis Gizmo Size', gizmoSize),
-      srow('set-gizmo-pos', 'Axis Gizmo Position', gizmoPos)]],
+      srow('set-gizmo-pos', 'Axis Gizmo Position', gizmoPos),
+      srow('set-playback-status', 'Show Playback Status', check('set-playback-status', 'showPlaybackStatus'))]],
     ['rendering', 'Rendering', [
       h('h2', null, 'Rendering'),
       h('div', { class: 'shint muted' }, 'Lighting and shadows of the 3D view. Presentation only: the model and its exports are not affected.'),

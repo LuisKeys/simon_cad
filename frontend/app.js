@@ -1238,7 +1238,9 @@ async function playDesign() {
       for (const l of f.chat?.before ?? []) { if (S.playAbort) break; await say(l); }
       if (S.playAbort) break;
       vp.applyDelta(f.scene);
-      $('hud').textContent = i === 0 ? 'Playback… (Esc to stop)' : `${i}/${f.total} · ${f.changeset?.intent ?? ''}`;
+      // Settings → Viewport → Show Playback Status can hide it (a clean viewport for recording demos)
+      $('hud').textContent = vp.viewPrefs.showPlaybackStatus === false ? ''
+        : i === 0 ? 'Playback… (Esc to stop)' : `${i}/${f.total} · ${f.changeset?.intent ?? ''}`;
       if (i > 0) vp.fitAll();
       await wait(PLAY_PACE.frame);
       for (const l of f.chat?.after ?? []) { if (S.playAbort) break; await say(l); }

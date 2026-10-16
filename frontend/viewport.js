@@ -72,7 +72,7 @@ export class Viewport {
     this.axes = new WorldAxes();
     this.scene.add(this.axes);
     this.viewPrefs = { showAxes: true, showAxisLabels: true, axisOpacity: 70,
-      showGizmo: true, gizmoSize: 'medium', gizmoPosition: 'bottom-left' };
+      showGizmo: true, gizmoSize: 'medium', gizmoPosition: 'bottom-left', showPlaybackStatus: true };
 
     this.appearance = {};       // body id -> {color, opacity, visible, material_id, texture_scale} from the CAD-IR
     this.materials = new MaterialManager(hooks.library, hooks.textureUrl, () => this.dirty());

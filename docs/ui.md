@@ -152,7 +152,8 @@ backlog item "round only the outer edges after pocketing".
   orientation of their view's camera directly, so they always agree; view changes from either are animated.
   All of it is presentation only: not pickable, not in the model bounds, never exported or recorded
   in the history. Settings → *Viewport* turns each part on or off and sets the axis opacity and the
-  gizmo's size and corner; the choice is saved with the other settings.
+  gizmo's size and corner; the choice is saved with the other settings. *Show Playback Status* hides
+  the step/intent line shown above the viewport during Play design (for clean demo recordings).
 - **Rendering and materials look:** the viewport lights the model with a procedural studio environment
   (`lighting.js`: softboxes on a gradient dome, reflected by metals and glossy plastics), a key light that casts soft
   shadows onto an invisible ground plane, and a fill. The shadow map is redrawn only when the model, its visibility or

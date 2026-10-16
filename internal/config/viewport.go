@@ -30,6 +30,8 @@ type ViewportSettings struct {
 	ShowGizmo     bool   `json:"showGizmo"`
 	GizmoSize     string `json:"gizmoSize"`
 	GizmoPosition string `json:"gizmoPosition"`
+	// ShowPlaybackStatus shows the step and intent above the viewport while Play design runs.
+	ShowPlaybackStatus bool `json:"showPlaybackStatus"`
 }
 
 const (
@@ -39,6 +41,7 @@ const (
 	keyGizmo       = "SIMONCAD_VIEW_GIZMO"
 	keyGizmoSize   = "SIMONCAD_VIEW_GIZMO_SIZE"
 	keyGizmoPos    = "SIMONCAD_VIEW_GIZMO_POSITION"
+	keyPlayStatus  = "SIMONCAD_VIEW_PLAYBACK_STATUS"
 )
 
 // The switches are stored as "on"/"off" rather than left empty when off: an empty value is
@@ -58,6 +61,7 @@ func Viewport() ViewportSettings {
 		ShowAxes: flag(keyAxes), ShowLabels: flag(keyAxisLabels),
 		ShowGizmo: flag(keyGizmo), AxisOpacity: DefaultAxisOpacity,
 		GizmoSize: GizmoMedium, GizmoPosition: GizmoBottomLeft,
+		ShowPlaybackStatus: flag(keyPlayStatus),
 	}
 	if n, err := strconv.Atoi(Get(keyAxisOpacity)); err == nil && n >= 0 && n <= 100 {
 		v.AxisOpacity = n
@@ -92,5 +96,6 @@ func viewportValues(v ViewportSettings) (map[string]string, error) {
 		keyAxes: onOff(v.ShowAxes), keyAxisLabels: onOff(v.ShowLabels),
 		keyGizmo: onOff(v.ShowGizmo), keyAxisOpacity: strconv.Itoa(v.AxisOpacity),
 		keyGizmoSize: v.GizmoSize, keyGizmoPos: v.GizmoPosition,
+		keyPlayStatus: onOff(v.ShowPlaybackStatus),
 	}, nil
 }
