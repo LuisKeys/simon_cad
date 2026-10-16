@@ -87,6 +87,13 @@ type Runtime struct {
 	// MaxStructural bounds the structural (geometry-changing) tool calls of each Send; 0 is
 	// unlimited. Visual refinement uses it to keep each iteration's feedback causal.
 	MaxStructural int
+	// Escalator, if set, lets a turn move to a more capable model when the current one keeps
+	// failing (see Router.Agent/AgentAt). LocalRetries and StandardRetries are the number of
+	// consecutive failed rounds the local and Cloud Standard tiers get before it does.
+	Escalator                     Escalator
+	LocalRetries, StandardRetries int
+	// OnEscalate, if set, observes each escalation.
+	OnEscalate func(Escalation)
 	// Subtask marks a helper run inside another agent turn (e.g. image interpretation): it
 	// records no prompt of its own; its tool calls belong to the enclosing prompt.
 	Subtask bool
@@ -102,6 +109,14 @@ type Result struct {
 	Steps      int
 	Usage      Usage
 	Transcript []Message
+	// Failures counts the rounds of tool calls that failed in a way a more capable model might
+	// fix, and Escalations the climbs to a more capable model.
+	Failures    int
+	Escalations []Escalation
+	// Unresolved: the last round of tool calls ended in a failure that was never corrected.
+	// Blocked is why a more capable model was not used when the turn needed one.
+	Unresolved bool
+	Blocked    error
 }
 
 // SystemPrompt joins the capability prompts.
@@ -175,8 +190,14 @@ type Conversation struct {
 	intent  string
 	started bool
 	review  bool // an interpreter left an image interpretation for the user to review
-	Msgs    []Message
-	Res     *Result
+	// fails counts consecutive failed rounds on the current tier; noEscalation is set once
+	// escalating is refused or impossible, so it is not tried again.
+	fails        int
+	lastKind     FailureKind
+	noEscalation bool
+	actor        app.Actor // the actor recorded with the prompt; its Model follows escalations
+	Msgs         []Message
+	Res          *Result
 }
 
 // TurnCall is one tool call made during a Send.
@@ -196,6 +217,9 @@ type Turn struct {
 	// AwaitingReview: the turn stopped because an image interpretation waits for the user
 	// to review, adjust and approve it (the agent does not go on until then).
 	AwaitingReview bool
+	// EscalationBlocked is why the turn ended without a more capable model taking over
+	// (cloud disabled, not authorized); nil otherwise.
+	EscalationBlocked error
 }
 
 // reviewNotice is what a turn that stops for an image interpretation tells the user.
@@ -214,6 +238,7 @@ func (rt *Runtime) Begin(ctx context.Context, a *app.App, intent string, policy 
 	}
 	actor := app.Actor{CreatedBy: "agent", Capability: strings.Join(capNames, ","), Model: rt.Provider.Name()}
 	a.SetActor(actor)
+	c.actor = actor
 	vision := CapabilitiesOf(rt.Provider).Vision
 	var attached []string
 	for _, id := range rt.ImageIDs {
@@ -320,7 +345,19 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 		return turn, nil
 	}
 	structural := 0
-	for step := 0; step < rt.MaxSteps; step++ {
+	budget := rt.MaxSteps
+	for step := 0; ; step++ {
+		if step >= budget {
+			// out of steps: a more capable model gets a fresh budget to finish
+			moved, done := c.escalate(turn, "step_budget_exhausted")
+			if done {
+				return turn, nil
+			}
+			if !moved {
+				break
+			}
+			budget += rt.MaxSteps
+		}
 		resp, err := rt.Provider.Complete(ctx, Request{System: c.system, Messages: c.Msgs, Tools: c.defs, NoThinking: rt.NoThinking})
 		if err != nil {
 			return turn, err
@@ -344,6 +381,16 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 			continue
 		}
 		if len(uses) == 0 {
+			if c.fails > 0 && c.lastKind.Escalates() {
+				// The model answered while its last calls still failed: that is not a success.
+				moved, done := c.escalate(turn, "unresolved_"+string(c.lastKind)+"_failure")
+				if done {
+					return turn, nil
+				}
+				if moved {
+					continue
+				}
+			}
 			turn.Final = resp.Text()
 			return turn, nil
 		}
@@ -393,6 +440,9 @@ func (c *Conversation) Send(ctx context.Context, directive string) (*Turn, error
 			results = append(results, Block{Type: "tool_result", ToolUseID: u.ID, Content: content, IsError: !o.OK})
 		}
 		c.Msgs = append(c.Msgs, Message{Role: "user", Content: results})
+		if c.recover(turn, turn.Calls[firstCall:]) {
+			return turn, nil
+		}
 		if proposed(turn.Calls[firstCall:]) {
 			// A fresh interpretation is the user's to review and approve: stop here instead of
 			// letting the agent build on values the user has not seen.

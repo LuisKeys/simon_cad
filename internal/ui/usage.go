@@ -14,6 +14,9 @@ type UsageView struct {
 	Session TurnUsage `json:"session"`
 	// Turns counts the model-driven turns (agent runs and refinement runs) of the session.
 	Turns int `json:"turns"`
+	// Route is the routing record of the last request: tiers, attempts, escalations, cost and
+	// latency (nil before the first request).
+	Route *runtime.RouteTrace `json:"route,omitempty"`
 }
 
 // TurnUsage is one scope of consumption: tokens, their per-model breakdown and the cost.
@@ -50,7 +53,7 @@ func (s *Service) recordUsage(u runtime.Usage) {
 
 // usageView renders the ledger for State. Caller holds mu.
 func (s *Service) usageView() UsageView {
-	return UsageView{Turn: turnUsage(s.turnUsage), Session: turnUsage(s.sessionUsage), Turns: s.turns}
+	return UsageView{Turn: turnUsage(s.turnUsage), Session: turnUsage(s.sessionUsage), Turns: s.turns, Route: s.lastTrace}
 }
 
 // sayUsage reports one turn's consumption in the conversation. Caller holds mu.

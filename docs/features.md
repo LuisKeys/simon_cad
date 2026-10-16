@@ -166,6 +166,12 @@ Primitivas:
 - **Proveedores:** Claude, OpenAI, Ollama (local).
 - **Modelo de fallback** con política de consentimiento (`ask` / `allow` / `deny`) y enrutamiento
   automático (adjuntos o peticiones específicas al modelo de respaldo).
+- **Enrutamiento local-first por niveles** (Local · Cloud Standard · Cloud Advanced): cada petición
+  se clasifica sin coste de API (reglas y, si hace falta, el modelo local), se valida con el
+  resultado real del motor CAD y escala solo si falla de forma recuperable y el modo
+  (`local_first` / `local_only` / `cloud_preferred` / `manual`) y el consentimiento lo permiten.
+  Cada petición deja una traza (niveles, intentos, escaladas, coste estimado, latencia) sin
+  contenido del prompt.
 - **Control de esfuerzo y de coste** (consumo de tokens, caché de prompts).
 - **Caché de prompts de Anthropic** sobre las definiciones de herramientas y el prompt de sistema.
 - **Herramientas categorizadas** (11 categorías: primitivas, sketch, edición, transformación,
@@ -214,7 +220,7 @@ Primitivas:
   de desbordamiento.
 - **Paneles** redimensionables y colapsables (tamaños persistentes); overlays en pantallas estrechas.
 - **Soporte táctil:** controles de 40–44 px, pulsación larga = menú contextual.
-- **Ajustes** con navegación por secciones: Modelo primario, Modelo de fallback, Configuración de
+- **Ajustes** con navegación por secciones: Modelo primario, Modelo de fallback, Routing, Configuración de
   UI, Viewport, Rendering, Workspace / Units & Grid.
 - **Modo Print** (barra superior / paleta): simulación de impresión 3D, ver [§22](#22-simulación-de-impresión-3d).
 - **Concurrencia:** el turno del agente no bloquea la lectura de estado; las ediciones se rechazan
@@ -285,7 +291,7 @@ Banderas del agente: `--preview`, `--commit`, `--label`, `--autonomous`.
 ## 19. Configuración y proveedores de modelo
 
 - Variables en `.env`: `SIMONCAD_PROVIDER`, claves y modelos de Claude / OpenAI / Ollama,
-  `OLLAMA_NUM_CTX`, `OLLAMA_VISION`, `SIMONCAD_AUTONOMOUS`, `SIMON_TOOL_LOADING`, `SIMONCAD_PRUSASLICER`, fallback
+  `OLLAMA_NUM_CTX`, `OLLAMA_VISION`, `SIMONCAD_AUTONOMOUS`, `SIMONCAD_ROUTING_MODE`, `SIMONCAD_LOCAL_RETRIES`, `SIMONCAD_STANDARD_RETRIES`, `SIMONCAD_ADVANCED_*`, `SIMON_TOOL_LOADING`, `SIMONCAD_PRUSASLICER`, fallback
   (`SIMONCAD_FALLBACK_*`, `SIMONCAD_FALLBACK_CONSENT`).
 - Ajustes de UI: modelos, viewport, rendering y workspace, con previsualización en vivo y Cancel
   que revierte.

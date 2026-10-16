@@ -102,6 +102,9 @@ values are ignored. `.env` is git-ignored; `.env.example` documents everything.
 | `SIMONCAD_FALLBACK_ENABLED`, `SIMONCAD_FALLBACK_PROVIDER` | Fallback model (`openai` or `claude`); unset, migrated from the provider configuration above |
 | `SIMONCAD_FALLBACK_<PROVIDER VARIABLE>` | The fallback's own configuration, e.g. `SIMONCAD_FALLBACK_OPENAI_MODEL`; unset values inherit the provider's |
 | `SIMONCAD_FALLBACK_CONSENT` | `ask` (default), `allow` or `deny`: may a local primary's request be sent to the cloud fallback |
+| `SIMONCAD_ROUTING_MODE` | `local_first`, `local_only`, `cloud_preferred` or `manual`. Unset: `local_first` with an Ollama primary, `manual` otherwise (see *Model routing* below) |
+| `SIMONCAD_LOCAL_RETRIES`, `SIMONCAD_STANDARD_RETRIES` | Consecutive failed rounds of tool calls the local tier (default `2`) and the Cloud Standard tier (default `1`) get before the request escalates |
+| `SIMONCAD_ADVANCED_ENABLED`, `SIMONCAD_ADVANCED_PROVIDER`, `SIMONCAD_ADVANCED_<PROVIDER VARIABLE>` | The Cloud Advanced model (`openai` or `claude`); unset values inherit the fallback (Cloud Standard) model's, so it is the same model until given another |
 | `ANTHROPIC_INPUT_PRICE`, `ANTHROPIC_CACHED_INPUT_PRICE`, `ANTHROPIC_OUTPUT_PRICE` | Optional cost per million tokens; same pattern for `OPENAI_*` (local Ollama models are never priced) |
 | `SIMONCAD_CURRENCY` | Default label for the price amounts (default `USD`; `OPENAI_CURRENCY`/`ANTHROPIC_CURRENCY` per model); it performs no conversion |
 
@@ -117,6 +120,30 @@ local primary, SimonCAD asks before the first request it would send to the cloud
 be remembered; Settings › Fallback Model › Remote data changes it). Every fallback is named in the
 conversation and logged with the model requested, the model used, the reason, the tokens and the
 estimated cost; the Simon Agent header shows the model serving the request.
+
+**Model routing.** With a local primary (`OLLAMA_MODEL`, e.g. `gemma4:12b`) every request starts
+on the cheapest tier that can serve it: **Local** (the primary model), **Cloud Standard** (the
+Fallback Model) or **Cloud Advanced** (the Advanced Model, Settings › Routing). The tier is chosen
+without any paid call: attachments, or a prompt asking for the frontier model, start on Advanced;
+a request that needs a multi-step plan starts on Standard; routine operations (primitives,
+move/rotate/scale, dimensions, colors and materials, editing a feature) start Local; only a request
+those rules cannot place is put to the local model itself. A model response is not a result:
+each tool call is validated and run by the CAD engine, and a failed one reaches the model as a
+structured error. After `SIMONCAD_LOCAL_RETRIES` failed rounds in a row the same conversation moves
+up one tier (Standard gets `SIMONCAD_STANDARD_RETRIES`, then Advanced), told which changes are already
+applied so it does not repeat them. Only failures a more capable model might fix escalate
+(invalid tool call, schema validation, CAD execution error, truncated output); an unsupported
+operation or a reference to something that is not there is reported instead. Modes: *Local only*
+never builds a cloud provider (a request that needs one ends with a clear error); *Local first*
+escalates when the remote-data setting allows it (`ask` asks, `deny` keeps a request local unless
+an attachment needs the cloud); *Cloud preferred* starts on Standard (choosing it is the
+authorization); *Manual* is the behaviour before routing existed. Each request is classified on its
+own: a conversation does not stay on a cloud model once it went there. The route of each request
+is logged as one JSON line (`route {...}`, no prompt or project data) and the last one is in
+`/api/state` under `usage.route`: `request_id`, `initial_tier`, `final_tier`, `attempts` (1 + failed
+rounds), `escalations`, `escalation_reason`, `execution_success`, per-model tokens,
+`estimated_api_cost` with its `currency` (always 0 for local models), `local_tokens`/`cloud_tokens`,
+`latency_ms` and `tier_latency_ms`. Prices are the configured ones, never built in.
 
 **Token consumption and cost.** Every model call is metered: input and output tokens are counted
 per model, per turn and per session, and reported in the agent panel (session meter above the

@@ -69,6 +69,7 @@ e2e: build
 	node e2e/viewports.mjs
 	node e2e/dimensions.mjs
 	node e2e/workspace.mjs
+	node e2e/routing.mjs
 	node e2e/rendering.mjs
 	node e2e/visual.mjs
 	node e2e/models.mjs

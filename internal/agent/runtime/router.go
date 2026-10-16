@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/accelone/simoncad/internal/config"
 )
@@ -30,6 +31,11 @@ type Router struct {
 	// Consent is the user's authorization (config.ConsentAsk/Allow/Deny; "" = ask) to send a
 	// request of a local Selected provider to a remote fallback.
 	Consent string
+	// Mode is the routing mode (config.RoutingMode); "" behaves as config.ModeManual.
+	Mode string
+	// Advanced is the Cloud Advanced model; nil when it is not configured, and the first
+	// fallback then serves the advanced tier too.
+	Advanced Provider
 	// OnRoute, if set, observes every model call made through the router's providers (see
 	// Observe and Agent): which model serves it, and why when it is the fallback. It is
 	// called while no caller lock is held, right before the call.
@@ -69,10 +75,19 @@ type CapabilityUnavailableError struct {
 	Reason string
 	// Disabled: the fallback model is switched off, so the request is refused, not rerouted.
 	Disabled bool
+	// LocalOnly: the routing mode forbids cloud models, so nothing can serve the request.
+	LocalOnly bool
 }
 
 func (e *CapabilityUnavailableError) Error() string {
 	what := strings.Join(e.Missing, ", ")
+	if e.LocalOnly {
+		who := "the local model"
+		if e.Selected != "" {
+			who = e.Selected
+		}
+		return fmt.Sprintf("%s cannot handle %s input and the routing mode is Local only, so nothing was sent to a cloud model (change the mode in Settings › Routing, or use a local model that supports it)", who, what)
+	}
 	if e.Disabled && e.Selected != "" {
 		return fmt.Sprintf("%s cannot handle %s input and the fallback model is disabled, so the request was not sent anywhere else (enable it in Settings › Fallback Model)", e.Selected, what)
 	}
@@ -114,17 +129,31 @@ var ErrConsentRequired = errors.New("remote fallback needs authorization")
 
 func (e *ConsentError) Is(target error) bool { return target == ErrConsentRequired && !e.Declined }
 
+// ErrLocalOnly is the FallbackErr of a router whose mode forbids cloud providers.
+var ErrLocalOnly = errors.New("cloud models are disabled: the routing mode is Local only")
+
+// ErrNoHigherTier means a request already runs on the highest tier available.
+var ErrNoHigherTier = errors.New("no more capable model is configured")
+
 // NewRouterFromEnv builds the router from the configuration. It never fails: an
 // unconfigured selected provider is reported through SelectedErr, an unusable fallback
 // through FallbackErr.
 func NewRouterFromEnv() *Router {
-	r := &Router{Consent: config.FallbackConsent()}
+	r := &Router{Consent: config.FallbackConsent(), Mode: config.RoutingMode()}
 	name, err := ProviderNameFromEnv()
 	if err == nil {
 		r.Selected, err = NewNamedProviderFromEnv(name)
 	}
 	r.SelectedErr = err
+	if r.Mode == config.ModeLocalOnly {
+		if r.Selected != nil && !IsLocal(r.Selected) {
+			r.Selected, r.SelectedErr = nil, fmt.Errorf("the routing mode is Local only, but the selected provider (%s) is a cloud model", name)
+		}
+		r.FallbackErr = ErrLocalOnly // nothing below may build a cloud provider
+		return r
+	}
 	mc, enabled := config.FallbackModel()
+	defer r.buildAdvanced()
 	switch {
 	case !enabled:
 		r.FallbackErr = ErrFallbackDisabled
@@ -138,6 +167,30 @@ func NewRouterFromEnv() *Router {
 		}
 	}
 	return r
+}
+
+// buildAdvanced sets the Cloud Advanced provider when it is enabled, complete and a different
+// model from the primary and from the Standard one.
+func (r *Router) buildAdvanced() {
+	mc, enabled := config.AdvancedModel()
+	if !enabled || mc.Complete() != nil || (r.Selected != nil && sameModel(r.Selected, mc.Provider, mc.Model)) {
+		return
+	}
+	if len(r.Fallbacks) > 0 && sameProvider(r.Fallbacks[0], &identity{mc.Provider, mc.Model}) {
+		return
+	}
+	if p, err := NewProviderFor(mc); err == nil {
+		r.Advanced = p
+	}
+}
+
+// identity is a placeholder Provider that only carries an identity, to compare models.
+type identity struct{ provider, model string }
+
+func (i *identity) Name() string               { return i.model }
+func (i *identity) Identity() (string, string) { return i.provider, i.model }
+func (i *identity) Complete(context.Context, Request) (*Response, error) {
+	return nil, errors.New("identity placeholder")
 }
 
 func sameModel(p Provider, provider, model string) bool {
@@ -179,7 +232,7 @@ func (r *Router) route(need ProviderCapabilities) (Provider, bool, error) {
 		reason = r.FallbackErr.Error()
 	}
 	return nil, false, &CapabilityUnavailableError{Missing: missing, Selected: sel, Reason: reason,
-		Disabled: errors.Is(r.FallbackErr, ErrFallbackDisabled)}
+		Disabled: errors.Is(r.FallbackErr, ErrFallbackDisabled), LocalOnly: errors.Is(r.FallbackErr, ErrLocalOnly)}
 }
 
 // consent is nil when fb may serve a request of the selected provider.
@@ -190,6 +243,12 @@ func (r *Router) consent(fb Provider) error {
 	switch r.Consent {
 	case config.ConsentAllow:
 		return nil
+	case config.ConsentAsk:
+		if r.Mode == config.ModeCloudPreferred {
+			return nil // choosing the mode is the authorization
+		}
+	}
+	switch r.Consent {
 	case config.ConsentDeny:
 		return &ConsentError{Selected: Label(r.Selected), Fallback: r.event(fb, true, ""), Declined: true}
 	}
@@ -256,17 +315,87 @@ func (r *Router) Agent() Provider { return &failover{r: r} }
 // A local primary needs the user's consent to send the request to a remote fallback: the
 // ConsentError is returned so the caller can ask.
 func (r *Router) AgentOnFallback(reason string, userRequested bool) (Provider, bool, error) {
-	if reason == "" || len(r.Fallbacks) == 0 || r.Selected == nil {
+	if reason == "" {
 		return r.Agent(), false, nil
 	}
-	if !userRequested && !IsLocal(r.Selected) {
+	return r.AgentAt(TierStandard, reason, userRequested)
+}
+
+// providerAt is the provider of a tier, nil when none is configured. Standard is the
+// fallback model and Advanced the advanced one; each stands in for the other when only one
+// is configured.
+func (r *Router) providerAt(t Tier) Provider {
+	var std Provider
+	if len(r.Fallbacks) > 0 {
+		std = r.Fallbacks[0]
+	}
+	switch t {
+	case TierLocal:
+		return r.Selected
+	case TierStandard:
+		if std != nil {
+			return std
+		}
+		return r.Advanced
+	}
+	if r.Advanced != nil {
+		return r.Advanced
+	}
+	return std
+}
+
+// StartTier is the tier a request the classifier placed at t starts on: Cloud preferred
+// never starts below Standard, and a request whose tier has no model starts on the highest
+// one available (Local when there is no cloud model at all).
+func (r *Router) StartTier(t Tier) Tier {
+	if r.Mode == config.ModeCloudPreferred && t < TierStandard && r.providerAt(TierStandard) != nil {
+		t = TierStandard
+	}
+	for t > TierLocal && r.providerAt(t) == nil {
+		t--
+	}
+	return t
+}
+
+// AgentAt is Agent for a request that starts on tier t (see StartTier), for reason. A
+// request that starts on the selected provider gets the plain Agent. Starting on a remote
+// model needs the user's consent when the selected provider is local (a ConsentError is
+// returned so the caller can ask), except that a selected cloud provider already serves
+// the request unless the user asked for the frontier model.
+func (r *Router) AgentAt(t Tier, reason string, userRequested bool) (Provider, bool, error) {
+	t = r.StartTier(t)
+	if t == TierLocal || r.Selected == nil || (!userRequested && !IsLocal(r.Selected)) {
 		return r.Agent(), false, nil
 	}
-	fb := r.Fallbacks[0]
-	if err := r.consent(fb); err != nil {
+	p := r.providerAt(t)
+	if err := r.consent(p); err != nil {
 		return nil, false, err
 	}
-	return &failover{r: r, switched: fb, reason: reason, preset: true}, true, nil
+	return &failover{r: r, switched: p, tier: t, reason: reason, preset: true}, true, nil
+}
+
+// Escalation is one climb of the ladder.
+type Escalation struct {
+	From   Tier   `json:"from"`
+	To     Tier   `json:"to"`
+	Reason string `json:"reason"`
+}
+
+// Escalator is implemented by the provider Agent and AgentAt return: it tells the tier the
+// request runs on and moves it up when a lower tier cannot finish it.
+type Escalator interface {
+	// Tier is the tier the next model call runs on.
+	Tier() Tier
+	// Escalate moves the rest of the request to the next more capable model. It fails with
+	// ErrNoHigherTier when there is none, ErrLocalOnly when the mode forbids the cloud, and
+	// a *ConsentError when the user has not authorized sending the request out.
+	Escalate(reason string) (Escalation, error)
+}
+
+// EscalatorOf is p as an Escalator, nil when p cannot escalate.
+func EscalatorOf(p Provider) Escalator {
+	e, _ := p.(Escalator)
+	return e
 }
 
 type failover struct {
@@ -276,6 +405,58 @@ type failover struct {
 	reason     string
 	noThinking bool
 	preset     bool // the request started on the fallback (see AgentOnFallback)
+	tier       Tier // the tier of switched; TierLocal while on the selected provider
+	latency    [TierAdvanced + 1]time.Duration
+}
+
+// Latencies is the time spent waiting on the model of each tier so far, by tier name. Tool
+// execution is not included.
+func (f *failover) Latencies() map[Tier]time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[Tier]time.Duration{}
+	for t, d := range f.latency {
+		if d > 0 {
+			out[Tier(t)] = d
+		}
+	}
+	return out
+}
+
+func (f *failover) Tier() Tier {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tier
+}
+
+func (f *failover) Escalate(reason string) (Escalation, error) {
+	f.mu.Lock()
+	from := f.tier
+	cur := f.r.Selected
+	if f.switched != nil {
+		cur = f.switched
+	}
+	f.mu.Unlock()
+	for t := from + 1; t <= TierAdvanced; t++ {
+		p := f.r.providerAt(t)
+		if p == nil || sameProvider(p, cur) {
+			continue
+		}
+		if err := f.r.consent(p); err != nil {
+			return Escalation{}, err
+		}
+		f.mu.Lock()
+		// the conversation so far carries tool calls made without the new model's thinking
+		// blocks, which a thinking-enabled request refuses (see Complete)
+		f.switched, f.tier, f.reason, f.noThinking = p, t, reason, true
+		f.mu.Unlock()
+		f.r.emit(f.r.event(p, true, reason))
+		return Escalation{From: from, To: t, Reason: reason}, nil
+	}
+	if f.r.Mode == config.ModeLocalOnly {
+		return Escalation{}, ErrLocalOnly
+	}
+	return Escalation{}, ErrNoHigherTier
 }
 
 func (f *failover) current() Provider {
@@ -312,7 +493,9 @@ func (f *failover) Complete(ctx context.Context, req Request) (*Response, error)
 		req.NoThinking = true
 	}
 	f.r.emit(f.r.event(p, switched, reason))
+	start := time.Now()
 	resp, err := p.Complete(ctx, req)
+	f.addLatency(time.Since(start))
 	if err == nil || switched || ctx.Err() != nil || !recoverable(err) {
 		return resp, err
 	}
@@ -337,16 +520,45 @@ func (f *failover) Complete(ctx context.Context, req Request) (*Response, error)
 	noThinking = noThinking || hasToolUses(req.Messages)
 	f.mu.Lock()
 	f.switched, f.reason, f.noThinking = fb, reason, noThinking
+	f.tier = f.r.tierOf(fb)
 	f.mu.Unlock()
 	req.NoThinking = req.NoThinking || noThinking
 	f.r.emit(f.r.event(fb, true, reason))
-	return fb.Complete(ctx, req)
+	start = time.Now()
+	resp, err = fb.Complete(ctx, req)
+	f.addLatency(time.Since(start))
+	return resp, err
+}
+
+// addLatency charges d to the tier the request runs on.
+func (f *failover) addLatency(d time.Duration) {
+	f.mu.Lock()
+	f.latency[f.tier] += d
+	f.mu.Unlock()
+}
+
+// LatenciesOf is the per-tier model latency of a provider returned by Agent or AgentAt.
+func LatenciesOf(p Provider) map[Tier]time.Duration {
+	if f, ok := p.(*failover); ok {
+		return f.Latencies()
+	}
+	return nil
 }
 
 // recoverable errors are those the fallback model may resolve: the primary is unavailable,
 // or the request does not fit in its context window.
 func recoverable(err error) bool {
 	return errors.Is(err, ErrUnavailable) || errors.Is(err, ErrContextExceeded)
+}
+
+// tierOf is the tier fb serves.
+func (r *Router) tierOf(fb Provider) Tier {
+	for t := TierStandard; t <= TierAdvanced; t++ {
+		if p := r.providerAt(t); p != nil && sameProvider(p, fb) {
+			return t
+		}
+	}
+	return TierStandard
 }
 
 func sameProvider(a, b Provider) bool {

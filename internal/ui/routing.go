@@ -2,11 +2,13 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"strings"
 	"sync"
 
 	"github.com/accelone/simoncad/internal/agent/runtime"
+	"github.com/accelone/simoncad/internal/agent/workflow"
 	"github.com/accelone/simoncad/internal/config"
 )
 
@@ -140,4 +142,36 @@ func autonomousFromEnv() bool {
 		return false
 	}
 	return true
+}
+
+// route classifies a request: the tier it starts on, why, and whether the user asked for the
+// frontier model. A request that asks for it in a Local only configuration is refused with
+// a clear error, never run on the local model as if it had been honored. Caller holds mu.
+func (s *Service) route(prov runtime.Provider, router *runtime.Router, text string, images, docs bool) (tier runtime.Tier, reason string, asked bool, err error) {
+	asked = runtime.WantsFrontier(text)
+	if asked && router.Mode == config.ModeLocalOnly {
+		return runtime.TierLocal, "", true, runtime.ErrLocalOnly
+	}
+	sig := runtime.Signals{Images: images, Documents: docs, UserAsked: asked}
+	var classifier runtime.Provider
+	if router.Mode != "" && router.Mode != config.ModeManual {
+		// The manual mode keeps the selected provider unless something is attached or the
+		// prompt asks; the other modes also weigh the request's complexity. Only a local
+		// model ever classifies: the decision itself must not cost anything.
+		sig.Complex = workflow.NeedsPlan(text)
+		if runtime.IsLocal(prov) {
+			classifier = unlocking{prov, &s.mu}
+		}
+	}
+	tier, reason = runtime.Classify(context.Background(), classifier, text, sig)
+	return tier, reason, asked, nil
+}
+
+// recordTrace keeps the routing record of the last request and logs it as one JSON line. The
+// trace holds no prompt text or project data. Caller holds mu.
+func (s *Service) recordTrace(t runtime.RouteTrace) {
+	s.lastTrace = &t
+	if b, err := json.Marshal(t); err == nil {
+		log.Printf("route %s", b)
+	}
 }

@@ -9,6 +9,14 @@ const PROVIDERS = [['openai', 'OpenAI'], ['claude', 'Anthropic'], ['ollama', 'Ol
 // The fallback model is always a cloud model: it serves what the local or primary model cannot.
 const CLOUD = PROVIDERS.filter(([p]) => p !== 'ollama');
 const CONSENTS = [['ask', 'Ask before the first remote fallback'], ['allow', 'Always allow'], ['deny', 'Never — stay local']];
+// Routing modes (see docs/architecture.md, "Model routing").
+const ROUTING_MODES = [['local_first', 'Local first'], ['local_only', 'Local only'], ['cloud_preferred', 'Cloud preferred'], ['manual', 'Manual']];
+const ROUTING_HINTS = {
+  local_first: 'Routine operations run on the local model. Ambiguous or complex requests, and requests that keep failing, move up to the Fallback (Standard) and Advanced models, only if the remote data setting allows it.',
+  local_only: 'Nothing is ever sent to a cloud model. Requests that need one (an image or PDF the local model cannot read, or repeated failures) end with a clear error.',
+  cloud_preferred: 'Requests go straight to the Fallback (Standard) model; choosing this mode is the authorization to send them.',
+  manual: 'Uses the Primary Model you selected, and the Fallback Model only for what it cannot serve (attachments, or being unavailable).',
+};
 // Reasoning levels, weakest first. Not every model accepts every level: one that refuses the
 // level asked for is sent the closest it does accept, so no choice here can break a turn.
 const EFFORTS = [['', 'Model default'], ['none', 'None'], ['minimal', 'Minimal'], ['low', 'Low'],
@@ -137,6 +145,17 @@ export async function openSettings({ toast, onTheme, onViewport, onRender, works
   const fb = cfg.fallback ?? { enabled: false, provider: 'openai', providers: {}, consent: 'ask' };
   const primary = modelFields('primary', PROVIDERS, cfg.providers, cfg.provider, cfg.currency, () => hints());
   const fallback = modelFields('fallback', CLOUD, fb.providers, fb.provider, cfg.currency, () => hints());
+  // Routing: how much the cloud is used, how often a tier retries, and the Advanced model (the Fallback Model is the Standard one).
+  const rt = cfg.routing ?? { mode: 'manual', localRetries: 2, standardRetries: 1,
+    advanced: { enabled: false, provider: 'openai', providers: {} } };
+  const adv = rt.advanced;
+  const advanced = modelFields('advanced', CLOUD, adv.providers, adv.provider, cfg.currency, () => hints());
+  const mode = sel('set-routing-mode', ROUTING_MODES, rt.mode, () => hints());
+  const retry = (id, v) => h('input', { id, type: 'number', min: '0', max: '10', step: '1', value: String(v) });
+  const localRetries = retry('set-local-retries', rt.localRetries), standardRetries = retry('set-standard-retries', rt.standardRetries);
+  const advEnabled = h('input', { id: 'set-advanced-enabled', type: 'checkbox' });
+  advEnabled.checked = !!adv.enabled;
+  const routeHint = h('div', { class: 'shint muted' });
   const fbEnabled = h('input', { id: 'set-fallback-enabled', type: 'checkbox', onchange: () => hints() });
   fbEnabled.checked = !!fb.enabled;
   const consent = sel('set-fallback-consent', CONSENTS, fb.consent || 'ask');
@@ -157,6 +176,7 @@ export async function openSettings({ toast, onTheme, onViewport, onRender, works
     else lines.push('Used when the primary model cannot serve a request or is unavailable.');
     if (fbEnabled.checked && fb.problem && fallback.provider.value === fb.provider) lines.push('Not usable yet: ' + fb.problem + '.');
     fbHint.textContent = lines.join(' ');
+    routeHint.textContent = ROUTING_HINTS[mode.value] ?? '';
   };
   const theme = sel('set-theme', [['light', 'Light'], ['dark', 'Dark']], cfg.theme, () => applyTheme(theme.value, onTheme));
   // Where reusable projects are looked up, on top of the ones next to the open project. It is
@@ -203,6 +223,16 @@ export async function openSettings({ toast, onTheme, onViewport, onRender, works
       h('h2', null, 'Fallback Model'),
       srow('set-fallback-enabled', 'Enable Fallback', fbEnabled),
       fbHint, ...fallback.nodes, consentRow]],
+    ['routing', 'Routing', [
+      h('h2', null, 'Routing'),
+      srow('set-routing-mode', 'Mode', mode),
+      routeHint,
+      srow('set-local-retries', 'Local recovery attempts', localRetries),
+      srow('set-standard-retries', 'Standard recovery attempts', standardRetries),
+      h('h2', null, 'Advanced Model'),
+      h('div', { class: 'shint muted' }, 'Cloud Advanced: complex design and difficult failures. Without it the Fallback Model (Cloud Standard) serves them too. API key and unset fields come from the Fallback Model.'),
+      srow('set-advanced-enabled', 'Enable Advanced', advEnabled),
+      ...advanced.nodes]],
     ['ui', 'UI Configuration', [
       h('h2', null, 'UI Configuration'),
       h('div', { class: 'srow' }, h('label', { for: 'set-theme' }, 'Theme'), theme),
@@ -251,7 +281,7 @@ export async function openSettings({ toast, onTheme, onViewport, onRender, works
   };
   const form = h('form', { class: 'dialog settings', 'aria-label': 'Settings', onsubmit: async (e) => {
     e.preventDefault();
-    primary.stash(); fallback.stash();
+    primary.stash(); fallback.stash(); advanced.stash();
     // An invalid workspace value is already reported next to the section; nothing is saved.
     if (ws?.invalid()) { const f = form.querySelector('[aria-invalid=true]'); if (f) reveal(f); return; }
     status.textContent = ''; status.className = 'muted';
@@ -264,7 +294,9 @@ export async function openSettings({ toast, onTheme, onViewport, onRender, works
       // The global currency is only the default label now (each model names its own); it is sent back unchanged.
       const out = await api('settings', { provider: primary.provider.value, providers: cfg.providers, theme: theme.value,
         componentLibrary: complib.value.trim(), currency: cfg.currency ?? '', viewport: view, render, workspace: wsDefaults ?? undefined,
-        fallback: { enabled: fbEnabled.checked, provider: fallback.provider.value, providers: fb.providers, consent: consent.value } });
+        fallback: { enabled: fbEnabled.checked, provider: fallback.provider.value, providers: fb.providers, consent: consent.value },
+        routing: { mode: mode.value, localRetries: Number(localRetries.value), standardRetries: Number(standardRetries.value),
+          advanced: { enabled: advEnabled.checked, provider: advanced.provider.value, providers: adv.providers } } });
       try { localStorage.setItem(THEME_KEY, out.theme); } catch { /* ignore */ }
       el.hidden = true; el.replaceChildren();
       toast('Settings saved', 'ok');
@@ -286,7 +318,7 @@ export async function openSettings({ toast, onTheme, onViewport, onRender, works
   el.replaceChildren(form);
   el.onmousedown = (e) => { if (e.target === el) close(true); }; // assigned, not added: a stale listener from a closed dialog would revert the theme
   el.hidden = false;
-  primary.fill(); fallback.fill(); hints();
+  primary.fill(); fallback.fill(); advanced.fill(); hints();
   show(panels.some((p) => p.id === lastTab) ? lastTab : panels[0].id);
   (panels.find((p) => p.id === activeTab).tab).focus();
 }

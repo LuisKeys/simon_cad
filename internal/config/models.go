@@ -14,13 +14,21 @@ import (
 // The fallback slot has its own variables, FallbackPrefix + the same names; a fallback value
 // that was never set inherits the provider's primary-slot value, which is how an existing
 // OpenAI or Anthropic configuration becomes the fallback without being copied or rewritten.
+//
+// The fallback slot is the Cloud Standard tier of the router. The advanced slot (Cloud Advanced)
+// inherits from the fallback slot the same way, with its own variables under AdvancedPrefix, so
+// it is the same model until the user gives it another one.
 const (
 	SlotPrimary  = "primary"
 	SlotFallback = "fallback"
+	SlotAdvanced = "advanced"
 )
 
 // FallbackPrefix prefixes the provider variables of the fallback slot.
 const FallbackPrefix = "SIMONCAD_FALLBACK_"
+
+// AdvancedPrefix prefixes the provider variables of the advanced slot.
+const AdvancedPrefix = "SIMONCAD_ADVANCED_"
 
 const (
 	keyFallbackEnabled  = "SIMONCAD_FALLBACK_ENABLED"
@@ -117,29 +125,11 @@ func ModelConfigFor(slot, provider string) ModelConfig {
 	if provider == ProviderClaude && mc.Model == "" {
 		mc.Model = DefaultClaudeModel
 	}
-	if slot == SlotFallback {
-		inherit := func(key, primary string) string {
-			if key == "" {
-				return primary
-			}
-			if v := Get(FallbackPrefix + key); v != "" {
-				return v
-			}
-			return primary
-		}
-		primaryModel := mc.Model
-		mc.Model, mc.APIKey, mc.BaseURL = inherit(k.model, mc.Model), inherit(k.key, mc.APIKey), inherit(k.baseURL, mc.BaseURL)
-		mc.ReasoningEffort = strings.ToLower(inherit(k.effort, mc.ReasoningEffort))
-		mc.Currency = inherit(currencyKeys[provider], mc.Currency)
-		// Prices belong to a model: the primary slot's prices only carry over when the
-		// fallback runs that same model.
-		own := Price{Input: parsePrice(Get(FallbackPrefix + pk.in)), Output: parsePrice(Get(FallbackPrefix + pk.out)),
-			CachedInput: parsePrice(Get(FallbackPrefix + pk.cached))}
-		if own.Set() {
-			mc.Price = own
-		} else if mc.Model != primaryModel {
-			mc.Price = Price{}
-		}
+	switch slot {
+	case SlotFallback:
+		mc = overlaySlot(mc, FallbackPrefix)
+	case SlotAdvanced:
+		mc = overlaySlot(overlaySlot(mc, FallbackPrefix), AdvancedPrefix)
 	}
 	if k.ctx != "" {
 		mc.NumCtx = DefaultContextLength
@@ -153,6 +143,35 @@ func ModelConfigFor(slot, provider string) ModelConfig {
 		mc.Currency = Currency()
 	}
 	mc.Currency = strings.ToUpper(mc.Currency)
+	return mc
+}
+
+// overlaySlot applies the variables of a slot (named by prefix) on top of base, the slot it
+// inherits from: a value that was never set in the slot keeps base's.
+func overlaySlot(base ModelConfig, prefix string) ModelConfig {
+	k, pk := envKeys[base.Provider], priceKeys[base.Provider]
+	mc := base
+	inherit := func(key, inherited string) string {
+		if key == "" {
+			return inherited
+		}
+		if v := Get(prefix + key); v != "" {
+			return v
+		}
+		return inherited
+	}
+	mc.Model, mc.APIKey, mc.BaseURL = inherit(k.model, base.Model), inherit(k.key, base.APIKey), inherit(k.baseURL, base.BaseURL)
+	mc.ReasoningEffort = strings.ToLower(inherit(k.effort, base.ReasoningEffort))
+	mc.Currency = inherit(currencyKeys[base.Provider], base.Currency)
+	// Prices belong to a model: the inherited slot's prices only carry over when this slot
+	// runs that same model.
+	own := Price{Input: parsePrice(Get(prefix + pk.in)), Output: parsePrice(Get(prefix + pk.out)),
+		CachedInput: parsePrice(Get(prefix + pk.cached))}
+	if own.Set() {
+		mc.Price = own
+	} else if mc.Model != base.Model {
+		mc.Price = Price{}
+	}
 	return mc
 }
 
@@ -240,7 +259,7 @@ func PriceForModel(provider, model string) (Price, string, bool) {
 		return Price{}, "", false
 	}
 	primary := ModelConfigFor(SlotPrimary, provider)
-	for _, mc := range []ModelConfig{primary, ModelConfigFor(SlotFallback, provider)} {
+	for _, mc := range []ModelConfig{primary, ModelConfigFor(SlotFallback, provider), ModelConfigFor(SlotAdvanced, provider)} {
 		if mc.Model == model {
 			return mc.Price, mc.Currency, mc.Price.Set()
 		}

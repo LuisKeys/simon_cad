@@ -3,8 +3,10 @@ package ui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/accelone/simoncad/internal/agent/attachments"
 	geo "github.com/accelone/simoncad/internal/agent/capabilities/geometry"
@@ -13,6 +15,7 @@ import (
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/agent/workflow"
 	"github.com/accelone/simoncad/internal/app"
+	"github.com/accelone/simoncad/internal/config"
 )
 
 // Prompt starts one agent turn on a goroutine. Progress arrives on the Hub as chat
@@ -51,26 +54,29 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 	// itself runs on the router's agent provider, which may hand the request over to the
 	// fallback model once if the primary becomes unavailable.
 	router := s.router(prov)
-	// The whole request runs on the fallback (frontier) model when something is attached
-	// (an image or a document) and the primary is local, when the prompt asks for it, or
-	// when an earlier turn of this conversation already ran there: a conversation never
-	// drops from the frontier model back to the local one (until Clear).
-	// Without a usable fallback the request stays on the primary, as before.
-	reason, asked := "", runtime.WantsFrontier(text)
-	switch {
-	case asked:
-		reason = "requested in the prompt"
-	case len(images) > 0:
-		reason = "an image is attached"
-	case len(s.specs) > 0:
-		reason = "a document is attached"
-	case s.frontier:
-		reason = "the conversation runs on the frontier model"
-	}
-	agentProv, onFallback, err := router.AgentOnFallback(reason, asked)
+	// Every request is classified and starts on the cheapest tier that can serve it (see
+	// route): the local model, unless something is attached, the prompt asks for the frontier
+	// model or the request is complex. A request that fails keeps climbing the tiers while the
+	// routing mode and the user's consent allow it.
+	tier, reason, asked, err := s.route(prov, router, text, len(images) > 0, len(s.specs) > 0)
 	if err != nil {
 		s.mu.Unlock()
 		return err
+	}
+	agentProv, onFallback, err := router.AgentAt(tier, reason, asked)
+	initial := runtime.TierLocal // the tier the request really starts on
+	if onFallback {
+		initial = router.StartTier(tier)
+	}
+	if err != nil {
+		var ce *runtime.ConsentError
+		if !errors.As(err, &ce) || !ce.Declined || asked || len(images) > 0 || len(s.specs) > 0 {
+			s.mu.Unlock()
+			return err
+		}
+		// Only complexity asked for the cloud and the user declined it: run locally.
+		agentProv, onFallback, initial = router.Agent(), false, runtime.TierLocal
+		reason = "cloud models are declined in Settings"
 	}
 	var interp runtime.ImageInterpreter
 	if !onFallback && len(images) > 0 && !runtime.CapabilitiesOf(prov).Vision {
@@ -106,6 +112,7 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 	s.hub.Publish(Notice{Kind: "state"})
 	level := s.level
 	s.mu.Unlock()
+	started := time.Now()
 	go func() {
 		defer func() {
 			s.mu.Lock()
@@ -120,6 +127,9 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		caps := runtime.SelectCaps(s.app, images, geo.New(), vis.New(), visualcap.New())
 		rt := &runtime.Runtime{Provider: unlocking{agentProv, &s.mu}, Caps: caps, History: prior, NoThinking: !thinking, ToolLoading: runtime.InteractiveToolLoading(),
 			ImageIDs: images, DocumentIDs: docIDs, Interpreter: interp, Reference: s.specContext()}
+		if router.Mode != "" && router.Mode != config.ModeManual {
+			rt.Escalator, rt.LocalRetries, rt.StandardRetries = runtime.EscalatorOf(agentProv), config.LocalRetries(), config.StandardRetries()
+		}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
 			if o.ChangeSet != nil {
@@ -159,11 +169,14 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 			s.say("agent", res.Final, "", true, "")
 		}
 		// Usage is reported even when the turn failed: the tokens were spent either way.
-		if runtime.IsLocal(prov) && !runtime.IsLocal(agentProv) { // ran on the cloud fallback
-			s.frontier = true
-		}
 		s.recordUsage(res.Usage)
 		s.endRoutes(res.Usage)
+		final := initial
+		if esc := runtime.EscalatorOf(agentProv); esc != nil {
+			final = esc.Tier()
+		}
+		s.recordTrace(runtime.BuildTrace(runtime.TraceInput{RequestID: runtime.NewRequestID(), Mode: router.Mode, Initial: initial,
+			Reason: reason, Final: final, Result: res, Err: err, Elapsed: time.Since(started), Latency: runtime.LatenciesOf(agentProv)}))
 		s.sayUsage(res.Usage)
 		if len(s.draft) > 0 {
 			s.say("draft", fmt.Sprintf("%d step(s) applied as a draft — keep or discard them.", len(s.draft)), "", true, "")

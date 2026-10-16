@@ -105,7 +105,10 @@ type Settings struct {
 	Providers map[string]ProviderSettings `json:"providers"`
 	// Fallback is the fallback model. On save, nil leaves it as it is.
 	Fallback *FallbackSettings `json:"fallback,omitempty"`
-	Theme    string            `json:"theme"`
+	// Routing is the routing mode, the recovery limits and the Cloud Advanced model; the
+	// fallback model is the Cloud Standard tier. On save, nil leaves it as it is.
+	Routing *RoutingSettings `json:"routing,omitempty"`
+	Theme   string           `json:"theme"`
 	// ComponentLibrary is the directory searched for reusable projects, on top of the ones
 	// next to the open project. It is a path, not a URL, and empty means "only the project's
 	// own neighbourhood".
@@ -259,6 +262,8 @@ func Current() Settings {
 		fb.Problem = err.Error()
 	}
 	s.Fallback = fb
+	routing := Routing()
+	s.Routing = &routing
 	return s
 }
 
@@ -353,6 +358,15 @@ func Save(s Settings) error {
 					return fmt.Errorf("fallback: %w", err)
 				}
 			}
+		}
+	}
+	if s.Routing != nil {
+		rv, err := routingValues(*s.Routing)
+		if err != nil {
+			return err
+		}
+		for k, v := range rv {
+			next[k] = v
 		}
 	}
 	if err := persist(next); err != nil {

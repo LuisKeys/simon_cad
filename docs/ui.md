@@ -163,7 +163,7 @@ backlog item "round only the outer edges after pocketing".
   room), reflection intensity, exposure, tone mapping (neutral, ACES, AgX, none) and shadow quality (off, standard,
   high); changes preview live, Cancel reverts them and they are saved with the other settings (`internal/config/render.go`,
   `frontend/render-model.js`). Presentation only: never in the project, the history or an export.
-- **Settings navigation:** the dialog has a left-hand section list (Primary Model, Fallback Model, UI Configuration,
+- **Settings navigation:** the dialog has a left-hand section list (Primary Model, Fallback Model, Routing, UI Configuration,
   Viewport, Rendering and, with a project open, Workspace); only the active section is shown, all share one Save/Cancel, and
   the last section used is reopened. A validation error switches to the section holding the field.
 - **Workspace / Units & Grid:** Settings › *Workspace / Units & Grid* edits the open project's
@@ -313,6 +313,37 @@ one configured fallback model (cloud only), built by `NewRouterFromEnv` from `co
   keeps the last one in `State.model`. Each fallback is named in the conversation
   (`Fallback: OpenAI · gpt-x — reason`) and logged with the model requested, the model used, the
   reason, its tokens and its estimated cost.
+
+### Routing tiers
+
+`runtime.Router` also climbs a ladder of three tiers, `Local` (`Selected`), `Standard`
+(`Fallbacks[0]`) and `Advanced` (`Router.Advanced`; the Standard model when none is configured),
+under a routing mode (`Router.Mode`, `config.RoutingMode`: `local_first`, `local_only`,
+`cloud_preferred`, `manual`; an empty mode behaves as `manual`).
+
+- **Classify.** `runtime.Classify(ctx, local, text, Signals)` picks the starting tier from fixed
+  rules (`classify.go`) and, for a prompt they cannot place, one forced `classify_request` call to the
+  *local* model (never a cloud one; unavailable → Local). `Service.route` feeds it the attachments,
+  `WantsFrontier` and `workflow.NeedsPlan`. Local only refuses an explicit request for the frontier
+  model with `ErrLocalOnly`.
+- **Start.** `Router.AgentAt(tier, reason, userRequested)` generalizes `AgentOnFallback`: a request
+  that starts on a cloud tier needs consent like any remote fallback (`409 fallback_consent`), except
+  that declining the cloud only for complexity runs the request locally.
+- **Recover and escalate.** `Conversation.Send` classifies every failed tool call (`recovery.go`,
+  `FailureKind`) from the engine's own result. `Runtime.Escalator` (the provider `Agent`/`AgentAt`
+  returns, see `EscalatorOf`) is asked to `Escalate` after `LocalRetries`/`StandardRetries`
+  consecutive failed rounds, when the model ends its turn with a failure unresolved, or when
+  `MaxSteps` runs out. The same `Conversation` goes on, so tool results already applied are kept,
+  and a `[router]` note lists the committed change sets as not to be repeated. An escalation the
+  mode or consent refuses ends the turn with `Turn.EscalationBlocked` and an explanation; undoing is
+  the existing change-set history.
+- **Trace.** `runtime.BuildTrace` summarizes a request (`RouteTrace`, `trace.go`); the service logs it
+  and exposes the last one as `UsageView.Route`.
+
+Configuration: `SIMONCAD_ROUTING_MODE`, `SIMONCAD_LOCAL_RETRIES`, `SIMONCAD_STANDARD_RETRIES`, and the
+advanced slot `SIMONCAD_ADVANCED_ENABLED`, `SIMONCAD_ADVANCED_PROVIDER` plus provider variables
+prefixed `SIMONCAD_ADVANCED_` (inheriting the fallback slot, which inherits the primary). All are in
+Settings › Routing.
 
 **Ollama.** The provider speaks Ollama's native `/api/chat`, the only Ollama API that honors a
 context window per request: the OpenAI-compatible endpoint ignores it, and Ollama silently drops

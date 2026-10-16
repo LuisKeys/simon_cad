@@ -305,9 +305,9 @@ func TestConsentRequestIsAConflictWithItsDetails(t *testing.T) {
 	}
 }
 
-// A conversation that moved to the frontier fallback (an image was attached) stays there for
-// the follow-up prompts that carry nothing, until the chat is cleared.
-func TestConversationStaysOnTheFrontierModel(t *testing.T) {
+// Every prompt is classified on its own: the one with an image goes to the frontier model and
+// the routine follow-ups that carry nothing come back to the local one.
+func TestEachPromptIsRoutedOnItsOwn(t *testing.T) {
 	s := newSvc(t)
 	info, _ := s.UploadImage(testPNG(t))
 	ollama := identified{&capProvider{name: "ollama:qwen3", caps: textCaps}, "ollama", "qwen3"}
@@ -326,17 +326,7 @@ func TestConversationStaysOnTheFrontierModel(t *testing.T) {
 		}
 		waitIdle(t, s)
 	}
-	if len(ollama.reqs) != 0 || len(cloud.reqs) != 3 {
-		t.Fatalf("every turn must run on the frontier model: local %d, cloud %d", len(ollama.reqs), len(cloud.reqs))
-	}
-	if err := s.ClearChat(); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.PromptWith("A new idea.", false, nil); err != nil {
-		t.Fatal(err)
-	}
-	waitIdle(t, s)
-	if len(ollama.reqs) != 1 {
-		t.Fatal("a cleared conversation starts on the primary again")
+	if len(ollama.reqs) != 2 || len(cloud.reqs) != 1 {
+		t.Fatalf("only the prompt with the image goes to the frontier model: local %d, cloud %d", len(ollama.reqs), len(cloud.reqs))
 	}
 }

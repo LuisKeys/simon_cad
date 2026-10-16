@@ -13,11 +13,9 @@ import (
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/agent/workflow"
 	"github.com/accelone/simoncad/internal/app"
-	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/printsim/job"
 	"github.com/accelone/simoncad/internal/rendering"
-	"strings"
 	"sync"
 	"time"
 )
@@ -79,9 +77,8 @@ type Service struct {
 	sessionConsent string
 	// announced holds the fallback models already named in the conversation this turn.
 	announced map[string]bool
-	// frontier: a turn of this conversation ran on the cloud fallback, so the rest of it
-	// stays there instead of dropping back to the local primary (see PromptWith).
-	frontier bool
+	// lastTrace is the routing record of the last request (see recordTrace).
+	lastTrace *runtime.RouteTrace
 
 	// routeMu guards the routing record, which the router reports from model calls made
 	// while mu is released (see unlocking).
@@ -124,13 +121,10 @@ func (s *Service) attach(a *app.App, path string) {
 		s.stopPrintSim()
 		s.app.Close()
 	}
-	s.app, s.path, s.dirty, s.sel, s.chat, s.draft, s.specs, s.frontier = a, path, false, nil, nil, nil, nil, false
+	s.app, s.path, s.dirty, s.sel, s.chat, s.draft, s.specs = a, path, false, nil, nil, nil, nil
 	a.SetActor(app.Actor{CreatedBy: "user"})
 	a.Bus.Subscribe(func(ev events.Event) { s.hub.Publish(Notice{Kind: "event", Type: ev.Type, Seq: ev.Seq}) })
 	for _, p := range a.AH.Prompts { // reopen: rebuild the conversation from the project record
-		if prov, _, _ := strings.Cut(p.Model, ":"); prov != "" && !config.Local(prov) {
-			s.frontier = true
-		}
 		s.sayWith("user", p.Text, "", true, "", p.Images)
 		s.chat[len(s.chat)-1].Docs = a.PromptDocs(p)
 		if p.Summary != "" {
