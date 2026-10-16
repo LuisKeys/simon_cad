@@ -258,3 +258,68 @@ func TestWorkspacePersistsAcrossReloads(t *testing.T) {
 		t.Fatal("the next save must write workspace.json")
 	}
 }
+
+// Undo and redo always act on the latest edit, whatever it was: workspace-settings changes are
+// undo steps interleaved with the ChangeSets. The ChangeSet-only Undo (agent revert, draft
+// discard) refuses to cross a settings change instead of skipping it.
+func TestUndoRedoInterleavesWorkspaceAndModelEdits(t *testing.T) {
+	useGlobalWorkspace(t, workspace.Defaults())
+	a := New("ws", clock)
+	defer a.Close()
+	mustOK(t, a.ApplyTool("create_box", []byte(`{"id":"b","dx":10,"dy":10,"dz":10}`), PolicyAuto))
+	mustOK(t, a.ApplyTool("set_units", []byte(`{"linear":"cm"}`), PolicyAuto))
+	mustOK(t, a.ApplyTool("create_box", []byte(`{"id":"c","dx":5,"dy":5,"dz":5,"x":50}`), PolicyAuto))
+	mustOK(t, a.ApplyTool("configure_grid", []byte(`{"spacing":2.5}`), PolicyAuto))
+	mustOK(t, a.ApplyTool("set_units", []byte(`{"linear":"cm"}`), PolicyAuto)) // no change: no step
+
+	type snap struct {
+		unit    string
+		spacing float64
+		nodes   int
+	}
+	now := func() snap { return snap{a.Workspace.Units.Linear, a.Workspace.Grid.Spacing, len(a.Graph.Nodes)} }
+	def := workspace.Defaults()
+	want := []snap{
+		{def.Units.Linear, def.Grid.Spacing, 0},
+		{def.Units.Linear, def.Grid.Spacing, 1},
+		{"cm", def.Grid.Spacing, 1},
+		{"cm", def.Grid.Spacing, 2},
+		{"cm", 2.5, 2},
+	}
+	if got := now(); got != want[4] {
+		t.Fatalf("start: %+v", got)
+	}
+	if _, err := a.Undo(); err == nil || !strings.Contains(err.Error(), "not a model change") {
+		t.Fatalf("ChangeSet-only Undo must refuse a settings step, got %v", err)
+	}
+	for i := 3; i >= 0; i-- {
+		if _, err := a.UndoStep(); err != nil {
+			t.Fatal(err)
+		}
+		if got := now(); got != want[i] {
+			t.Fatalf("after undo to step %d: %+v, want %+v", i, got, want[i])
+		}
+	}
+	if a.CanUndo() {
+		t.Fatal("everything was undone")
+	}
+	for i := 1; i <= 4; i++ {
+		if _, err := a.RedoStep(); err != nil {
+			t.Fatal(err)
+		}
+		if got := now(); got != want[i] {
+			t.Fatalf("after redo to step %d: %+v, want %+v", i, got, want[i])
+		}
+	}
+	if a.CanRedo() {
+		t.Fatal("everything was redone")
+	}
+	// A new edit after an undo drops the redo stack, settings steps included.
+	if _, err := a.UndoStep(); err != nil {
+		t.Fatal(err)
+	}
+	mustOK(t, a.ApplyTool("create_box", []byte(`{"id":"d","dx":5,"dy":5,"dz":5,"x":-50}`), PolicyAuto))
+	if a.CanRedo() {
+		t.Fatal("a new edit must clear redo")
+	}
+}

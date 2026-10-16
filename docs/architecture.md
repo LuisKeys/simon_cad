@@ -258,9 +258,12 @@ values) on request.
 workspace tools (`set_units`, `configure_grid`, `configure_snapping`,
 `restore_workspace_defaults`; reads `get_workspace_settings`, `snap_calculate`, `convert_units`),
 which validate with `workspace.Settings.Validate` and store through `App.SetWorkspace`. They are
-query tools, not ChangeSets: workspace settings are not CAD state, are not undone with undo and
-never trigger a rebuild; each call is still in `agent-history.json` and each change publishes a
-`WorkspaceChanged` event.
+query tools, not ChangeSets: workspace settings are not CAD state and never trigger a rebuild.
+Each change is still an undo step: `App.SetWorkspace` pushes a `commands.Reversible` onto the
+Manager's undo stack, interleaved with the ChangeSets, so Undo/Redo (`Manager.UndoStep` /
+`RedoStep`) always act on the latest edit of any kind. `Manager.Undo`/`Redo` stay ChangeSet-only
+(the agent's revert and draft discard refuse to cross a settings change). Each call is in
+`agent-history.json` and each change publishes a `WorkspaceChanged` event.
 
 **Grid rendering** (`frontend/grid.js`, lines from `grid-model.js`): lines at `origin + k·spacing`
 in world space, major lines every `major_interval` cells, centre lines in the axis colours. The

@@ -124,6 +124,11 @@ try {
   await page.keyboard.press('Control+Shift+Z');
   await page.waitForFunction((x) => window.simonViewport.bodies.has(x), moved);
   assert.deepEqual(await origin(moved), o1, 'redo restores the move');
+  // The header buttons do the same.
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => window.simonViewport.bodies.has('b'));
+  await page.click('#btn-redo');
+  await page.waitForFunction((x) => window.simonViewport.bodies.has(x), moved);
 
   // 5. Grid snapping: the origin lands on the 10 mm grid.
   await api('tool', { name: 'configure_snapping', args: { enabled: true, grid: true, translation: true, rotation: true, rotation_increment: 15 } });

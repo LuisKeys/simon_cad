@@ -108,6 +108,37 @@ type Evaluator interface {
 	Evaluate(g *cadir.Graph) (Evaluation, error)
 }
 
+// Reversible is an undoable edit outside the model (the workspace settings, say). It shares
+// the undo/redo stacks with the ChangeSets, so undo always reverts the latest edit of any kind.
+type Reversible interface {
+	Label() string
+	Revert() error
+	Reapply() error
+}
+
+// Step is one entry of the undo/redo stacks: a ChangeSet, or else an edit outside the model.
+type Step struct {
+	ChangeSet *ChangeSet
+	Other     Reversible
+}
+
+// Label names the step for messages.
+func (s Step) Label() string {
+	if s.ChangeSet != nil {
+		if s.ChangeSet.Intent != "" {
+			return s.ChangeSet.ID + ": " + s.ChangeSet.Intent
+		}
+		return s.ChangeSet.ID
+	}
+	return s.Other.Label()
+}
+
+// entry is a stack element: a ChangeSet id, or an edit outside the model.
+type entry struct {
+	id    string
+	other Reversible
+}
+
 // Manager owns the live graph and the ChangeSet log with undo/redo.
 type Manager struct {
 	G    *cadir.Graph
@@ -116,8 +147,8 @@ type Manager struct {
 	Now  func() time.Time
 
 	Log  []*ChangeSet
-	undo []string
-	redo []string
+	undo []entry
+	redo []entry
 }
 
 func NewManager(g *cadir.Graph, ev Evaluator, bus *events.Bus) *Manager {
@@ -137,7 +168,7 @@ func (m *Manager) Restore(log []*ChangeSet) {
 	}
 	sort.Slice(committed, func(i, j int) bool { return committed[i].Seq < committed[j].Seq })
 	for _, cs := range committed {
-		m.undo = append(m.undo, cs.ID)
+		m.undo = append(m.undo, entry{id: cs.ID})
 	}
 }
 
@@ -347,7 +378,7 @@ func (m *Manager) Commit(id string) (*ChangeSet, error) {
 		return nil, err
 	}
 	cs.State = StateCommitted
-	m.undo = append(m.undo, cs.ID)
+	m.undo = append(m.undo, entry{id: cs.ID})
 	m.redo = nil
 	m.publish(events.ChangeSetCommitted, map[string]any{"id": cs.ID, "affected": cs.Affected, "result_hash": cs.ResultHash})
 	m.publish(events.FeatureGraphUpdated, map[string]any{"hash": m.G.Hash(), "nodes": len(m.G.Nodes)})
@@ -365,44 +396,94 @@ func (m *Manager) Reject(id string) error {
 	return nil
 }
 
-// Undo reverts the most recently committed ChangeSet.
-func (m *Manager) Undo() (*ChangeSet, error) {
-	if len(m.undo) == 0 {
-		return nil, fmt.Errorf("nothing to undo")
-	}
-	id := m.undo[len(m.undo)-1]
-	cs := m.find(id)
-	if err := m.applyRecords(cs.Inverse, true); err != nil {
-		return nil, err
-	}
-	m.undo = m.undo[:len(m.undo)-1]
-	m.redo = append(m.redo, id)
-	cs.State = StateUndone
-	m.publish(events.ChangeSetUndone, map[string]any{"id": id})
-	m.publish(events.FeatureGraphUpdated, map[string]any{"hash": m.G.Hash(), "nodes": len(m.G.Nodes)})
-	return cs, nil
+// Push records an edit outside the model that was just applied, as the newest undo step.
+func (m *Manager) Push(r Reversible) {
+	m.undo = append(m.undo, entry{other: r})
+	m.redo = nil
 }
 
-// Redo re-applies the most recently undone ChangeSet.
-func (m *Manager) Redo() (*ChangeSet, error) {
-	if len(m.redo) == 0 {
-		return nil, fmt.Errorf("nothing to redo")
+// Undo reverts the most recently committed ChangeSet. It fails when the newest undo step is
+// an edit outside the model; UndoStep reverts whatever the newest step is.
+func (m *Manager) Undo() (*ChangeSet, error) {
+	if len(m.undo) > 0 && m.undo[len(m.undo)-1].other != nil {
+		return nil, fmt.Errorf("the latest change (%s) is not a model change", m.undo[len(m.undo)-1].other.Label())
 	}
-	id := m.redo[len(m.redo)-1]
-	cs := m.find(id)
+	st, err := m.UndoStep()
+	return st.ChangeSet, err
+}
+
+// Redo re-applies the most recently undone ChangeSet. It fails when the newest redo step is
+// an edit outside the model; RedoStep re-applies whatever the newest step is.
+func (m *Manager) Redo() (*ChangeSet, error) {
+	if len(m.redo) > 0 && m.redo[len(m.redo)-1].other != nil {
+		return nil, fmt.Errorf("the next change to redo (%s) is not a model change", m.redo[len(m.redo)-1].other.Label())
+	}
+	st, err := m.RedoStep()
+	return st.ChangeSet, err
+}
+
+// UndoStep reverts the newest undo step, a ChangeSet or an edit outside the model.
+func (m *Manager) UndoStep() (Step, error) {
+	if len(m.undo) == 0 {
+		return Step{}, fmt.Errorf("nothing to undo")
+	}
+	e := m.undo[len(m.undo)-1]
+	if e.other != nil {
+		if err := e.other.Revert(); err != nil {
+			return Step{}, err
+		}
+		m.undo = m.undo[:len(m.undo)-1]
+		m.redo = append(m.redo, e)
+		return Step{Other: e.other}, nil
+	}
+	cs := m.find(e.id)
+	if err := m.applyRecords(cs.Inverse, true); err != nil {
+		return Step{}, err
+	}
+	m.undo = m.undo[:len(m.undo)-1]
+	m.redo = append(m.redo, e)
+	cs.State = StateUndone
+	m.publish(events.ChangeSetUndone, map[string]any{"id": e.id})
+	m.publish(events.FeatureGraphUpdated, map[string]any{"hash": m.G.Hash(), "nodes": len(m.G.Nodes)})
+	return Step{ChangeSet: cs}, nil
+}
+
+// RedoStep re-applies the newest redo step, a ChangeSet or an edit outside the model.
+func (m *Manager) RedoStep() (Step, error) {
+	if len(m.redo) == 0 {
+		return Step{}, fmt.Errorf("nothing to redo")
+	}
+	e := m.redo[len(m.redo)-1]
+	if e.other != nil {
+		if err := e.other.Reapply(); err != nil {
+			return Step{}, err
+		}
+		m.redo = m.redo[:len(m.redo)-1]
+		m.undo = append(m.undo, e)
+		return Step{Other: e.other}, nil
+	}
+	cs := m.find(e.id)
 	if err := m.applyRecords(cs.Commands, false); err != nil {
-		return nil, err
+		return Step{}, err
 	}
 	m.redo = m.redo[:len(m.redo)-1]
-	m.undo = append(m.undo, id)
+	m.undo = append(m.undo, e)
 	cs.State = StateCommitted
-	m.publish(events.ChangeSetRedone, map[string]any{"id": id})
+	m.publish(events.ChangeSetRedone, map[string]any{"id": e.id})
 	m.publish(events.FeatureGraphUpdated, map[string]any{"hash": m.G.Hash(), "nodes": len(m.G.Nodes)})
-	return cs, nil
+	return Step{ChangeSet: cs}, nil
 }
 
 // CommittedIDs lists the ChangeSets currently applied, oldest first.
-func (m *Manager) CommittedIDs() []string { return append([]string(nil), m.undo...) }
+func (m *Manager) CommittedIDs() []string {
+	var out []string
+	for _, e := range m.undo {
+		if e.other == nil {
+			out = append(out, e.id)
+		}
+	}
+	return out
+}
 
 // ReplayOnto rebuilds a graph by applying the given committed ChangeSets in order to g.
 func ReplayOnto(g *cadir.Graph, sets []*ChangeSet) error {

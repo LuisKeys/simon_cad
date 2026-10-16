@@ -364,7 +364,7 @@
 <section>
 <h2 id="history" data-group="Prompt cookbook">Undo, checkpoints and design replay</h2>
 <ul>
-  <li><b>Undo / Redo</b>: header buttons, <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>.</li>
+  <li><b>Undo / Redo</b>: header buttons, <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> (or <kbd>Ctrl</kbd>+<kbd>Y</kbd>). They always act on the latest edit, whatever it was: a model change or a change of the units, grid or snapping. They also work from the chat box while it is empty.</li>
   <li><b>Timeline</b>: each committed ChangeSet creates a checkpoint labelled with its intent. <b>Restore</b> proposes returning to it (previewed, never auto-committed); <b>Compare</b> shows what differs.</li>
   <li><b>▶ Play design</b> replays the committed ChangeSets one at a time so the geometry appears feature by feature.</li>
 </ul>
@@ -529,7 +529,7 @@ a size or a position. Grid changes show in the viewport at once. New projects st
 <tr><td><kbd>?</kbd></td><td>Show / hide the shortcuts panel (also the keyboard button in the header)</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd></td><td>Save</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd></td><td>Undo</td></tr>
-<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td>Redo</td></tr>
+<tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> · <kbd>Ctrl</kbd> + <kbd>Y</kbd></td><td>Redo</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>D</kbd></td><td>Duplicate the selected bodies</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>G</kbd></td><td>Group the selection</td></tr>
 <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>Ungroup the selection</td></tr>

@@ -5,7 +5,7 @@
 export const SECTIONS = [
   { title: 'Essentials', rows: [
     { keys: [['Ctrl', 'Z']], label: 'Undo' },
-    { keys: [['Ctrl', 'Shift', 'Z']], label: 'Redo' },
+    { keys: [['Ctrl', 'Shift', 'Z'], ['Ctrl', 'Y']], label: 'Redo' },
     { keys: [['Ctrl', 'S']], label: 'Save the project' },
     { keys: [['Delete'], ['Backspace']], label: 'Delete the selection' },
     { keys: [['Esc']], label: 'Close a menu or dialog · clear the selection' },

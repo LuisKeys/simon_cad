@@ -1083,8 +1083,9 @@ async function lifecycle(action, id) {
   scheduleRefresh();
 }
 
-async function doUndo() { try { const c = await api('undo', {}); toast(`Undid ${c.id}`, 'ok'); } catch (e) { toast(e.message, 'bad'); } scheduleRefresh(); }
-async function doRedo() { try { const c = await api('redo', {}); toast(`Redid ${c.id}`, 'ok'); } catch (e) { toast(e.message, 'bad'); } scheduleRefresh(); }
+// Undo / redo the latest edit of any kind: a model change or a workspace-settings change.
+async function doUndo() { try { const c = await api('undo', {}); toast(`Undid ${c.id || c.intent}`, 'ok'); } catch (e) { toast(e.message, 'bad'); } scheduleRefresh(); }
+async function doRedo() { try { const c = await api('redo', {}); toast(`Redid ${c.id || c.intent}`, 'ok'); } catch (e) { toast(e.message, 'bad'); } scheduleRefresh(); }
 
 async function restoreCheckpoint(c) {
   try {
@@ -1580,6 +1581,8 @@ async function save() {
   } catch (e) { toast(e.message, 'bad'); }
   scheduleRefresh();
 }
+$('btn-undo').addEventListener('click', doUndo);
+$('btn-redo').addEventListener('click', doRedo);
 $('btn-save').addEventListener('click', save);
 $('btn-export').addEventListener('click', async () => {
   const r = await ask({ title: 'Export to (path)', value: `out/${S.state?.name || 'model'}.step`, format: true, ok: 'Export' });
@@ -1612,6 +1615,8 @@ const palette = initPalette({ S, api, toast, callTool: (...a) => callTool(...a),
 const shortcuts = initShortcuts($('shortcuts'));
 $('btn-shortcuts').addEventListener('click', () => shortcuts.toggle());
 
+const emptyPrompt = () => document.activeElement === $('prompt') && !$('prompt').value;
+
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
@@ -1639,7 +1644,12 @@ document.addEventListener('keydown', (e) => {
   } else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
   else if (mod && !typing && !overlay && e.key.toLowerCase() === 'd' && selIds().length) { e.preventDefault(); actionEnv.duplicate(); }
   else if (mod && !typing && !overlay && e.key.toLowerCase() === 'g' && selIds().length) { e.preventDefault(); e.shiftKey ? actionEnv.ungroup() : actionEnv.group(); }
-  else if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
+  else if (mod && !overlay && (e.key.toLowerCase() === 'z' || (e.key.toLowerCase() === 'y' && !e.shiftKey)) && (!typing || emptyPrompt())) {
+    // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y act on the model, also from the empty chat box (focus stays
+    // there after a prompt); a field with text keeps the browser's own text undo.
+    e.preventDefault();
+    e.shiftKey || e.key.toLowerCase() === 'y' ? doRedo() : doUndo();
+  }
   else if (e.ctrlKey && e.altKey && !e.shiftKey && (e.code === 'Digit4' || e.code === 'Numpad4') && !typing && !overlay) { e.preventDefault(); vp.layout.toggleMode(); renderCtxBar(); }
   else if (pathEditor.active && !mod) { /* the path editor owns the plain keys */ }
   else if (!typing && !mod && !overlay && !e.altKey && (e.key === 'g' || e.key === 'r') && !S.playing && !S.printsim && viewportFocused()) {

@@ -248,6 +248,7 @@ func (s *Service) Reject(id string) error {
 	return nil
 }
 
+// Undo reverts the latest edit, whatever it is: a ChangeSet or a workspace-settings change.
 func (s *Service) Undo() (ChangeSetCard, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -255,26 +256,27 @@ func (s *Service) Undo() (ChangeSetCard, error) {
 		return ChangeSetCard{}, err
 	}
 	s.keepDraft()
-	cs, err := s.app.Undo()
+	st, err := s.app.UndoStep()
 	if err != nil {
 		return ChangeSetCard{}, err
 	}
-	s.say("system", "Undid "+cs.ID+": "+cs.Intent, "", true, cs.ID)
+	s.say("system", "Undid "+st.Label(), "", true, app.StepID(st))
 	s.changed()
-	return app.CardOf(cs), nil
+	return app.StepCard(st, "undone"), nil
 }
 
+// Redo re-applies the latest undone edit, whatever it is.
 func (s *Service) Redo() (ChangeSetCard, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.guard(); err != nil {
 		return ChangeSetCard{}, err
 	}
-	cs, err := s.app.Redo()
+	st, err := s.app.RedoStep()
 	if err != nil {
 		return ChangeSetCard{}, err
 	}
-	s.say("system", "Redid "+cs.ID+": "+cs.Intent, "", true, cs.ID)
+	s.say("system", "Redid "+st.Label(), "", true, app.StepID(st))
 	s.changed()
-	return app.CardOf(cs), nil
+	return app.StepCard(st, "redone"), nil
 }

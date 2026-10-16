@@ -13,9 +13,9 @@ import (
 // Workspace tools: the project's display units, reference grid and snapping. They are the
 // one way to change these settings — the Settings screen calls the same tools — and they
 // never touch the model: geometry is always millimetres, so switching a project to inches
-// moves nothing. Like set_mesh_detail they are not ChangeSets (there is nothing to rebuild
-// or undo in the model); each call is still recorded in the project's tool-call trace and
-// the settings are saved with the project.
+// moves nothing. They are not ChangeSets (there is nothing to rebuild in the model), but each
+// change is still an undo step, interleaved with the ChangeSets; each call is also recorded in
+// the project's tool-call trace and the settings are saved with the project.
 
 // IsWorkspaceTool reports whether name edits the workspace settings (applied directly from
 // the UI, like a display preference).

@@ -240,7 +240,7 @@ Primitivas:
 
 | Grupo | Atajos |
 |---|---|
-| Esenciales | Ctrl+Z deshacer · Ctrl+Shift+Z rehacer · Ctrl+S guardar · Supr/Backspace eliminar · Esc cerrar/limpiar · Ctrl+K paleta · `?` atajos |
+| Esenciales | Ctrl+Z deshacer · Ctrl+Shift+Z / Ctrl+Y rehacer · Ctrl+S guardar · Supr/Backspace eliminar · Esc cerrar/limpiar · Ctrl+K paleta · `?` atajos |
 | Selección y edición | Clic · Shift+clic · Ctrl+clic · `B` caja · `G` mover · `R` rotar · Ctrl+D duplicar · Ctrl+G agrupar · Ctrl+Shift+G desagrupar · clic derecho menú |
 | Vista y cámara | `F` fit · rueda zoom · arrastre orbitar/pan · arrastre central/derecho pan · `M` medir · Ctrl+Alt+4 Single/Quad · doble clic maximizar |
 | Durante mover/rotar | Clic/Enter confirmar · Esc/clic derecho cancelar · `X`/`Y`/`Z` eje · Shift+`X`/`Y`/`Z` plano · Ctrl sin snapping · `P` pivote |

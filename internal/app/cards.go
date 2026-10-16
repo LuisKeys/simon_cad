@@ -51,3 +51,21 @@ func CardOf(cs *commands.ChangeSet) ChangeSetCard {
 	}
 	return c
 }
+
+// StepID is the ChangeSet of an undo/redo step, or "" for an edit outside the model.
+func StepID(st commands.Step) string {
+	if st.ChangeSet != nil {
+		return st.ChangeSet.ID
+	}
+	return ""
+}
+
+// StepCard is the card of an undo/redo step; an edit outside the model has no ChangeSet, so
+// its card only names it.
+func StepCard(st commands.Step, state string) ChangeSetCard {
+	if st.ChangeSet != nil {
+		return CardOf(st.ChangeSet)
+	}
+	return ChangeSetCard{State: state, Intent: st.Label(), Commands: []string{}, Affected: []string{}, Warnings: []string{},
+		Validation: []Validation{}, Valid: true, Added: []string{}, Removed: []string{}, Modified: []string{}}
+}

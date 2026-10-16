@@ -91,7 +91,7 @@ func (a *App) MeshDetail() string {
 }
 
 // SetWorkspace validates and stores the project's workspace settings. It is what the
-// workspace tools call; geometry is never touched.
+// workspace tools call; geometry is never touched. The change is an undo step of its own.
 func (a *App) SetWorkspace(s workspace.Settings) error {
 	s = s.Normalized()
 	if err := s.Validate(); err != nil {
@@ -100,7 +100,23 @@ func (a *App) SetWorkspace(s workspace.Settings) error {
 	if s.Equal(a.Workspace) {
 		return nil
 	}
-	a.Workspace = s.Clone()
-	a.Bus.Publish(events.WorkspaceChanged, a.Workspace)
+	before := a.Workspace.Clone()
+	a.setWorkspace(s)
+	a.Mgr.Push(&workspaceEdit{a: a, before: before, after: s.Clone()})
 	return nil
 }
+
+func (a *App) setWorkspace(s workspace.Settings) {
+	a.Workspace = s.Clone()
+	a.Bus.Publish(events.WorkspaceChanged, a.Workspace)
+}
+
+// workspaceEdit is a change of the workspace settings on the undo/redo stacks.
+type workspaceEdit struct {
+	a             *App
+	before, after workspace.Settings
+}
+
+func (w *workspaceEdit) Label() string  { return "workspace settings" }
+func (w *workspaceEdit) Revert() error  { w.a.setWorkspace(w.before); return nil }
+func (w *workspaceEdit) Reapply() error { w.a.setWorkspace(w.after); return nil }

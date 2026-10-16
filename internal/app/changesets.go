@@ -267,6 +267,8 @@ func (a *App) Commit(id string) (*commands.ChangeSet, error) {
 
 func (a *App) Reject(id string) error { return a.Mgr.Reject(id) }
 
+// Undo reverts the latest committed ChangeSet. It fails when the latest undo step is an edit
+// outside the model (the workspace settings); UndoStep reverts whatever the latest step is.
 func (a *App) Undo() (*commands.ChangeSet, error) {
 	cs, err := a.Mgr.Undo()
 	if err != nil {
@@ -285,6 +287,28 @@ func (a *App) Redo() (*commands.ChangeSet, error) {
 	a.trackForCheckpoint(cs)
 	_, err = a.refresh()
 	return cs, err
+}
+
+// UndoStep reverts the latest edit of any kind: a ChangeSet or a workspace-settings change.
+func (a *App) UndoStep() (commands.Step, error) {
+	st, err := a.Mgr.UndoStep()
+	if err != nil || st.ChangeSet == nil {
+		return st, err
+	}
+	a.dropFromSinceCP(st.ChangeSet.ID)
+	_, err = a.refresh()
+	return st, err
+}
+
+// RedoStep re-applies the latest undone edit of any kind.
+func (a *App) RedoStep() (commands.Step, error) {
+	st, err := a.Mgr.RedoStep()
+	if err != nil || st.ChangeSet == nil {
+		return st, err
+	}
+	a.trackForCheckpoint(st.ChangeSet)
+	_, err = a.refresh()
+	return st, err
 }
 
 // trackForCheckpoint queues a committed ChangeSet for the next checkpoint. Appearance-only
