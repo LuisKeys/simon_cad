@@ -486,8 +486,11 @@ const justLongPressed = (el) => performance.now() - (el._lp ?? -1e9) < 700;
 
 function renderTree(st) {
   const el = $('tree');
+  // playback shows the tree as it stood at the current step (read-only, nothing selected)
+  el.classList.toggle('replaying', !!S.playTree);
+  if (S.playTree) st = { ...st, tree: S.playTree, selection: {} };
   if (!st.tree.length) { el.replaceChildren(h('div', { class: 'muted' }, 'No features yet.')); return; }
-  const sel = S.selection ?? st.selection;
+  const sel = (S.playTree ? st.selection : S.selection) ?? st.selection;
   const selFeatures = new Set((sel.selectors ?? []).map(featureOf));
   const nodeEl = (n) => {
     const open = S.openNode === n.id;
@@ -532,7 +535,7 @@ function renderTree(st) {
         n.errors.length ? h('div', { class: 'errors' }, n.errors[0]) : null,
         n.visible ? appearanceEditor([n]) : null, paramEditor(n)));
     } else if (n.errors.length) kids.push(h('div', { class: 'detail' }, h('div', { class: 'errors' }, n.errors[0])));
-    return h('div', { class: `node${selected ? ' sel' : ''}${n.suppressed || hiddenApp ? ' off' : ''}`, role: 'none', dataset: { type: n.type } }, ...kids);
+    return h('div', { class: `node${selected ? ' sel' : ''}${S.playTree && S.playFresh?.has(n.id) ? ' fresh' : ''}${n.suppressed || hiddenApp ? ' off' : ''}`, role: 'none', dataset: { type: n.type } }, ...kids);
   };
   // Grouped features are listed under their group, which sits where its first member is.
   const out = [];
@@ -1019,15 +1022,19 @@ function changeSetCard(cs) {
 
 function renderTimeline(st) {
   const el = $('timeline');
+  // playback shows the steps reached so far (read-only: no selection, Restore or Compare)
+  const playing = !!S.playCheckpoints;
+  el.classList.toggle('replaying', playing);
+  if (playing) st = { ...st, checkpoints: S.playCheckpoints };
   const n = st.checkpoints.length;
   $('hist-title').textContent = n ? `History · ${n} step${n === 1 ? '' : 's'}` : 'History';
   const prev = el.scrollLeft, grew = n > (S.cpCount ?? 0);
   S.cpCount = n;
-  if (S.histSel && !st.checkpoints.some((c) => c.id === S.histSel)) S.histSel = null;
+  if (!playing && S.histSel && !st.checkpoints.some((c) => c.id === S.histSel)) S.histSel = null;
   if (!n) el.replaceChildren(h('div', { class: 'none' }, 'Checkpoints appear here as the design evolves.'));
   else {
     el.replaceChildren(...st.checkpoints.map((c) => {
-      const sel = S.histSel === c.id;
+      const sel = !playing && S.histSel === c.id;
       return h('button', { type: 'button', class: `cp${c.current ? ' current' : ''}${sel ? ' sel' : ''}`, 'aria-pressed': String(sel), title: `${c.label}\n${c.time}`,
         onclick: () => { S.histSel = sel ? null : c.id; renderTimeline(S.state); } },
         h('div', { class: 'label' }, h('span', { class: 'n' }, c.seq), c.label),
@@ -1036,7 +1043,7 @@ function renderTimeline(st) {
     el.scrollLeft = grew ? el.scrollWidth : prev;
   }
   // Restore / Compare exist only once a step is selected.
-  const c = st.checkpoints.find((x) => x.id === S.histSel);
+  const c = playing ? null : st.checkpoints.find((x) => x.id === S.histSel);
   const acts = $('hist-actions');
   acts.hidden = !c;
   if (c) acts.replaceChildren(
@@ -1156,6 +1163,10 @@ async function playDesign() {
   S.playing = true;
   S.playAbort = false;
   S.playChat = [];
+  S.playTree = [];
+  S.playCheckpoints = [];
+  renderTree(S.state);
+  renderTimeline(S.state);
   clearPreview();
   vp.clear();
   const el = $('chat');
@@ -1254,6 +1265,12 @@ async function playDesign() {
       for (const l of f.chat?.before ?? []) { if (S.playAbort) break; await say(l); }
       if (S.playAbort) break;
       vp.applyDelta(f.scene);
+      const had = new Set(S.playTree.map((n) => n.id));
+      S.playTree = f.tree ?? [];
+      S.playFresh = new Set(S.playTree.filter((n) => !had.has(n.id)).map((n) => n.id));
+      renderTree(S.state);
+      S.playCheckpoints = f.checkpoints ?? [];
+      renderTimeline(S.state);
       // Settings → Viewport → Show Playback Status can hide it (a clean viewport for recording demos)
       $('hud').textContent = vp.viewPrefs.showPlaybackStatus === false ? ''
         : i === 0 ? 'Playback… (Esc to stop)' : `${i}/${f.total} · ${f.changeset?.intent ?? ''}`;
@@ -1264,6 +1281,7 @@ async function playDesign() {
   } catch (e) { toast(e.message, 'bad'); }
   S.playing = false;
   S.playChat = null;
+  S.playTree = S.playFresh = S.playCheckpoints = null;
   $('send').classList.remove('pressed');
   prompt.readOnly = false;
   prompt.value = draft;

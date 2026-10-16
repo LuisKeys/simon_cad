@@ -30,6 +30,18 @@ func (s *Service) checkpoints() []CheckpointView {
 	return out
 }
 
+// checkpointsAt lists the checkpoints reached by playback frame n; the last one is current.
+func (s *Service) checkpointsAt(n int) []CheckpointView {
+	out := []CheckpointView{}
+	for _, c := range s.app.CheckpointsAt(n) {
+		out = append(out, CheckpointView{ID: c.ID, Seq: c.Seq, Label: c.Label, Actor: c.Actor, Time: c.Time, ChangeSets: c.ChangeSets})
+	}
+	if len(out) > 0 {
+		out[len(out)-1].Current = true
+	}
+	return out
+}
+
 // Restore proposes a return to a checkpoint. It is never auto-committed: the user previews
 // and commits it like any other ChangeSet.
 func (s *Service) Restore(ref string) (Outcome, error) {
@@ -94,6 +106,9 @@ type Frame struct {
 	ChangeSet *ChangeSetCard   `json:"changeset,omitempty"`
 	Chat      *app.StepChat    `json:"chat,omitempty"` // the conversation behind this step, replayed in the chat panel
 	Scene     *rendering.Delta `json:"scene"`
+	Tree      []TreeNode       `json:"tree"` // the design tree as it stood after this step
+	// Checkpoints are the history steps reached by this step; the last one is current.
+	Checkpoints []CheckpointView `json:"checkpoints"`
 }
 
 // PlaybackFrame rebuilds the model after the first i committed ChangeSets, so geometry
@@ -102,7 +117,7 @@ func (s *Service) PlaybackFrame(i int, known map[string]string) (*Frame, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sets := s.app.Committed()
-	m, err := s.app.ModelAfter(i)
+	g, m, err := s.app.GraphAfter(i)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +132,7 @@ func (s *Service) PlaybackFrame(i int, known map[string]string) (*Frame, error) 
 		}
 		sort.Strings(d.Removed)
 	}
-	f := &Frame{Index: i, Total: len(sets), Scene: d}
+	f := &Frame{Index: i, Total: len(sets), Scene: d, Tree: treeRows(g, m, s.app.ComponentsOutOfDate()), Checkpoints: s.checkpointsAt(i)}
 	if i > 0 {
 		c := app.CardOf(sets[i-1])
 		f.ChangeSet = &c

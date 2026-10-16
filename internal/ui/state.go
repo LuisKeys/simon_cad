@@ -9,6 +9,7 @@ import (
 	"github.com/accelone/simoncad/internal/agent/workflow"
 	"github.com/accelone/simoncad/internal/app"
 	"github.com/accelone/simoncad/internal/cadir"
+	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/workspace"
 )
 
@@ -155,10 +156,6 @@ func (s *Service) State() (*State, error) {
 		return nil, err
 	}
 	g := s.app.Snapshot()
-	leaf := map[string]bool{}
-	for _, id := range m.Leaves {
-		leaf[id] = true
-	}
 	st := &State{Name: s.app.Meta.Name, Path: s.path, Dirty: s.dirty, Units: g.Units, Level: s.level, Busy: s.busy,
 		Tree: []TreeNode{}, Pending: []ChangeSetCard{}, Recent: []ChangeSetCard{}, Checkpoints: s.checkpoints(),
 		Chat: append([]ChatMessage{}, s.chat...), Selection: s.selectionView(), OpenWarnings: s.app.OpenWarnings, CanUndo: s.app.CanUndo(),
@@ -189,6 +186,25 @@ func (s *Service) State() (*State, error) {
 	}
 	stale := s.app.ComponentsOutOfDate()
 	st.Reusable, st.Stale = s.app.Meta.Reusable, len(stale)
+	st.Tree = treeRows(g, m, stale)
+	for _, cs := range s.app.Pending() {
+		st.Pending = append(st.Pending, app.CardOf(cs))
+	}
+	sets := s.app.Committed()
+	for i := len(sets) - 1; i >= 0 && len(st.Recent) < 8; i-- {
+		st.Recent = append(st.Recent, app.CardOf(sets[i]))
+	}
+	return st, nil
+}
+
+// treeRows lists the design-tree rows of g, rebuilt as m. stale holds the component
+// instances whose component has changed on disk.
+func treeRows(g *cadir.Graph, m *rebuild.Model, stale map[string]string) []TreeNode {
+	leaf := map[string]bool{}
+	for _, id := range m.Leaves {
+		leaf[id] = true
+	}
+	rows := []TreeNode{}
 	for _, n := range g.Nodes {
 		name := n.Metadata.Name
 		if name == "" {
@@ -202,14 +218,7 @@ func (s *Service) State() (*State, error) {
 			row.Component, row.ComponentOK = c, n.Status == "ok"
 			_, row.OutOfDate = stale[n.ID]
 		}
-		st.Tree = append(st.Tree, row)
+		rows = append(rows, row)
 	}
-	for _, cs := range s.app.Pending() {
-		st.Pending = append(st.Pending, app.CardOf(cs))
-	}
-	sets := s.app.Committed()
-	for i := len(sets) - 1; i >= 0 && len(st.Recent) < 8; i-- {
-		st.Recent = append(st.Recent, app.CardOf(sets[i]))
-	}
-	return st, nil
+	return rows
 }

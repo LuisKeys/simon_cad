@@ -115,11 +115,16 @@ try {
   await page.waitForFunction(() => document.querySelector('#chat.replaying .msg.system')?.textContent.startsWith('Manual edit'), null, { timeout: 15000 });
   await page.waitForFunction(() => /^Add four/.test(document.querySelector('#prompt').value) && !document.querySelector('#chat.replaying .msg.user'), null, { timeout: 15000 });
   await page.waitForFunction(() => document.querySelector('#chat.replaying .msg.user')?.textContent === 'Add four M3 holes here', null, { timeout: 15000 });
+  // the design tree follows the replay: only the plate so far, not the holes still to come
+  assert.equal(await page.locator('#tree.replaying .row').count(), 1, 'the tree shows the features built so far');
+  assert.equal(await page.locator('#timeline.replaying .cp').count(), 1, 'the history shows the steps reached so far');
   await page.waitForFunction(() => document.querySelector('#hud').textContent.includes('2/2'), null, { timeout: 15000 });
   await page.waitForFunction(() => /^I proposed four/.test(document.querySelector('#chat.replaying .msg.agent')?.textContent ?? ''), null, { timeout: 15000 });
   await page.screenshot({ path: join(shots, '5-playback-chat.png') });
   await page.waitForFunction(() => !/\d\/\d|Playback/.test(document.querySelector('#hud').textContent) && window.simonViewport.bodies.size === 1, null, { timeout: 15000 });
   assert.equal(await page.locator('#chat.replaying').count(), 0, 'the real chat is back after playback');
+  assert.equal(await page.locator('#tree.replaying').count(), 0, 'the real tree is back after playback');
+  assert.equal(await page.locator('#timeline.replaying').count(), 0, 'the real history is back after playback');
   assert.equal(await page.inputValue('#prompt'), 'my draft', 'the composer gets its draft back after playback');
   await page.fill('#prompt', '');
   assert.ok((await page.locator('#chat .msg.tool').count()) >= 1, 'the real chat keeps its tool rows');

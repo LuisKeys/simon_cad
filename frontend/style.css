@@ -262,6 +262,9 @@ button.ghost.wide { width: 100%; margin-top: 8px; }
 #chat.replaying { box-shadow: inset 0 0 0 1px var(--accent-soft); border-radius: 10px; overflow-anchor: none; }
 #chat.replaying > .msg { animation: fadein 200ms ease; }
 #chat.replaying .typing-rest { visibility: hidden; }
+#tree.replaying .node, #tree.replaying .row { pointer-events: none; }
+#tree.replaying .node.fresh { animation: fadein 200ms ease; }
+#timeline.replaying .cp { pointer-events: none; }
 .cs { border-radius: 10px; background: var(--panel-2); padding: 12px; display: flex; flex-direction: column; gap: 8px; line-height: 1.5; }
 .cs.previewing { box-shadow: inset 3px 0 0 var(--ghost); }
 .cs .title { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }

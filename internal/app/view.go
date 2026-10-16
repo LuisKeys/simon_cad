@@ -11,6 +11,7 @@ import (
 	"github.com/accelone/simoncad/internal/dimensions"
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
+	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/persistence"
 	"github.com/accelone/simoncad/internal/tools"
 	"github.com/accelone/simoncad/internal/transform"
@@ -100,15 +101,50 @@ func (a *App) Committed() []*commands.ChangeSet { return a.committedInOrder() }
 // ModelAfter rebuilds the model as it stood after the first n committed ChangeSets
 // (n=0 is the empty project). It powers Instant Design playback from the event record.
 func (a *App) ModelAfter(n int) (*rebuild.Model, error) {
+	_, m, err := a.GraphAfter(n)
+	return m, err
+}
+
+// GraphAfter is ModelAfter plus the graph it was rebuilt from, with each node's status and
+// errors filled in from the rebuild (what the design tree showed at that point).
+func (a *App) GraphAfter(n int) (*cadir.Graph, *rebuild.Model, error) {
 	sets := a.committedInOrder()
 	if n < 0 || n > len(sets) {
-		return nil, fmt.Errorf("playback frame %d is out of range (0..%d)", n, len(sets))
+		return nil, nil, fmt.Errorf("playback frame %d is out of range (0..%d)", n, len(sets))
 	}
 	g := cadir.NewGraph()
 	if err := commands.ReplayOnto(g, sets[:n]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return a.Engine.Rebuild(g)
+	m, err := a.Engine.Rebuild(g)
+	if err != nil {
+		return nil, nil, err
+	}
+	m.Apply(g)
+	return g, m, nil
+}
+
+// CheckpointsAt lists the checkpoints reached once the first n committed ChangeSets are
+// applied (playback frame n), oldest first. A checkpoint is reached with the last of its
+// ChangeSets that is still committed (undone ones never replay); one with none left is
+// reached with the checkpoint before it.
+func (a *App) CheckpointsAt(n int) []*history.Checkpoint {
+	frame := map[string]int{} // ChangeSet id → the frame that applies it
+	for i, cs := range a.committedInOrder() {
+		frame[cs.ID] = i + 1
+	}
+	var out []*history.Checkpoint
+	reach := 0
+	for _, c := range a.Hist.Checkpoints {
+		for _, id := range c.ChangeSets {
+			reach = max(reach, frame[id])
+		}
+		if reach > n {
+			break
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // ChatLine is one conversation row replayed alongside playback, shaped like a chat message.

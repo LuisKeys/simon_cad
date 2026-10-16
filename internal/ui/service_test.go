@@ -188,6 +188,15 @@ func TestParameterEditTimelineCompareAndPlayback(t *testing.T) {
 	if len(f1.Scene.Changed) != 1 || f1.ChangeSet.Intent == "" || len(f3.Scene.Changed) != 1 || f3.Scene.Changed[0].Triangles <= f1.Scene.Changed[0].Triangles/2 {
 		t.Fatalf("frames %+v %+v", f1.Scene.Stats, f3.Scene.Stats)
 	}
+	// and the design tree with it: each frame lists the features as they stood at that step.
+	if len(f0.Tree) != 0 || len(f1.Tree) != 1 || len(f3.Tree) != 2 || f3.Tree[0].Params["dz"] != 6.0 || f1.Tree[0].Params["dz"] == 6.0 || f3.Tree[0].Status != "ok" {
+		t.Fatalf("frame trees %+v / %+v / %+v", f0.Tree, f1.Tree, f3.Tree)
+	}
+	// and so is the history: the steps reached so far, the latest one current.
+	if len(f0.Checkpoints) != 0 || len(f1.Checkpoints) != 1 || !f1.Checkpoints[0].Current || len(f3.Checkpoints) != len(st.Checkpoints) ||
+		f3.Checkpoints[0].Current || !f3.Checkpoints[len(f3.Checkpoints)-1].Current {
+		t.Fatalf("frame checkpoints %+v / %+v / %+v", f0.Checkpoints, f1.Checkpoints, f3.Checkpoints)
+	}
 	if _, err := s.PlaybackFrame(9, nil); err == nil {
 		t.Fatal("out-of-range frame must fail")
 	}
