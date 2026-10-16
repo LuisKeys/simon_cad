@@ -71,6 +71,9 @@ export async function uploadSpec(file) {
 // <img src> cannot send headers, so the token travels in the query string for images.
 export const imageUrl = (id) => `/api/image/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
 
+// An attached document as stored inside the project (opened from the chat).
+export const documentUrl = (id) => `/api/document/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
+
 // Offscreen renders and silhouette differences of the visual refinement.
 export const renderUrl = (id) => `/api/render/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
 export const diffUrl = (iteration, ref, previous) =>

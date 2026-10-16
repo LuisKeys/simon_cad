@@ -87,6 +87,9 @@ type Service struct {
 	fallbacks []runtime.RouteEvent
 }
 
+// DocRef names an attached document.
+type DocRef = app.DocRef
+
 // ChatMessage is one entry of the conversation panel.
 type ChatMessage struct {
 	Seq       int      `json:"seq"`
@@ -96,7 +99,7 @@ type ChatMessage struct {
 	OK        bool     `json:"ok,omitempty"`
 	ChangeSet string   `json:"changeset,omitempty"`
 	Images    []string `json:"images,omitempty"` // ids of images attached to a user message
-	Docs      []string `json:"docs,omitempty"`   // documents first sent with this user message
+	Docs      []DocRef `json:"docs,omitempty"`   // documents first sent with this user message
 	Time      string   `json:"time"`
 }
 
@@ -120,11 +123,13 @@ func (s *Service) attach(a *app.App, path string) {
 	a.SetActor(app.Actor{CreatedBy: "user"})
 	a.Bus.Subscribe(func(ev events.Event) { s.hub.Publish(Notice{Kind: "event", Type: ev.Type, Seq: ev.Seq}) })
 	for _, p := range a.AH.Prompts { // reopen: rebuild the conversation from the project record
-		s.say("user", p.Text, "", true, "")
+		s.sayWith("user", p.Text, "", true, "", p.Images)
+		s.chat[len(s.chat)-1].Docs = a.PromptDocs(p)
 		if p.Summary != "" {
 			s.say("agent", p.Summary, "", true, "")
 		}
 	}
+	s.restoreSpecs() // documents still attached when the project was saved
 }
 
 // Close releases the project and the kernel.

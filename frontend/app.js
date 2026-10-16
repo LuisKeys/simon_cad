@@ -1207,7 +1207,7 @@ async function playDesign() {
     autosize();
   };
   const say = async (l) => {
-    const m = { seq: S.playChat.length + 1, role: l.role, text: l.text ?? '', tool: l.tool, ok: l.ok, images: l.images };
+    const m = { seq: S.playChat.length + 1, role: l.role, text: l.text ?? '', tool: l.tool, ok: l.ok, images: l.images, docs: l.docs };
     S.playChat.push(m);
     if (l.role === 'user') {
       await typePrompt(m.text);

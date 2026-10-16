@@ -118,6 +118,26 @@ type ChatLine struct {
 	Tool   string   `json:"tool,omitempty"`
 	OK     bool     `json:"ok"`
 	Images []string `json:"images,omitempty"`
+	Docs   []DocRef `json:"docs,omitempty"`
+}
+
+// DocRef names an attached document a message carried (its id serves the project's copy).
+type DocRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// PromptDocs names the documents first sent with a prompt.
+func (a *App) PromptDocs(p persistence.Prompt) []DocRef {
+	var out []DocRef
+	for _, id := range p.Documents {
+		name := id
+		if d, ok := a.Docs.Get(id); ok {
+			name = d.Name
+		}
+		out = append(out, DocRef{ID: id, Name: name})
+	}
+	return out
 }
 
 // StepChat is the conversation around one playback frame: Before plays out ahead of the
@@ -184,7 +204,7 @@ func (a *App) PlaybackScript() []StepChat {
 		tc := calls[i]
 		if tc.PromptID != prev {
 			p := prompts[tc.PromptID]
-			script[f].Before = append(script[f].Before, ChatLine{Role: "user", Text: p.Text, OK: true, Images: p.Images})
+			script[f].Before = append(script[f].Before, ChatLine{Role: "user", Text: p.Text, OK: true, Images: p.Images, Docs: a.PromptDocs(p)})
 			prev, last = tc.PromptID, -1
 			for j := range calls { // replay from the prompt's first call
 				if calls[j].PromptID == prev {

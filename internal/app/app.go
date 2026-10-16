@@ -14,6 +14,7 @@ import (
 	"github.com/accelone/simoncad/internal/commands"
 	"github.com/accelone/simoncad/internal/components"
 	"github.com/accelone/simoncad/internal/config"
+	"github.com/accelone/simoncad/internal/documents"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/geometry/api"
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
@@ -61,6 +62,9 @@ type App struct {
 	// Neither is CAD state.
 	Vision *vision.Store
 	Images *vision.ImageStore
+	// Docs are the reference documents attached to the conversation. Images and documents
+	// attached to a prompt are stored inside the project (assets/) and read from there.
+	Docs *documents.Store
 	// Materials is the visual material library (built-in plus the open project's own).
 	// Presentation only; it is never an input to geometry.
 	Materials *materials.Library
@@ -110,7 +114,7 @@ func newApp(clock func() time.Time) *App {
 	lib := components.NewLibrary()
 	a := &App{K: k, Engine: rebuild.New(k), Graph: cadir.NewGraph(), Hist: &history.Log{}, Bus: events.NewBus(),
 		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI},
-		Vision: vision.NewStore(), Images: vision.NewImageStore(), Visual: visual.NewState(),
+		Vision: vision.NewStore(), Images: vision.NewImageStore(), Docs: documents.NewStore(), Visual: visual.NewState(),
 		Materials: materials.New(materialsdata.FS()),
 		Lib:       lib, Resolver: components.NewResolver(lib, k), Deps: components.NewDependencyGraph(lib)}
 	a.Engine.Components = a.Resolver
@@ -166,11 +170,7 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 			return nil, fmt.Errorf("agent-history.json visual: %w", err)
 		}
 	}
-	for _, im := range p.Images { // retained source images; the geometry never needs them
-		if put, err := a.Images.Put(im.Data); err == nil {
-			_ = a.Images.Retain(put.ID, true)
-		}
-	}
+	a.loadAttachments(dir, p) // source images and documents; the geometry never needs them
 	a.Mgr.Restore(a.AH.ChangeSets)
 	a.Hist.Checkpoints = a.AH.Checkpoints
 	a.Bus.Load(p.Events)
@@ -296,21 +296,15 @@ func (a *App) Save(dir string) error {
 		}
 		a.AH.Visual = b
 	}
-	var imgs []persistence.Image
-	for _, im := range a.Images.All() {
-		if !im.Retained {
-			continue
-		}
-		ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[im.MediaType]
-		imgs = append(imgs, persistence.Image{ID: im.ID, Ext: ext, Data: im.Data})
-	}
+	imgs, docs := a.savedAttachments()
 	if err := persistence.Save(dir, &persistence.Project{
 		Meta: a.Meta, Graph: a.Graph, History: a.AH, Events: a.Bus.Events(),
 		Components: components.Manifest(a.Graph), Constraints: a.constraints, Materials: a.materials, Images: imgs,
-		Workspace: &a.Workspace,
+		Documents: docs, Workspace: &a.Workspace,
 	}); err != nil {
 		return err
 	}
+	a.attachmentsSavedIn(dir, imgs, docs)
 	a.savedHash = a.Graph.Hash()
 	if err := a.carryProjectMaterials(dir); err != nil {
 		return err

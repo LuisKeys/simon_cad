@@ -5,7 +5,7 @@
 // Nothing here changes the model: every action is a tool call through /api/tool
 // (confirm_detected_dimension, set_sketch_scale, update_sketch_proposal, create_from_image),
 // and the result is an ordinary proposed ChangeSet.
-import { api, h, svg, uploadImage, uploadSpec, imageUrl } from './api.js';
+import { api, h, svg, uploadImage, uploadSpec, imageUrl, documentUrl } from './api.js';
 import { confidenceClass, pct, entityShapes, entityRoles, drawingWidthPx, uncertain, ambiguityEdits, CHOICES } from './vision-geom.js';
 
 const OK_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -400,7 +400,13 @@ export function initVision(ctx) {
   /** What a sent user message carried: image thumbnails and the documents attached with it. */
   function thumbs(ids, docs) {
     const imgs = (ids ?? []).map((id) => h('img', { class: 'thumb', src: imageUrl(id), alt: 'attached image', loading: 'lazy' }));
-    const files = (docs ?? []).map((d) => h('span', { class: 'msg-doc', title: `${d} · remembered until Clear` }, `📄 ${d}`));
+    // Documents link to their copy inside the project ({id, name}; a bare name has no copy).
+    const files = (docs ?? []).map((d) => {
+      const name = typeof d === 'string' ? d : d.name;
+      return d.id
+        ? h('a', { class: 'msg-doc', href: documentUrl(d.id), target: '_blank', rel: 'noopener', title: `${name} · stored with the project` }, `📄 ${name}`)
+        : h('span', { class: 'msg-doc', title: `${name} · remembered until Clear` }, `📄 ${name}`);
+    });
     return imgs.length || files.length ? h('div', { class: 'thumbs' }, ...imgs, ...files) : null;
   }
 

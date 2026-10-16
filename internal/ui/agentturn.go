@@ -93,7 +93,12 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 	s.beginRoutes()
 	prior := s.history()
 	s.sayWith("user", text, "", true, "", append([]string(nil), images...))
-	s.chat[len(s.chat)-1].Docs = s.newSpecs() // the message shows the documents it introduced
+	docs := s.newSpecs() // the message shows the documents it introduced
+	s.chat[len(s.chat)-1].Docs = docs
+	var docIDs []string
+	for _, d := range docs {
+		docIDs = append(docIDs, d.ID)
+	}
 	s.hub.Publish(Notice{Kind: "state"})
 	level := s.level
 	s.mu.Unlock()
@@ -110,7 +115,7 @@ func (s *Service) PromptWith(text string, thinking bool, images []string) error 
 		defer s.mu.Unlock()
 		caps := runtime.SelectCaps(s.app, images, geo.New(), vis.New(), visualcap.New())
 		rt := &runtime.Runtime{Provider: unlocking{agentProv, &s.mu}, Caps: caps, History: prior, NoThinking: !thinking, ToolLoading: runtime.InteractiveToolLoading(),
-			ImageIDs: images, Interpreter: interp, Reference: s.specContext()}
+			ImageIDs: images, DocumentIDs: docIDs, Interpreter: interp, Reference: s.specContext()}
 		rt.OnStep = func(name string, args json.RawMessage, o app.Outcome) {
 			cs := ""
 			if o.ChangeSet != nil {

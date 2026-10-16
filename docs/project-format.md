@@ -15,7 +15,8 @@ my_part.scadproj/
   agent-history.json   prompts, tool calls, ChangeSets, checkpoints
   events.jsonl         append-only event recorder, one JSON object per line
   thumbnails/          reserved (.gitkeep)
-  assets/images/       source images, only if explicitly retained (<id>.png|jpg|webp)
+  assets/images/       images attached to a prompt, or retained by the user (<id>.png|jpg|webp)
+  assets/documents/    attached reference documents (<id>.<ext>, plus <id>.extracted.md for a PDF)
 ```
 
 An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/servo_bracket.scadproj).
@@ -28,15 +29,16 @@ An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/se
 - **Versioned:** `project.json.schema_version` is checked on load. Newer than the build supports
   → refusal; older → `persistence.migrate`. v2 adds `assets/images/` and
   `agent-history.json.interpretations`; v3 adds the project `id` and the reusable-component
-  metadata; v4 (current) adds `workspace.json`. Every addition is optional, so v1–v3 projects load
-  as they are.
+  metadata; v4 adds `workspace.json`; v5 (current) adds `assets/documents/` with its
+  `agent-history.json.documents` index and `prompts[].documents`, and stores every image attached to
+  a prompt. Every addition is optional, so v1–v4 projects load as they are.
 - **Self-verifying:** `simoncad-cli replay` re-derives the model from the recorded ChangeSets and
   checks it equals `model.json`.
 
 ## `project.json`
 
 ```json
-{ "schema_version": 4, "id": "prj_9f31c4a0b72e", "name": "servo_bracket", "units": "mm",
+{ "schema_version": 5, "id": "prj_9f31c4a0b72e", "name": "servo_bracket", "units": "mm",
   "occt_version": "7.8.1", "created": "2026-01-02T03:04:05Z",
   "reusable": true, "description": "the bracket a servo bolts to", "tags": ["robotics"],
   "component_version": 4 }
@@ -139,7 +141,8 @@ traceable here.
 
 | Key | Entries |
 |---|---|
-| `prompts` | `id` (`pr_0001`), `time`, `text`, `selection`, `capability`, `model`, `agent_summary` |
+| `prompts` | `id` (`pr_0001`), `time`, `text`, `selection`, `capability`, `model`, `agent_summary`, `images` (ids under `assets/images/`), `documents` (ids of the documents first sent with it) |
+| `documents` | `id` (`doc_<hash>`), `name`, `file` (`assets/documents/<id>.<ext>`), `extracted` + `extracted_by` (text a model extracted from a PDF), `active` (still attached to the conversation) |
 | `tool_calls` | `id` (`tc_0001`), `prompt_id`, `actor` (user/agent/cli), `name`, `args`, `status` (`ok`/`rejected`/`invalid`), `error`, `changeset_id`, `result` |
 | `changesets` | `id` (`cs_0001`), `seq`, `state` (`proposed`/`committed`/`rejected`/`undone`), `intent`, `explanation`, `commands`, `rollback`, `affected`, `expected_effects`, `warnings`, `validation`, `provenance`, `base_hash`, `result_hash`, `time` |
 | `checkpoints` | `id` (`cp_001`), `seq`, `label`, `actor`, `changesets`, `graph_hash`, `time`, `snapshot` (full CAD-IR) |
@@ -151,8 +154,15 @@ discarded.
 `interpretations` (optional) holds the image proposals of the vision capability (entities in pixel
 space, dimensions with confidence, operations, revision). They explain image-derived features but are
 never needed to rebuild: nodes keep `provenance.source_image_id` / `interpretation_id` as plain
-references, and the geometry is fully described by `model.json`. Images are written to
-`assets/images/` only when the user retains them.
+references, and the geometry is fully described by `model.json`.
+
+Attachments live inside the project. Every image attached to a prompt (and any the user retains) is
+written to `assets/images/`, and every reference document that is still attached or that a sent
+prompt shows is written to `assets/documents/`; anything else is removed on save. A project that
+already has a directory gets its copy the moment something is attached; a new project gets it on its
+first save. From then on chat previews (`/api/image/<id>`, `/api/document/<id>`) and attachment
+processing (PDF extraction) read the project's copy, never the file the user picked. Paths in the
+`documents` index must stay directly inside `assets/documents/`, or the project is refused.
 
 Commands inside a ChangeSet are `{ "type": "AddFeature" | "RemoveFeature" | "SetParameter" |
 "SetExpression" | "Reorder" | "Suppress" | "Rename" | "SetGroup" | "SetColor" | "SetOpacity" |

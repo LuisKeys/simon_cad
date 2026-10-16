@@ -295,7 +295,7 @@ proposal into ordinary features — `sketch → extrude (add/cut) → union/subt
 ChangeSet that is **always left proposed** (`Plan.RequireApproval`) for preview and commit. Nodes
 carry `created_by: agent`, `capability: vision`, `source_image_id`, `interpretation_id`, tool call and
 ChangeSet ids. Geometry rebuilds from the CAD-IR alone; `geometry`/`cadir` never import `vision` or
-`agent` (tested). Source images are saved under `assets/images/` only when explicitly retained.
+`agent` (tested). Source images attached to a prompt (or retained) are saved under `assets/images/`, attached documents under `assets/documents/`.
 
 ### Paths, sweeps and creative geometry
 

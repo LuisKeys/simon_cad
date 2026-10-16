@@ -250,3 +250,51 @@ func TestSaveKeepsAndPrunesImages(t *testing.T) {
 		t.Fatalf("images after reload: %+v %v", got.Images, err)
 	}
 }
+
+// Documents round-trip with their extracted text, saving twice is byte-stable, and an index
+// entry pointing outside assets/documents/ is refused.
+func TestDocumentsRoundTrip(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "p.scadproj")
+	docs := []Document{
+		{ID: "doc_1", Name: "spec.md", Ext: ".md", Data: []byte("plate 4 mm"), Active: true},
+		{ID: "doc_2", Name: "plate.pdf", Ext: ".pdf", Data: []byte("%PDF-1.4"), Extracted: "Plate 80 x 60", ExtractedBy: "claude"},
+	}
+	p := &Project{Meta: Meta{Name: "p", Units: "mm"}, Graph: cadir.NewGraph(), Documents: docs}
+	if err := Save(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := os.ReadFile(filepath.Join(dir, "agent-history.json"))
+	if err := Save(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := os.ReadFile(filepath.Join(dir, "agent-history.json")); !bytes.Equal(first, again) {
+		t.Fatal("saving the same documents twice must produce identical bytes")
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Documents) != 2 || string(got.Documents[0].Data) != "plate 4 mm" || !got.Documents[0].Active ||
+		got.Documents[1].Extracted != "Plate 80 x 60" || got.Documents[1].ExtractedBy != "claude" || got.Documents[1].Ext != ".pdf" {
+		t.Fatalf("documents: %+v", got.Documents)
+	}
+	// Dropping one removes its files.
+	p.Documents = docs[:1]
+	if err := Save(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"doc_2.pdf", "doc_2.extracted.md"} {
+		if _, err := os.Stat(filepath.Join(dir, "assets", "documents", f)); !os.IsNotExist(err) {
+			t.Fatalf("%s must be removed", f)
+		}
+	}
+	for _, bad := range []string{"assets/documents/../../secret", "assets/other/x.md", "/etc/passwd", "assets/documents/"} {
+		h := strings.Replace(string(first), `"file": "assets/documents/doc_1.md"`, fmt.Sprintf("%q: %q", "file", bad), 1)
+		if err := os.WriteFile(filepath.Join(dir, "agent-history.json"), []byte(h), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(dir); err == nil {
+			t.Fatalf("%q must be refused", bad)
+		}
+	}
+}

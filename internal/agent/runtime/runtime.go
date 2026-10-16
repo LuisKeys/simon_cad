@@ -77,6 +77,8 @@ type Runtime struct {
 	Interpreter ImageInterpreter
 	// Reference is user-attached document text (specifications) shown to the model every turn.
 	Reference string
+	// DocumentIDs are the attached documents (App.Docs) first sent with this turn's message.
+	DocumentIDs []string
 	// ToolLoading is ToolLoadingAll or ToolLoadingProgressive; empty reads SIMON_TOOL_LOADING
 	// (default all).
 	ToolLoading string
@@ -234,6 +236,7 @@ func (rt *Runtime) Begin(ctx context.Context, a *app.App, intent string, policy 
 	if !rt.Subtask {
 		c.Res.PromptID = a.RecordPrompt(intent)
 		a.RecordPromptImages(c.Res.PromptID, rt.ImageIDs)
+		a.RecordPromptDocuments(c.Res.PromptID, rt.DocumentIDs)
 	}
 	if !vision && len(rt.ImageIDs) > 0 {
 		in, err := rt.Interpreter.Interpret(ctx, a, intent, rt.ImageIDs, policy)

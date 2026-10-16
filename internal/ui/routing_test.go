@@ -205,7 +205,14 @@ func TestUserMessageListsTheDocumentsAndImagesItCarries(t *testing.T) {
 			users = append(users, m)
 		}
 	}
-	if len(users) != 2 || strings.Join(users[0].Docs, ",") != "a.md,b.txt" || strings.Join(users[1].Docs, ",") != "c.md" {
+	names := func(ds []DocRef) string {
+		var out []string
+		for _, d := range ds {
+			out = append(out, d.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	if len(users) != 2 || names(users[0].Docs) != "a.md,b.txt" || names(users[1].Docs) != "c.md" {
 		t.Fatalf("docs per message: %+v", users)
 	}
 	if err := s.PromptWith("too many", false, append(imgs, imgs...)[:maxPromptImages+1]); err == nil {

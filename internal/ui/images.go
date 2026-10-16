@@ -24,30 +24,28 @@ func imageInfo(im *vision.Image) ImageInfo {
 	return ImageInfo{ID: im.ID, MediaType: im.MediaType, Width: im.Width, Height: im.Height, Retained: im.Retained}
 }
 
-// UploadImage stores a PNG, JPEG or WebP image for this session. It does not touch the model;
-// the image is only saved with the project if it is explicitly retained.
+// UploadImage stores a PNG, JPEG or WebP image. It does not touch the model. The image is
+// copied into the project (assets/images/) when the project has a directory, or on its
+// first save, and is stored with it once it is attached to a prompt or retained.
 func (s *Service) UploadImage(data []byte) (ImageInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.guard(); err != nil {
 		return ImageInfo{}, err
 	}
-	im, err := s.app.Images.Put(data)
+	im, err := s.app.StoreImage(data)
 	if err != nil {
 		return ImageInfo{}, err
 	}
 	return imageInfo(im), nil
 }
 
-// ImageData returns an uploaded image's bytes and media type.
+// ImageData returns an uploaded image's bytes and media type, read from the project's copy
+// once it has one.
 func (s *Service) ImageData(id string) ([]byte, string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	im, ok := s.app.Images.Get(id)
-	if !ok {
-		return nil, "", false
-	}
-	return im.Data, im.MediaType, true
+	return s.app.Images.Content(id)
 }
 
 // MaterialsView is the material library as the panels show it.
@@ -89,10 +87,14 @@ func (s *Service) MaterialFile(id, name string) ([]byte, string, bool) {
 	return b, ct, true
 }
 
-// RetainImage chooses whether an image is stored inside the project (assets/images/).
+// RetainImage chooses whether an image is stored inside the project (assets/images/). An
+// image attached to a prompt is part of the conversation and is always stored.
 func (s *Service) RetainImage(id string, keep bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !keep && s.app.ImageInConversation(id) {
+		return fmt.Errorf("this image was attached to a message, so it is stored with the project")
+	}
 	if err := s.app.Images.Retain(id, keep); err != nil {
 		return err
 	}

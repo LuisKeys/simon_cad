@@ -73,7 +73,8 @@ func (s *Service) ClearChat() error {
 	if err := s.guard(); err != nil {
 		return err
 	}
-	s.chat, s.specs = nil, nil
+	s.chat = nil
+	s.detachSpecs()
 	s.hub.Publish(Notice{Kind: "state"})
 	return nil
 }

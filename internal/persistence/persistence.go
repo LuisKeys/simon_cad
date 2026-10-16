@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/accelone/simoncad/internal/cadir"
 	"github.com/accelone/simoncad/internal/commands"
@@ -22,8 +23,9 @@ import (
 // SchemaVersion is the current on-disk format version. v2 adds assets/images/ (source
 // images, only when explicitly retained) and interpretations in agent-history.json; v3 adds
 // the stable project id and the reusable-component metadata; v4 adds workspace.json (units,
-// grid and snapping). Every addition is optional, so v1–v3 projects load unchanged.
-const SchemaVersion = 4
+// grid and snapping); v5 adds assets/documents/ (attached reference documents) and stores
+// every image attached to a prompt. Every addition is optional, so v1–v4 projects load unchanged.
+const SchemaVersion = 5
 
 // Meta is project.json. ID is the stable identity a ComponentInstance references: it survives
 // renaming the directory, and the directory name never does. A project with Reusable set is a
@@ -72,6 +74,7 @@ type Prompt struct {
 	Model      string   `json:"model,omitempty"`
 	Summary    string   `json:"agent_summary,omitempty"` // the agent's final explanation
 	Images     []string `json:"images,omitempty"`        // ids of images attached to the prompt
+	Documents  []string `json:"documents,omitempty"`     // ids of documents first sent with the prompt
 }
 
 type ToolCall struct {
@@ -99,6 +102,29 @@ type AgentHistory struct {
 	// Visual is the visual-refinement state: references and their analysis, regions and
 	// locks, the iteration history (scores, changes, parameters). Renders are not saved.
 	Visual json.RawMessage `json:"visual,omitempty"`
+	// Documents index the attached reference documents stored under assets/documents/.
+	Documents []DocumentInfo `json:"documents,omitempty"`
+}
+
+// DocumentInfo describes a stored reference document. Paths are relative to the project.
+type DocumentInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	File        string `json:"file"`                   // the original
+	Extracted   string `json:"extracted,omitempty"`    // the text a model extracted from it (PDF)
+	ExtractedBy string `json:"extracted_by,omitempty"` // that model
+	Active      bool   `json:"active,omitempty"`       // still attached to the conversation
+}
+
+// Document is a reference document stored under assets/documents/.
+type Document struct {
+	ID          string // doc_<hash>
+	Name        string
+	Ext         string // of the original: .pdf | .txt | .md | …
+	Data        []byte // the original
+	Extracted   string // text extracted from the original ("" for a text document)
+	ExtractedBy string
+	Active      bool
 }
 
 // Image is a retained source image stored under assets/images/.
@@ -117,6 +143,7 @@ type Project struct {
 	Constraints json.RawMessage
 	Materials   json.RawMessage
 	Images      []Image
+	Documents   []Document
 	// Workspace is the project's units, grid and snapping (workspace.json). Load leaves it
 	// nil for a project saved before it existed; Save writes the factory defaults for nil.
 	Workspace *workspace.Settings
@@ -238,7 +265,7 @@ func Save(dir string, p *Project) error {
 		{"components.json", raw(p.Components, emptyComponents)},
 		{"constraints.json", raw(p.Constraints, emptyConstraints)},
 		{"materials.json", raw(p.Materials, emptyMaterials)},
-		{"agent-history.json", p.History},
+		{"agent-history.json", historyWithDocuments(p.History, p.Documents)},
 		{WorkspaceFile, ws},
 	}
 	var pending []pendingFile
@@ -262,7 +289,11 @@ func Save(dir string, p *Project) error {
 	if err != nil {
 		return err
 	}
-	if err := writeAll(append(pending, imgs...)); err != nil {
+	docs, err := saveDocuments(dir, p.Documents)
+	if err != nil {
+		return err
+	}
+	if err := writeAll(append(append(pending, imgs...), docs...)); err != nil {
 		return err
 	}
 	keep := filepath.Join(dir, "thumbnails", ".gitkeep")
@@ -272,36 +303,117 @@ func Save(dir string, p *Project) error {
 	return nil
 }
 
-const imagesDir = "assets/images"
+const (
+	imagesDir    = "assets/images"
+	documentsDir = "assets/documents"
+)
 
-// saveImages removes retained images that are gone and returns the files to write for the
-// ones that remain. The directory only exists when there is something to keep.
-func saveImages(dir string, imgs []Image) ([]pendingFile, error) {
-	full := filepath.Join(dir, filepath.FromSlash(imagesDir))
+// ImagePath is where a project stores an image.
+func ImagePath(dir, id, ext string) string {
+	return filepath.Join(dir, filepath.FromSlash(imagesDir), id+ext)
+}
+
+// DocumentPath is where a project stores a document's original.
+func DocumentPath(dir, id, ext string) string {
+	return filepath.Join(dir, filepath.FromSlash(documentsDir), id+ext)
+}
+
+// extractedName is the file holding the text extracted from a document.
+func extractedName(id string) string { return id + ".extracted.md" }
+
+// historyWithDocuments indexes the stored documents in agent-history.json.
+func historyWithDocuments(h AgentHistory, docs []Document) AgentHistory {
+	h.Documents = nil
+	for _, d := range docs {
+		info := DocumentInfo{ID: d.ID, Name: d.Name, File: documentsDir + "/" + d.ID + d.Ext, ExtractedBy: d.ExtractedBy, Active: d.Active}
+		if d.Extracted != "" {
+			info.Extracted = documentsDir + "/" + extractedName(d.ID)
+		}
+		h.Documents = append(h.Documents, info)
+	}
+	return h
+}
+
+// saveDocuments removes stored documents that are gone and returns the files to write for
+// the ones that remain (the original, plus the extracted text of a PDF).
+func saveDocuments(dir string, docs []Document) ([]pendingFile, error) {
+	full := filepath.Join(dir, filepath.FromSlash(documentsDir))
+	var out []pendingFile
+	for _, d := range docs {
+		out = append(out, pendingFile{filepath.Join(full, d.ID+d.Ext), d.Data})
+		if d.Extracted != "" {
+			out = append(out, pendingFile{filepath.Join(full, extractedName(d.ID)), []byte(d.Extracted)})
+		}
+	}
+	return out, prune(full, out)
+}
+
+// prune removes the files of dir that are not about to be written, and creates dir when
+// something will be: an asset directory only exists when there is something to keep.
+func prune(full string, keep []pendingFile) error {
 	want := map[string]bool{}
-	for _, im := range imgs {
-		want[im.ID+im.Ext] = true
+	for _, f := range keep {
+		want[filepath.Base(f.path)] = true
 	}
 	if entries, err := os.ReadDir(full); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() && !want[e.Name()] {
 				if err := os.Remove(filepath.Join(full, e.Name())); err != nil {
-					return nil, err
+					return err
 				}
 			}
 		}
 	}
-	if len(imgs) == 0 {
-		return nil, nil
+	if len(keep) == 0 {
+		return nil
 	}
-	if err := os.MkdirAll(full, 0o755); err != nil {
-		return nil, err
+	return os.MkdirAll(full, 0o755)
+}
+
+// loadDocuments reads the documents agent-history.json indexes. A document whose original
+// is missing is skipped: the project still opens, only that attachment is lost.
+func loadDocuments(dir string, infos []DocumentInfo) ([]Document, error) {
+	var out []Document
+	for _, info := range infos {
+		if !validAsset(info.File, documentsDir) {
+			return nil, fmt.Errorf("agent-history.json: document %s is outside %s/", info.ID, documentsDir)
+		}
+		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(info.File)))
+		if err != nil {
+			continue
+		}
+		d := Document{ID: info.ID, Name: info.Name, Ext: filepath.Ext(info.File), Data: b, ExtractedBy: info.ExtractedBy, Active: info.Active}
+		if info.Extracted != "" {
+			if !validAsset(info.Extracted, documentsDir) {
+				return nil, fmt.Errorf("agent-history.json: document %s is outside %s/", info.ID, documentsDir)
+			}
+			t, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(info.Extracted)))
+			if err != nil {
+				continue
+			}
+			d.Extracted = string(t)
+		}
+		out = append(out, d)
 	}
+	return out, nil
+}
+
+// validAsset reports whether rel names a file directly inside the asset directory sub, so a
+// crafted agent-history.json cannot make the project read files from elsewhere.
+func validAsset(rel, sub string) bool {
+	base := strings.TrimPrefix(rel, sub+"/")
+	return base != rel && base != "" && base != "." && base != ".." && !strings.ContainsAny(base, `/\:`)
+}
+
+// saveImages removes retained images that are gone and returns the files to write for the
+// ones that remain. The directory only exists when there is something to keep.
+func saveImages(dir string, imgs []Image) ([]pendingFile, error) {
+	full := filepath.Join(dir, filepath.FromSlash(imagesDir))
 	out := make([]pendingFile, 0, len(imgs))
 	for _, im := range imgs {
 		out = append(out, pendingFile{filepath.Join(full, im.ID+im.Ext), im.Data})
 	}
-	return out, nil
+	return out, prune(full, out)
 }
 
 func loadImages(dir string) ([]Image, error) {
@@ -384,6 +496,9 @@ func Load(dir string) (*Project, error) {
 	if p.Images, err = loadImages(dir); err != nil {
 		return nil, err
 	}
+	if p.Documents, err = loadDocuments(dir, p.History.Documents); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -416,11 +531,11 @@ func LoadGraph(dir string) (Meta, *cadir.Graph, error) {
 
 // migrate upgrades files from older schema versions. Every version bump so far only added
 // optional content (v2: assets/images/, interpretations; v3: the project id and component
-// metadata; v4: workspace.json), so an older project is valid as it is; the next save writes
+// metadata; v4: workspace.json; v5: assets/documents/), so an older project is valid as it is; the next save writes
 // the current version.
 func migrate(dir string, p *Project) error {
 	switch p.Meta.SchemaVersion {
-	case SchemaVersion, 3, 2, 1:
+	case SchemaVersion, 4, 3, 2, 1:
 		if p.Meta.ID == "" {
 			p.Meta.ID = DeriveID(p.Meta.Name, p.Meta.Created)
 		}

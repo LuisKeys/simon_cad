@@ -30,7 +30,8 @@ func (a *App) RecordPrompt(text string) string {
 	return p.ID
 }
 
-// RecordPromptImages notes which uploaded images were attached to a prompt.
+// RecordPromptImages notes which uploaded images were attached to a prompt. From then on
+// they are part of the conversation and are stored with the project.
 func (a *App) RecordPromptImages(promptID string, ids []string) {
 	if len(ids) == 0 {
 		return
@@ -38,6 +39,21 @@ func (a *App) RecordPromptImages(promptID string, ids []string) {
 	for i := range a.AH.Prompts {
 		if a.AH.Prompts[i].ID == promptID {
 			a.AH.Prompts[i].Images = append([]string(nil), ids...)
+		}
+	}
+	for _, id := range ids {
+		_ = a.Images.Retain(id, true)
+	}
+}
+
+// RecordPromptDocuments notes which attached documents were first sent with a prompt.
+func (a *App) RecordPromptDocuments(promptID string, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	for i := range a.AH.Prompts {
+		if a.AH.Prompts[i].ID == promptID {
+			a.AH.Prompts[i].Documents = append([]string(nil), ids...)
 		}
 	}
 }

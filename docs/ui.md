@@ -353,8 +353,10 @@ projects.
 
 **Attach** (or drop) also accepts a text document (`.txt`, `.md`, `.json`, `.csv`, …, ≤ 200 KB each,
 400 KB total) such as the specification of a part. It shows as a 📄 chip and is sent to the agent with
-every request as short-term memory until **Clear** is pressed (or a project is opened/created). It is
-never saved with the project. `POST /api/spec?name=…` (raw body) attaches; `POST /api/spec/remove` detaches.
+every request as short-term memory until **Clear** is pressed (or another project is opened/created).
+The document is stored inside the project (`assets/documents/`) and the 📄 chip of the message that
+sent it opens that copy (`GET /api/document/<id>`); a reopened project keeps the documents that were
+still attached. `POST /api/spec?name=…` (raw body) attaches; `POST /api/spec/remove` detaches.
 
 ## Image to CAD
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"regexp"
@@ -84,7 +85,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 var readOnlyRoutes = []string{
 	"/api/state", "/api/scene", "/api/events", "/api/settings", "/api/visual", "/api/visual/diff",
 	"/api/materials", "/api/palette", "/api/printsim/info", "/api/compare", "/api/project/list", "/api/components",
-	"/api/render/", "/api/image/", "/api/materials/", "/api/printsim/result/",
+	"/api/render/", "/api/image/", "/api/document/", "/api/materials/", "/api/printsim/result/",
 }
 
 func readOnlyRoute(path string) bool {
@@ -262,6 +263,18 @@ func (s *Server) routes() {
 		}
 		w.Header().Set("Content-Type", mt)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		_, _ = w.Write(data)
+	})
+	m.HandleFunc("/api/document/", func(w http.ResponseWriter, r *http.Request) {
+		data, mt, name, ok := s.Svc.DocumentData(strings.TrimPrefix(r.URL.Path, "/api/document/"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", mt)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
 		w.Header().Set("Cache-Control", "private, max-age=3600")
 		_, _ = w.Write(data)
 	})

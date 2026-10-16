@@ -9,6 +9,7 @@ import (
 	"image"
 	_ "image/jpeg" // registers the JPEG decoder for image.DecodeConfig
 	_ "image/png"  // registers the PNG decoder for image.DecodeConfig
+	"os"
 	"sync"
 )
 
@@ -26,10 +27,18 @@ type Image struct {
 	Height    int    `json:"height"`
 	Retained  bool   `json:"retained"`
 	Data      []byte `json:"-"`
+	// Path is the image's copy inside the project (assets/images/), "" while the project has
+	// no directory yet. Once set, the image is read from there.
+	Path string `json:"-"`
 }
 
-// ImageStore keeps uploaded images in memory for the session. Images only reach the project
-// (assets/images/) when retained or referenced by an image-derived feature.
+// Ext is the file extension the image is stored under.
+func (im *Image) Ext() string {
+	return map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[im.MediaType]
+}
+
+// ImageStore keeps uploaded images for the session. They reach the project (assets/images/)
+// when they are attached to a prompt or explicitly retained.
 type ImageStore struct {
 	mu    sync.Mutex
 	items map[string]*Image
@@ -131,6 +140,37 @@ func (s *ImageStore) Retain(id string, keep bool) error {
 	}
 	im.Retained = keep
 	return nil
+}
+
+// SetPath records the image's copy inside the project.
+func (s *ImageStore) SetPath(id, path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if im, ok := s.items[id]; ok {
+		im.Path = path
+	}
+}
+
+// Content returns the image's bytes: read from its copy inside the project when it has one
+// (falling back to the uploaded bytes only if that file is gone), the uploaded bytes otherwise.
+func (s *ImageStore) Content(id string) ([]byte, string, bool) {
+	s.mu.Lock()
+	im, ok := s.items[id]
+	var path, mt string
+	var data []byte
+	if ok {
+		path, mt, data = im.Path, im.MediaType, im.Data
+	}
+	s.mu.Unlock()
+	if !ok {
+		return nil, "", false
+	}
+	if path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			return b, mt, true
+		}
+	}
+	return data, mt, true
 }
 
 // All lists images in upload order.
