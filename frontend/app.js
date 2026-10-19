@@ -1586,11 +1586,24 @@ async function newProject() {
   try { await api('project/new', { name: r.value }); clearPreview(); vp.clear(); } catch (e) { toast(e.message, 'bad'); }
   scheduleRefresh();
 }
+async function listProjectChoices() {
+  const projects = await api('project/list');
+  return projects.map((p) => ({ label: p.name, value: p.path, detail: new Date(p.modified).toLocaleString() }));
+}
 async function openProject() {
-  let projects = [];
-  try { projects = await api('project/list'); } catch { /* fall back to typing a path */ }
-  const choices = projects.map((p) => ({ label: p.name, value: p.path, detail: new Date(p.modified).toLocaleString() }));
-  const r = await ask({ title: 'Open a project (click one, or type a path)', ok: 'Open', choices });
+  let choices = [];
+  try { choices = await listProjectChoices(); } catch { /* fall back to typing a path */ }
+  // The list is newest first until the first rename, then alphabetical.
+  let alpha = false;
+  const fresh = async () => {
+    const cs = await listProjectChoices();
+    return alpha ? cs.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true })) : cs;
+  };
+  const manage = {
+    rename: async (c, name) => { await api('project/rename', { path: c.value, name }); alpha = true; return fresh(); },
+    remove: async (c) => { await api('project/delete', { path: c.value }); return fresh(); },
+  };
+  const r = await ask({ title: 'Open a project (click one, or type a path)', ok: 'Open', choices, manage });
   if (!r?.value) return;
   try { await api('project/open', { path: r.value }); clearPreview(); vp.clear(); } catch (e) { toast(e.message, 'bad'); }
   scheduleRefresh();

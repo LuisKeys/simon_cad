@@ -261,7 +261,7 @@ button.ghost.wide { width: 100%; margin-top: 8px; }
 .msg.md th { font-weight: 600; background: var(--panel-3); }
 #chat.replaying { box-shadow: inset 0 0 0 1px var(--accent-soft); border-radius: 10px; overflow-anchor: none; }
 #chat.replaying > .msg { animation: fadein 200ms ease; }
-#chat.replaying .typing-rest { visibility: hidden; }
+#chat.replaying .typing-rest { }
 #tree.replaying .node, #tree.replaying .row { pointer-events: none; }
 #tree.replaying .node.fresh { animation: fadein 200ms ease; }
 #timeline.replaying .cp { pointer-events: none; }
@@ -333,6 +333,16 @@ button.ghost.wide { width: 100%; margin-top: 8px; }
 .pal-list { list-style: none; margin: 0; padding: 0; overflow: auto; }
 .pal-list li { padding: 8px 10px; min-height: 40px; border-radius: var(--radius); cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
 .pal-list li.on, .pal-list li:hover { background: var(--panel-2); }
+.dialog.small.projects { width: min(920px, calc(100vw - 24px)); }
+.pal-list .nm { min-width: 0; max-width: 55%; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-list .d { flex: 0 0 auto; }
+.pal-list .row-act { flex: none; margin-left: auto; padding: 2px 8px; min-height: 28px; font-size: 12px; }
+.pal-list .row-act + .row-act { margin-left: 0; }
+.pal-list .row-act.danger { background: rgba(239, 106, 106, .18); color: var(--bad); }
+.pal-list .row-act.danger:hover { background: rgba(239, 106, 106, .32); }
+.pal-list .row-act.armed { background: var(--bad); color: #fff; }
+.pal-list .row-edit { width: 100%; min-width: 120px; padding: 2px 6px; }
+#dialog-error { color: var(--bad); font-size: 12px; }
 .pal-list .k { font-size: 10px; text-transform: uppercase; color: var(--faint); width: 56px; flex: none; }
 .pal-list .d { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pal-form textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
@@ -564,7 +574,7 @@ fieldset.amb { border: 1px solid var(--warn); border-radius: var(--radius); disp
 
 /* ---- print simulation --------------------------------------------------------------------- */
 body[data-printsim=on] #history, body[data-printsim=on] #ghost-bar, body[data-printsim=on] #empty { display: none; }
-body[data-printsim=on] #ctx-actions { visibility: hidden; }
+body[data-printsim=on] #ctx-actions { }
 .tabs { display: flex; gap: 2px; margin: -4px 0 -4px; border-bottom: 1px solid var(--line); }
 .tabs button { background: transparent; border-radius: var(--radius) var(--radius) 0 0; min-height: 34px; padding: 0 14px; font-size: 12.5px; color: var(--muted); box-shadow: inset 0 -2px 0 transparent; }
 .tabs button.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); background: transparent; }
@@ -644,7 +654,7 @@ body[data-printsim=on] #ctx-actions { visibility: hidden; }
 .path-error { color: var(--bad); font-size: 12px; }
 .path-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .path-actions button { min-height: 30px; font-size: 12.5px; }
-body.path-editing #ctx-actions { visibility: hidden; }
+body.path-editing #ctx-actions { }
 @media (max-width: 720px) { .path-hud { width: calc(100% - 24px); } .path-hint { display: none; } }
 
 /* ---- trace image dialog ------------------------------------------------------------------- */

@@ -107,6 +107,75 @@ func (s *Service) ListProjects() []ProjectInfo {
 	return out
 }
 
+// savedProject resolves a path from the project list to a saved project directly under
+// OutputDir; nothing outside the list can be renamed or deleted through it.
+func (s *Service) savedProject(p string) (string, error) {
+	dir := filepath.Clean(strings.TrimSpace(p))
+	if filepath.Dir(dir) != OutputDir || !strings.HasSuffix(strings.ToLower(dir), projectExt) {
+		return "", fmt.Errorf("%q is not a saved project", p)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("project %q not found", p)
+	}
+	if s.path != "" && samePath(s.path, dir) {
+		return "", fmt.Errorf("this project is open; open another one first")
+	}
+	return dir, nil
+}
+
+// DeleteProject removes a saved project from disk.
+func (s *Service) DeleteProject(p string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
+	}
+	dir, err := s.savedProject(p)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
+// RenameProject renames a saved project's directory and the name in its project.json.
+func (s *Service) RenameProject(p, name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return "", err
+	}
+	dir, err := s.savedProject(p)
+	if err != nil {
+		return "", err
+	}
+	name = strings.TrimSuffix(strings.TrimSpace(name), projectExt)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("give a plain project name (no slashes)")
+	}
+	to := filepath.Join(OutputDir, name+projectExt)
+	if _, err := os.Stat(to); err == nil {
+		return "", fmt.Errorf("a project named %q already exists", name)
+	}
+	meta := filepath.Join(dir, "project.json")
+	var m map[string]any
+	b, err := os.ReadFile(meta)
+	if err == nil {
+		err = json.Unmarshal(b, &m)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read project.json: %w", err)
+	}
+	m["name"] = name
+	out, _ := json.MarshalIndent(m, "", "  ") // map keys marshal sorted: the canonical form
+	if err := os.WriteFile(meta, append(out, '\n'), 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(dir, to); err != nil {
+		return "", err
+	}
+	return to, nil
+}
+
 // findProject resolves a typed path to an existing project: as typed, then under
 // OutputDir, each with and without the .scadproj extension.
 func (s *Service) findProject(p string) string {

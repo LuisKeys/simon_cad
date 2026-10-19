@@ -599,7 +599,24 @@ func (s *Server) routes() {
 	m.HandleFunc("/api/project/list", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.Svc.ListProjects())
 	})
-	m.HandleFunc("/api/project/open", func(w http.ResponseWriter, r *http.Request) {
+	m.HandleFunc("/api/project/delete", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Path string }
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, s.Svc.DeleteProject(in.Path))
+	})
+	m.HandleFunc("/api/project/rename", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Path, Name string }
+		if err := decode(r, &in); err != nil {
+			fail(w, err)
+			return
+		}
+		p, err := s.Svc.RenameProject(in.Path, in.Name)
+		reply(w, map[string]any{"ok": true, "path": p}, err)
+	})
+	m.HandleFunc("/api/project/open",func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Path string }
 		if err := decode(r, &in); err != nil {
 			fail(w, err)

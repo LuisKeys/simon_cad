@@ -57,7 +57,9 @@ export function formDialog({ title, fields, ok = 'Apply' }) {
   });
 }
 
-export function ask({ title, value = '', format = false, ok = 'OK', choices = null }) {
+// With `choices`, `manage` ({ rename(choice, name), remove(choice) }, each resolving to the
+// refreshed choices) adds a rename and a delete button to every row.
+export function ask({ title, value = '', format = false, ok = 'OK', choices = null, manage = null }) {
   return new Promise((resolve) => {
     const d = $('dialog'), input = $('dialog-input'), fmt = $('dialog-format');
     $('dialog-title').textContent = title;
@@ -65,19 +67,50 @@ export function ask({ title, value = '', format = false, ok = 'OK', choices = nu
     const list = $('dialog-list');
     list.replaceChildren();
     list.hidden = !choices;
-    if (choices) {
-      if (!choices.length) {
+    $('dialog-form').classList.toggle('projects', !!choices);
+    const err = $('dialog-error');
+    err.hidden = true;
+    const render = (cs) => {
+      list.replaceChildren();
+      if (!cs.length) {
         const li = document.createElement('li'); li.className = 'd'; li.textContent = 'No saved projects yet'; list.append(li);
       }
-      for (const c of choices) {
+      const apply = async (fn) => { try { render(await fn()); } catch (e) { err.textContent = e.message; err.hidden = false; } };
+      for (const c of cs) {
         const li = document.createElement('li');
-        const k = document.createElement('span'); k.textContent = c.label;
+        const k = document.createElement('span'); k.textContent = c.label; k.title = c.label; k.className = 'nm';
         const dsc = document.createElement('span'); dsc.className = 'd'; dsc.textContent = c.detail ?? '';
         li.append(k, dsc);
         li.onclick = () => close({ value: c.value, format: fmt.value });
+        if (manage) {
+          const btn = (text, title, fn) => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.textContent = text; b.title = title; b.className = 'row-act';
+            if (text === 'Delete') b.classList.add('danger');
+            b.onclick = (e) => { e.stopPropagation(); err.hidden = true; fn(b); };
+            return b;
+          };
+          const rename = btn('Rename', `Rename ${c.label}`, () => {
+            const edit = document.createElement('input');
+            edit.type = 'text'; edit.value = c.label; edit.spellcheck = false; edit.className = 'row-edit';
+            edit.onclick = (e) => e.stopPropagation();
+            edit.onkeydown = (e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') { e.preventDefault(); apply(() => manage.rename(c, edit.value.trim())); }
+              if (e.key === 'Escape') { e.preventDefault(); render(cs); }
+            };
+            k.replaceChildren(edit); edit.focus(); edit.select();
+          });
+          const del = btn('Delete', `Delete ${c.label}`, (b) => {
+            if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Really delete?'; b.classList.add('armed'); return; }
+            apply(() => manage.remove(c));
+          });
+          li.append(rename, del);
+        }
         list.append(li);
       }
-    }
+    };
+    if (choices) render(choices);
     d.hidden = false; input.focus(); input.select();
     const close = (v) => { d.hidden = true; list.hidden = true; $('dialog-form').onsubmit = null; $('dialog-cancel').onclick = null; resolve(v); };
     $('dialog-form').onsubmit = (e) => { e.preventDefault(); close({ value: input.value.trim(), format: fmt.value }); };
