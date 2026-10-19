@@ -18,6 +18,7 @@ import (
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/meshimport"
+	"github.com/accelone/simoncad/internal/stepimport"
 	"github.com/accelone/simoncad/internal/workspace"
 )
 
@@ -26,8 +27,9 @@ import (
 // the stable project id and the reusable-component metadata; v4 adds workspace.json (units,
 // grid and snapping); v5 adds assets/documents/ (attached reference documents) and stores
 // every image attached to a prompt; v6 adds assets/meshes/ (validated STL meshes that
-// import_mesh nodes reference). Every addition is optional, so v1–v5 projects load unchanged.
-const SchemaVersion = 6
+// import_mesh nodes reference); v7 adds assets/steps/ (STEP files that import_step nodes
+// reference). Every addition is optional, so v1–v6 projects load unchanged.
+const SchemaVersion = 7
 
 // Meta is project.json. ID is the stable identity a ComponentInstance references: it survives
 // renaming the directory, and the directory name never does. A project with Reusable set is a
@@ -136,6 +138,13 @@ type Mesh struct {
 	Data []byte
 }
 
+// Step is a STEP file stored as it came under assets/steps/<id>.step. Its id is the hash of its
+// content (stepimport.ID), so a file that no longer matches is detected on use.
+type Step struct {
+	ID   string // step_<hash>
+	Data []byte
+}
+
 // Image is a retained source image stored under assets/images/.
 type Image struct {
 	ID   string // img_<hash>
@@ -155,6 +164,8 @@ type Project struct {
 	Documents   []Document
 	// Meshes are the validated meshes the graph's import_mesh nodes reference (assets/meshes/).
 	Meshes []Mesh
+	// Steps are the STEP files the graph's import_step nodes reference (assets/steps/).
+	Steps []Step
 	// Workspace is the project's units, grid and snapping (workspace.json). Load leaves it
 	// nil for a project saved before it existed; Save writes the factory defaults for nil.
 	Workspace *workspace.Settings
@@ -308,7 +319,11 @@ func Save(dir string, p *Project) error {
 	if err != nil {
 		return err
 	}
-	if err := writeAll(append(append(append(pending, imgs...), docs...), meshes...)); err != nil {
+	steps, err := saveSteps(dir, p.Steps)
+	if err != nil {
+		return err
+	}
+	if err := writeAll(append(append(append(append(pending, imgs...), docs...), meshes...), steps...)); err != nil {
 		return err
 	}
 	keep := filepath.Join(dir, "thumbnails", ".gitkeep")
@@ -322,6 +337,7 @@ const (
 	imagesDir    = "assets/images"
 	documentsDir = "assets/documents"
 	meshesDir    = "assets/meshes"
+	stepsDir     = "assets/steps"
 )
 
 // MeshPath is where a project stores an imported mesh.
@@ -360,6 +376,60 @@ func loadMeshes(dir string) ([]Mesh, error) {
 		out = append(out, Mesh{ID: id, Data: b})
 	}
 	return out, nil
+}
+
+// StepPath is where a project stores an imported STEP file.
+func StepPath(dir, id string) string {
+	return filepath.Join(dir, filepath.FromSlash(stepsDir), id+".step")
+}
+
+// saveSteps removes stored STEP files nothing references any more and returns the files to write.
+func saveSteps(dir string, steps []Step) ([]pendingFile, error) {
+	full := filepath.Join(dir, filepath.FromSlash(stepsDir))
+	out := make([]pendingFile, 0, len(steps))
+	for _, s := range steps {
+		if !stepimport.ValidID(s.ID) {
+			return nil, fmt.Errorf("STEP id %q is not valid", s.ID)
+		}
+		out = append(out, pendingFile{StepPath(dir, s.ID), s.Data})
+	}
+	return out, prune(full, out)
+}
+
+func loadSteps(dir string) ([]Step, error) {
+	entries, err := os.ReadDir(filepath.Join(dir, filepath.FromSlash(stepsDir)))
+	if err != nil {
+		return nil, nil // no STEP files
+	}
+	var out []Step
+	for _, e := range entries {
+		id, ok := strings.CutSuffix(e.Name(), ".step")
+		if e.IsDir() || !ok || !stepimport.ValidID(id) {
+			continue
+		}
+		b, err := os.ReadFile(StepPath(dir, id))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Step{ID: id, Data: b})
+	}
+	return out, nil
+}
+
+// StepFiles resolves import_step nodes from the assets/steps/ of one project directory. A
+// reusable component is built from its own directory with it.
+type StepFiles string
+
+// Step reads the stored file; the caller checks it against the id (stepimport.Load).
+func (d StepFiles) Step(id string) ([]byte, error) {
+	if !stepimport.ValidID(id) {
+		return nil, fmt.Errorf("%q is not a STEP id", id)
+	}
+	b, err := os.ReadFile(StepPath(string(d), id))
+	if err != nil {
+		return nil, fmt.Errorf("STEP file %s is missing from the project's assets/steps/", id)
+	}
+	return b, nil
 }
 
 // MeshFiles resolves import_mesh nodes from the assets/meshes/ of one project directory. A
@@ -572,6 +642,9 @@ func Load(dir string) (*Project, error) {
 	if p.Meshes, err = loadMeshes(dir); err != nil {
 		return nil, err
 	}
+	if p.Steps, err = loadSteps(dir); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -604,11 +677,11 @@ func LoadGraph(dir string) (Meta, *cadir.Graph, error) {
 
 // migrate upgrades files from older schema versions. Every version bump so far only added
 // optional content (v2: assets/images/, interpretations; v3: the project id and component
-// metadata; v4: workspace.json; v5: assets/documents/; v6: assets/meshes/), so an older project is valid as it is; the next save writes
+// metadata; v4: workspace.json; v5: assets/documents/; v6: assets/meshes/; v7: assets/steps/), so an older project is valid as it is; the next save writes
 // the current version.
 func migrate(dir string, p *Project) error {
 	switch p.Meta.SchemaVersion {
-	case SchemaVersion, 5, 4, 3, 2, 1:
+	case SchemaVersion, 6, 5, 4, 3, 2, 1:
 		if p.Meta.ID == "" {
 			p.Meta.ID = DeriveID(p.Meta.Name, p.Meta.Created)
 		}

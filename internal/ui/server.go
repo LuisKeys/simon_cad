@@ -22,6 +22,7 @@ import (
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/config"
 	"github.com/accelone/simoncad/internal/meshimport"
+	"github.com/accelone/simoncad/internal/stepimport"
 	"github.com/accelone/simoncad/internal/vision"
 )
 
@@ -225,6 +226,20 @@ func (s *Server) routes() {
 		}
 		q := r.URL.Query()
 		o, err := s.Svc.ImportSTL(q.Get("name"), b, q.Get("units"), q.Get("placement"), q.Get("fill_holes") == "1", decimateParam(q.Get("decimate_to")))
+		reply(w, o, err)
+	})
+	m.HandleFunc("/api/step", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST the raw STEP bytes with ?name=file.step[&placement=file]", http.StatusMethodNotAllowed)
+			return
+		}
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, stepimport.MaxBytes+1))
+		if err != nil {
+			fail(w, fmt.Errorf("STEP file is larger than %d MB or unreadable", stepimport.MaxBytes>>20))
+			return
+		}
+		q := r.URL.Query()
+		o, err := s.Svc.ImportSTEP(q.Get("name"), b, q.Get("placement"))
 		reply(w, o, err)
 	})
 	m.HandleFunc("/api/interpretation/close", func(w http.ResponseWriter, r *http.Request) {

@@ -68,6 +68,19 @@ export async function uploadSpec(file) {
   return data;
 }
 
+// Uploads a STEP file. The server reads it with the kernel first (it must be valid and hold a
+// solid) and only then adds it as a body with its exact geometry; a refused file rejects with the
+// reason. STEP declares its own units, so there are none to send. Resolves to the tool outcome.
+export async function uploadStep(file, { placement = '' } = {}) {
+  const q = new URLSearchParams({ name: file.name });
+  if (placement) q.set('placement', placement);
+  const res = await fetch(`/api/step?${q}`, { method: 'POST', headers: { 'X-Simon-Token': token }, body: file });
+  let data = null;
+  try { data = await res.json(); } catch { /* empty body */ }
+  if (!res.ok) throw failure(data, res.status, `STEP import failed (HTTP ${res.status})`);
+  return data;
+}
+
 // Uploads an STL file. The server validates it first (it must be one closed, watertight solid) and
 // only then adds it as a body; a refused file rejects with the reasons (code "mesh_has_holes" when
 // holes are the only fault: retry with fillHoles). Resolves to the tool outcome.

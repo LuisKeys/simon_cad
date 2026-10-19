@@ -1,6 +1,7 @@
-// Importing an STL: the toolbar button and dropping a file on the viewport. The server validates
-// the mesh before keeping it (one closed, watertight, consistently oriented solid); a refused
-// file is explained in a toast and the model is not touched.
+// Importing a model: the toolbar button and dropping a file on the viewport. An STL is validated by
+// the server before it is kept (one closed, watertight, consistently oriented solid) and needs the
+// user to say its units; a STEP file carries exact geometry and its own units, so it is imported
+// as it is. A refused file is explained in a toast and the model is not touched.
 
 export const UNIT_CHOICES = [
   { label: 'mm', detail: 'millimetres (most CAD and slicers)', value: 'mm' },
@@ -13,6 +14,11 @@ export const UNIT_CHOICES = [
 /** The .stl files of a FileList / array, in order. */
 export function stlFiles(files) {
   return [...(files ?? [])].filter((f) => /\.stl$/i.test(f.name ?? ''));
+}
+
+/** The .step and .stp files of a FileList / array, in order. */
+export function stepFiles(files) {
+  return [...(files ?? [])].filter((f) => /\.(step|stp)$/i.test(f.name ?? ''));
 }
 
 /** True when a drag carries files (not a material or text). */
@@ -40,13 +46,18 @@ export async function importWithRepair({ file, units, uploadMesh, confirm }) {
 }
 
 /** Wires the Import button, its hidden input and viewport drops. */
-export function initImport({ button, input, viewport, ask, confirm, toast, uploadMesh, refresh, busy }) {
+export function initImport({ button, input, viewport, ask, confirm, toast, uploadMesh, uploadStep, refresh, busy }) {
   let importing = false;
   async function importFiles(files) {
-    const list = stlFiles(files);
+    // Files of any other kind are ignored; the dialog about units is only for meshes.
+    const list = [...(files ?? [])].filter((f) => stlFiles([f]).length || stepFiles([f]).length);
     if (!list.length || importing) return;
-    const r = await ask({ title: 'STL units (the file does not say)', value: 'mm', choices: UNIT_CHOICES, ok: 'Import' });
-    if (!r?.value) return;
+    let units = 'mm';
+    if (stlFiles(list).length) {
+      const r = await ask({ title: 'STL units (the file does not say)', value: 'mm', choices: UNIT_CHOICES, ok: 'Import' });
+      if (!r?.value) return;
+      units = r.value;
+    }
     importing = true;
     button.disabled = true;
     // A question asked while the dialog is up (close the holes?) hides it, then brings it back.
@@ -55,7 +66,7 @@ export function initImport({ button, input, viewport, ask, confirm, toast, uploa
       for (const file of list) {
         busy.show(`Importing ${file.name}`, 'Uploading the file');
         try {
-          const o = await importWithRepair({ file, units: r.value, uploadMesh, confirm: askWhileBusy });
+          const o = stepFiles([file]).length ? await uploadStep(file) : await importWithRepair({ file, units, uploadMesh, confirm: askWhileBusy });
           busy.close();
           toast(o.ok ? `Imported ${file.name}` : o.error, o.ok ? 'ok' : 'bad', o.ok ? 4500 : 12000);
         } catch (e) { busy.close(); toast(e.message, 'bad', 15000); }

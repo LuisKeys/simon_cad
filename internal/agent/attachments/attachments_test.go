@@ -35,6 +35,7 @@ func TestClassifyAndRequirements(t *testing.T) {
 		{"dims.json", []byte(`{"dx": 80}`), attachments.KindText},
 		{"drawing.pdf", []byte("%PDF-1.7\n%âãÏÓ\n1 0 obj"), attachments.KindDocument},
 		{"blob.bin", []byte{0, 1, 2, 3, 0xff}, attachments.KindUnknown},
+		{"part.step", []byte("ISO-10303-21;\nHEADER;\nENDSEC;\n"), attachments.KindUnknown},              // imported, never reference text
 		{"part.stl", []byte("solid part\nfacet normal 0 0 1\nendsolid part\n"), attachments.KindUnknown}, // imported, never reference text
 	} {
 		if got := attachments.Classify(c.name, c.data); got != c.want {

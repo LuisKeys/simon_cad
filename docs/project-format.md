@@ -18,6 +18,7 @@ my_part.scadproj/
   assets/images/       images attached to a prompt, or retained by the user (<id>.png|jpg|webp)
   assets/documents/    attached reference documents (<id>.<ext>, plus <id>.extracted.md for a PDF)
   assets/meshes/       imported STL meshes in canonical binary form (mesh_<hash>.stl)
+  assets/steps/        imported STEP files, byte for byte (step_<hash>.step)
 ```
 
 An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/servo_bracket.scadproj).
@@ -32,7 +33,7 @@ An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/se
   `agent-history.json.interpretations`; v3 adds the project `id` and the reusable-component
   metadata; v4 adds `workspace.json`; v5 adds `assets/documents/` with its
   `agent-history.json.documents` index and `prompts[].documents`, and stores every image attached to
-  a prompt; v6 (current) adds `assets/meshes/`. Every addition is optional, so v1–v5 projects load
+  a prompt; v6 adds `assets/meshes/`; v7 (current) adds `assets/steps/`. Every addition is optional, so v1–v6 projects load
   as they are.
 - **Self-verifying:** `simoncad-cli replay` re-derives the model from the recorded ChangeSets and
   checks it equals `model.json`.
@@ -199,6 +200,21 @@ or override materials in `assets/materials/<id>/material.json`; they are carried
 A reference to a material that no longer exists loads fine and renders with the generic gray fallback; the id
 is preserved. Visual materials are independent of any engineering material (density, strength) — the
 mapping `EngineeringDefaults` only suggests a default look.
+
+## Imported STEP files: `assets/steps/`
+
+An `import_step` tool call stores the file as it came, as `assets/steps/step_<hash>.step`, and adds
+an `import_step` node whose `step` parameter is that id (plus `placement` and the original file name
+in `source`). Unlike a mesh, a STEP file keeps its exact B-Rep (planes, cylinders, B-spline
+surfaces), so the body behaves like a modelled one: fillets, holes and face selectors work on it.
+The file declares its own length unit and the reader converts it to millimetres, so the node has no
+`units`. The id is the first 24 hex digits of the SHA-256 of the file, so a stored file that no
+longer matches its id is refused (the node fails to rebuild) instead of silently changing the model.
+Before it is stored (`internal/stepimport`) the kernel must read it, judge the geometry valid and
+find at least one solid with a positive volume; unreadable, invalid, surface-only and empty files are
+refused with the reason and nothing is stored. An assembly with several solids becomes one body that
+holds all of them. A save writes the files the graph still references and removes the rest. A
+reusable component carries its own files.
 
 ## Imported meshes: `assets/meshes/`
 

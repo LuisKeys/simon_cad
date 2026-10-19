@@ -131,6 +131,7 @@ func (r *Resolver) Shape(projectID, version, contentHash string, overrides map[s
 	eng := rebuild.New(r.k)
 	eng.Components = r
 	eng.Meshes = persistence.MeshFiles(dir)
+	eng.Steps = persistence.StepFiles(dir)
 	m, err := eng.Rebuild(built)
 	if err != nil {
 		eng.Close()

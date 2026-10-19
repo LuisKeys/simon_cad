@@ -47,6 +47,9 @@ func Classify(name string, data []byte) Kind {
 	ct := http.DetectContentType(head)
 	ext := strings.ToLower(filepath.Ext(name))
 	switch {
+	case ext == ".step" || ext == ".stp":
+		// A STEP file is geometry, not reference text: it goes in through Import.
+		return KindUnknown
 	case ext == ".stl":
 		// A mesh is not reference text, even when it is ASCII: it goes in through Import, which
 		// validates it (see internal/meshimport).
@@ -75,7 +78,7 @@ func Requirements(k Kind) (runtime.ProviderCapabilities, error) {
 	case KindDocument:
 		return runtime.ProviderCapabilities{Attachments: true}, nil
 	}
-	return runtime.ProviderCapabilities{}, fmt.Errorf("unsupported attachment type (use PNG/JPEG/WebP images, text documents or PDF; an STL model is added with Import)")
+	return runtime.ProviderCapabilities{}, fmt.Errorf("unsupported attachment type (use PNG/JPEG/WebP images, text documents or PDF; an STL or STEP model is added with Import)")
 }
 
 // Processor routes attachment work to a provider that can do it.

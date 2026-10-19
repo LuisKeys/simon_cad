@@ -105,7 +105,7 @@ export function icon(name) {
 export function featureIcon(type = '') {
   const t = type.toLowerCase();
   const exact = { copy: 'duplicate', scale: 'scale', face_extrude: 'extrude', face_inset: 'inset', face_offset: 'offset',
-    component_instance: 'component', import_mesh: 'import', path: 'path', profile: 'profile', sweep: 'sweep' };
+    component_instance: 'component', import_mesh: 'import', import_step: 'import', path: 'path', profile: 'profile', sweep: 'sweep' };
   if (exact[t]) return exact[t];
   for (const k of ['cylinder', 'cone', 'sphere', 'torus', 'hole', 'mirror', 'fillet', 'chamfer', 'sketch', 'union', 'subtract', 'intersect']) if (t.includes(k)) return k;
   if (t.includes('pattern')) return 'pattern';

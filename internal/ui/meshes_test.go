@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -63,6 +65,48 @@ func TestMeshUploadEndpointValidatesBeforeImporting(t *testing.T) {
 	node := srv.Svc.app.Graph.Get("cube")
 	srv.Svc.mu.Unlock()
 	if node == nil || node.Type != "import_mesh" || node.Parameters["units"] != "cm" || node.Parameters["source"] != "cube.stl" {
+		t.Fatalf("node: %+v", node)
+	}
+}
+
+func TestStepUploadEndpointChecksBeforeImporting(t *testing.T) {
+	srv, ts := testServer(t)
+	if code, _ := post(t, ts.URL, "", "/api/step?name=a.step", []byte("x")); code != http.StatusForbidden {
+		t.Fatalf("an upload needs the token: %d", code)
+	}
+	if code, out := post(t, ts.URL, srv.Token, "/api/step?name=a.stl", []byte("x")); code != 400 || !strings.Contains(out["error"].(string), ".step") {
+		t.Fatalf("only .step/.stp: %d %v", code, out)
+	}
+	if code, out := post(t, ts.URL, srv.Token, "/api/step?name=a.step", []byte("not a step file")); code != 400 || !strings.Contains(out["error"].(string), "not a STEP file") {
+		t.Fatalf("garbage: %d %v", code, out)
+	}
+	srv.Svc.mu.Lock()
+	n := len(srv.Svc.app.Graph.Nodes)
+	srv.Svc.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("a refused file changed the model (%d nodes)", n)
+	}
+
+	// A STEP exported by the same kernel imports as an import_step body.
+	srv.Svc.mu.Lock()
+	box, err := srv.Svc.app.K.Box(10, 20, 30)
+	srv.Svc.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "b.stp")
+	if err := box.ExportSTEP(p); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	code, out := post(t, ts.URL, srv.Token, "/api/step?name=block.stp&placement=center", data)
+	if code != 200 || out["ok"] != true {
+		t.Fatalf("import: %d %v", code, out)
+	}
+	srv.Svc.mu.Lock()
+	node := srv.Svc.app.Graph.Get("block")
+	srv.Svc.mu.Unlock()
+	if node == nil || node.Type != "import_step" || node.Parameters["placement"] != "center" || node.Parameters["source"] != "block.stp" {
 		t.Fatalf("node: %+v", node)
 	}
 }

@@ -85,3 +85,34 @@ test('a refused file closes the dialog and says why', async () => {
   assert.equal(h.log.at(-1), 'close', 'and it is closed again at the very end');
   assert.ok(h.log.indexOf('close') < h.log.indexOf('toast:bad:b.stl was not imported: not watertight'));
 });
+
+test('stepFiles keeps .step and .stp files, any case', async () => {
+  const { stepFiles } = await import('./import-stl.js');
+  const files = [{ name: 'a.step' }, { name: 'b.STP' }, { name: 'c.stl' }, { name: 'd.step.txt' }, {}];
+  assert.deepEqual(stepFiles(files).map((f) => f.name), ['a.step', 'b.STP']);
+  assert.deepEqual(stepFiles(null), []);
+});
+
+test('a STEP file is uploaded without asking for units, and an STL beside it still is', async () => {
+  const { initImport } = await import('./import-stl.js');
+  const sent = [];
+  const h = harness({ upload: async (f) => { sent.push('mesh:' + f.name); return { ok: true }; } });
+  let asked = 0;
+  h.ask = async () => { asked++; return { value: 'cm' }; };
+  h.uploadStep = async (f) => { sent.push('step:' + f.name); return { ok: true }; };
+  const { importFiles } = initImport(h);
+  await importFiles([{ name: 'a.step' }]);
+  assert.equal(asked, 0, 'STEP declares its own units');
+  await importFiles([{ name: 'b.STP' }, { name: 'c.stl' }, { name: 'notes.txt' }]);
+  assert.equal(asked, 1);
+  assert.deepEqual(sent, ['step:a.step', 'step:b.STP', 'mesh:c.stl']);
+});
+
+test('a refused STEP file says why and closes the dialog', async () => {
+  const { initImport } = await import('./import-stl.js');
+  const h = harness({ upload: async () => ({ ok: true }) });
+  h.uploadStep = async () => { throw new Error('x.step was not imported: the file has no solid'); };
+  await initImport(h).importFiles([{ name: 'x.step' }]);
+  assert.ok(h.log.includes('toast:bad:x.step was not imported: the file has no solid'));
+  assert.equal(h.log.at(-1), 'close');
+});

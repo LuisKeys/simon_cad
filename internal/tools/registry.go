@@ -18,6 +18,7 @@ import (
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
 	"github.com/accelone/simoncad/internal/meshimport"
+	"github.com/accelone/simoncad/internal/stepimport"
 	"github.com/accelone/simoncad/internal/vision"
 	"github.com/accelone/simoncad/internal/visual"
 	"github.com/accelone/simoncad/internal/workspace"
@@ -69,6 +70,10 @@ type Env interface {
 	// ReduceMesh decimates a stored mesh and stores the result as a new one.
 	ReduceMesh(id string, target int) (*meshimport.Prepared, error)
 	MeshInfo(id string) (meshimport.Report, bool)
+	// StoreStep checks a STEP file with the kernel and keeps the accepted one in the project;
+	// StepInfo describes a stored file.
+	StoreStep(data []byte) (*stepimport.Prepared, error)
+	StepInfo(id string) (stepimport.Report, bool)
 	// ResolveIOPath validates a file path chosen by the model and returns the path to use.
 	// Tools must never touch a model-supplied path without it: a prompt injection in an
 	// attachment must not be able to read or overwrite files outside the project/output dirs.

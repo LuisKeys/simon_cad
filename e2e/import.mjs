@@ -180,6 +180,25 @@ try {
   // one, and only the reduced version of the heavy mesh is kept (the full one is no longer used).
   assert.equal(readdirSync(join(tmp, 'p.scadproj', 'assets', 'meshes')).filter((f) => f.endsWith('.stl')).length, 2);
 
+  // 4. A STEP file: exact geometry and its own units, so no units dialog; it becomes an import_step
+  // body, survives a save, and a file that is not STEP is refused without touching the model.
+  const stepPath = join(root, 'out', 'e2e-source.step');
+  assert.ok((await api('tool', { name: 'create_box', args: { name: 'src', dx: 40, dy: 25, dz: 10 } })).ok);
+  assert.ok((await api('tool', { name: 'export_step', args: { path: stepPath } })).ok);
+  await api('undo', {});
+  await page.waitForFunction(() => window.simonViewport.bodies.size === 3);
+  await page.setInputFiles('#import-input', stepPath);
+  await page.waitForFunction(() => window.simonViewport.bodies.size === 4);
+  assert.equal(await page.locator('#dialog').isHidden(), true, 'a STEP file does not ask for units');
+  const stepNode = (await api('state')).tree.find((n) => n.type === 'import_step');
+  assert.ok(stepNode, 'the STEP body is in the design tree');
+  assert.equal(stepNode.type, 'import_step');
+  await page.setInputFiles('#import-input', { name: 'broken.step', mimeType: 'application/step', buffer: Buffer.from('definitely not a STEP file') });
+  await page.waitForFunction(() => /broken\.step was not imported/.test(document.querySelector('#toast').textContent));
+  assert.equal((await api('state')).tree.filter((n) => n.type === 'import_step').length, 1, 'the refused file left no node');
+  assert.ok(!(await api('project/save', { path: '' })).error);
+  assert.equal(readdirSync(join(tmp, 'p.scadproj', 'assets', 'steps')).filter((f) => f.endsWith('.step')).length, 1);
+
   // The browser logs the refused upload's 400 as a console error; that one is the point of step 2.
   assert.deepEqual(errors.filter((e) => !/status of 400/.test(e)), []);
   console.log('import e2e: OK');

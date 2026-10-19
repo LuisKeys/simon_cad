@@ -1448,6 +1448,17 @@ _edit tool._ REALLY reduce the number of triangles (faces) of an imported STL bo
 | `ratio` | number ≥ 0 |  | Fraction of the triangles to keep, e.g. 0.2 keeps a fifth. Give this or target_triangles; leave the other out (0 counts as left out). |
 | `target_triangles` | integer ≥ 0 ≤ 100000 |  | Triangles to keep, about. Give this or ratio; leave the other out (0 counts as left out). |
 
+### `import_step`
+
+_edit tool._ Import a STEP file (.step or .stp) as a solid body with its exact geometry: cylinders stay cylinders and planes stay planes, so fillet, chamfer, add_hole and face selectors work on it much better than on an imported STL. STEP declares its own units, which are converted to millimetres: do not ask the user for units. The file is checked first: it must be readable, geometrically valid and hold at least one solid (surface-only or empty files are refused with the reason, and the model is not changed). Give `path` (a file under the project, ./projects_output or ./out) or `step` (the id of a file the user already uploaded). A file with several solids (an assembly) becomes one body holding all of them. `placement`: file (as authored, default), center (bounding box centred on the origin) or base (centred on X/Y, resting on Z=0). Move, rotate, scale and combine the result with the usual tools.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `filename` | string |  | Original file name of an uploaded file, for display. |
+| `path` | string |  | Path of a .step or .stp file. |
+| `placement` | file \| center \| base \|  |  | Where to put the body (default file). (file \| center \| base) |
+| `step` | string |  | Id (step_...) of a STEP file the user uploaded in the UI. |
+
 ### `import_stl`
 
 _edit tool._ Import an STL file as a solid body. The file is validated before it is accepted: it must be one closed (watertight), consistently oriented, manifold, non-self-intersecting solid within the triangle limit; a file that is not is refused with what is wrong and where (holes, flipped triangles, several shells, self-intersections...), and the model is not changed. STL carries no units: ask the user if they are not obviously millimetres, and pass `units`. Give `path` (a file under the project, ./projects_output or ./out) or `mesh` (the id of a file the user already uploaded). A refusal that is only about holes can be retried with fill_holes=true if the user wants the holes closed. The imported body is a mesh-derived solid: move, rotate, scale and combine it with the usual tools (transform, boolean, add_hole...). `placement`: file (as authored), center (bounding box centred on the origin) or base (centred on X/Y, resting on Z=0).

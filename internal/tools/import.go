@@ -24,7 +24,7 @@ func orEmpty(e map[string]any) map[string]any {
 }
 
 func importTools() []*Tool {
-	return []*Tool{importSTL(), decimateMesh()}
+	return []*Tool{importSTL(), importSTEP(), decimateMesh()}
 }
 
 func importSTL() *Tool {

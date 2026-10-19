@@ -15,6 +15,7 @@ import (
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
 	"github.com/accelone/simoncad/internal/meshimport"
+	"github.com/accelone/simoncad/internal/stepimport"
 	"github.com/accelone/simoncad/internal/vision"
 	"github.com/accelone/simoncad/internal/visual"
 	"github.com/accelone/simoncad/internal/workspace"
@@ -69,6 +70,9 @@ func (e toolEnv) ReduceMesh(id string, target int) (*meshimport.Prepared, error)
 	return e.a.ReduceMesh(id, target)
 }
 func (e toolEnv) MeshInfo(id string) (meshimport.Report, bool) { return e.a.MeshInfo(id) }
+
+func (e toolEnv) StoreStep(data []byte) (*stepimport.Prepared, error) { return e.a.StoreStep(data) }
+func (e toolEnv) StepInfo(id string) (stepimport.Report, bool)        { return e.a.StepInfo(id) }
 
 func (e toolEnv) ResolveIOPath(path string, write bool) (string, error) {
 	return e.a.resolveIOPath(path, write)

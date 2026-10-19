@@ -153,6 +153,8 @@ type Ctx struct {
 	Components ComponentResolver
 	// Meshes resolves import_mesh nodes. Nil when no mesh store is configured.
 	Meshes MeshResolver
+	// Steps resolves import_step nodes. Nil when no STEP store is configured.
+	Steps StepResolver
 }
 
 func (c *Ctx) body(id string) (*Body, error) {

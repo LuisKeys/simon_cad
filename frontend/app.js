@@ -1,7 +1,7 @@
 // Simon CAD UI: panels over the ui.Service API. Every mutation here is a call that ends in
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
-import { api, apiBytes, subscribe, h, materialUrl, imageUrl, uploadMesh } from './api.js';
+import { api, apiBytes, subscribe, h, materialUrl, imageUrl, uploadMesh, uploadStep } from './api.js';
 import { toast } from './toast.js';
 import { $ } from './dom.js';
 import { showMenu } from './menu.js';
@@ -1627,7 +1627,7 @@ async function save() {
 $('btn-undo').addEventListener('click', doUndo);
 $('btn-redo').addEventListener('click', doRedo);
 $('btn-save').addEventListener('click', save);
-initImport({ busy, button: $('btn-import'), input: $('import-input'), viewport: $('viewport'), ask, confirm: confirmBox, toast, uploadMesh, refresh: () => scheduleRefresh() });
+initImport({ busy, button: $('btn-import'), input: $('import-input'), viewport: $('viewport'), ask, confirm: confirmBox, toast, uploadMesh, uploadStep, refresh: () => scheduleRefresh() });
 $('btn-export').addEventListener('click', async () => {
   const r = await ask({ title: 'Export to (path)', value: `out/${S.state?.name || 'model'}.step`, format: true, ok: 'Export' });
   if (!r?.value) return;

@@ -94,6 +94,7 @@ type App struct {
 	Resolver *components.Resolver
 	Deps     *components.DependencyGraph
 	meshes   *meshStore // imported STL meshes (see meshes.go)
+	steps    *stepStore // imported STEP files (see steps.go)
 	dir      string     // the project's directory, "" until saved or opened; anchors the library
 	// savedHash is the graph hash as of the last save; it decides whether a reusable project's
 	// component_version advances, so save → load → save stays byte-identical.
@@ -117,9 +118,10 @@ func newApp(clock func() time.Time) *App {
 		Reg: tools.Default(), Clock: clock, actor: Actor{CreatedBy: cadir.CreatedByCLI},
 		Vision: vision.NewStore(), Images: vision.NewImageStore(), Docs: documents.NewStore(), Visual: visual.NewState(),
 		Materials: materials.New(materialsdata.FS()),
-		Lib:       lib, Resolver: components.NewResolver(lib, k), Deps: components.NewDependencyGraph(lib), meshes: newMeshStore()}
+		Lib:       lib, Resolver: components.NewResolver(lib, k), Deps: components.NewDependencyGraph(lib), meshes: newMeshStore(), steps: newStepStore()}
 	a.Engine.Components = a.Resolver
 	a.Engine.Meshes = a
+	a.Engine.Steps = a
 	a.useLibraryRoots("")
 	a.Bus.Now = clock
 	a.Mgr = commands.NewManager(a.Graph, a, a.Bus)
@@ -174,6 +176,7 @@ func Open(dir string, clock func() time.Time) (*App, error) {
 	}
 	a.loadAttachments(dir, p) // source images and documents; the geometry never needs them
 	a.loadMeshes(p)
+	a.loadSteps(p)
 	a.Mgr.Restore(a.AH.ChangeSets)
 	a.Hist.Checkpoints = a.AH.Checkpoints
 	a.Bus.Load(p.Events)
@@ -303,7 +306,7 @@ func (a *App) Save(dir string) error {
 	if err := persistence.Save(dir, &persistence.Project{
 		Meta: a.Meta, Graph: a.Graph, History: a.AH, Events: a.Bus.Events(),
 		Components: components.Manifest(a.Graph), Constraints: a.constraints, Materials: a.materials, Images: imgs,
-		Documents: docs, Meshes: a.savedMeshes(), Workspace: &a.Workspace,
+		Documents: docs, Meshes: a.savedMeshes(), Steps: a.savedSteps(), Workspace: &a.Workspace,
 	}); err != nil {
 		return err
 	}
