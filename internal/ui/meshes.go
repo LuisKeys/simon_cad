@@ -18,7 +18,7 @@ const maxMeshBytes = meshimport.MaxBytes
 // (28 s for 72 000 triangles): it only sizes the progress bar.
 const meshBuildMicros = 450
 
-// ImportSTL validates an uploaded STL file and adds it as a body. The file is checked before
+// ImportSTL validates an uploaded STL or 3MF file and adds it as a body. The file is checked before
 // anything is kept: a mesh that is not one closed, consistently oriented, non-self-intersecting
 // solid is refused with what is wrong and where, and the model is not touched. An accepted
 // mesh goes in through the import_stl tool, like any other edit. With fillHoles the holes of the
@@ -26,8 +26,14 @@ const meshBuildMicros = 450
 // HolesOnly set, so the caller can offer that.
 func (s *Service) ImportSTL(name string, data []byte, units, placement string, fillHoles bool, decimateTo int) (Outcome, error) {
 	name = filepath.Base(strings.TrimSpace(name))
-	if !strings.EqualFold(filepath.Ext(name), ".stl") {
-		return Outcome{}, fmt.Errorf("%q is not an .stl file", name)
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext != ".stl" && ext != ".3mf" {
+		return Outcome{}, fmt.Errorf("%q is not an .stl or .3mf file", name)
+	}
+	tool := "import_stl"
+	if ext == ".3mf" {
+		tool = "import_3mf" // states its own unit: converted to mm on reading
+		units = ""
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -62,7 +68,7 @@ func (s *Service) ImportSTL(name string, data []byte, units, placement string, f
 	// Choosing a file to import is the user's explicit act, so the body is added at once (undoable),
 	// whatever the review policy for the agent's proposals is.
 	s.app.SetActor(app.Actor{CreatedBy: "user"})
-	return s.finishTool("import_stl", s.app.ApplyTool("import_stl", raw, app.PolicyAuto)), nil
+	return s.finishTool(tool, s.app.ApplyTool(tool, raw, app.PolicyAuto)), nil
 }
 
 // decimateParam reads the decimate_to query value: 0 (no reduction) when absent or not a number.

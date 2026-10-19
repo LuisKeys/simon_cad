@@ -33,7 +33,7 @@ var toolCategory = map[string]string{}
 func init() {
 	for cat, names := range map[string][]string{
 		"primitives": {"create_box", "create_cylinder", "create_sphere", "create_cone", "create_torus"},
-		"import":     {"import_stl", "import_step", "decimate_mesh"},
+		"import":     {"import_stl", "import_3mf", "import_step", "decimate_mesh"},
 		"sketch":     {"create_sketch", "extrude_sketch", "extrude_profile"},
 		"edit": {"add_hole", "fillet", "chamfer", "boolean", "face_extrude", "face_inset", "face_offset",
 			"remove_feature", "suppress_feature", "rename_feature", "delete_objects", "check_delete", "batch"},

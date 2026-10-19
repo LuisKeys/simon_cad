@@ -1,4 +1,4 @@
-// Package meshimport reads and validates triangle meshes (STL) before they are allowed into a
+// Package meshimport reads and validates triangle meshes (STL and 3MF) before they are allowed into a
 // project. A mesh is only accepted when it describes one closed, consistently oriented,
 // non-self-intersecting solid: anything weaker would make the B-Rep conversion in the kernel
 // fail late, or worse, succeed with a wrong shape. Accepted meshes are stored in a canonical
@@ -61,34 +61,44 @@ func reject(format string, a ...any) error {
 // that every coordinate is a sane finite number; whether the mesh is a usable solid is what
 // Validate decides.
 func Parse(data []byte, maxTris int) (m *Mesh, format string, err error) {
+	m, format, _, err = parseAny(data, maxTris)
+	return
+}
+
+// parseAny is Parse that also says which unit a 3MF declared (its coordinates are already in mm).
+func parseAny(data []byte, maxTris int) (m *Mesh, format, unit string, err error) {
 	if maxTris <= 0 {
 		maxTris = DefaultMaxTriangles
 	}
 	if len(data) > MaxBytes {
-		return nil, "", reject("file is %d MB, the limit is %d MB", len(data)>>20, MaxBytes>>20)
+		return nil, "", "", reject("file is %d MB, the limit is %d MB", len(data)>>20, MaxBytes>>20)
 	}
 	if len(data) == 0 {
-		return nil, "", reject("file is empty")
+		return nil, "", "", reject("file is empty")
 	}
 	if len(data) >= 84 {
 		n := int(binary.LittleEndian.Uint32(data[80:84]))
 		if len(data) == 84+n*50 {
 			m, err = parseBinary(data, n, maxTris)
-			return m, "binary", err
+			return m, "binary", "", err
 		}
+	}
+	if isZip(data) {
+		m, unit, err = Parse3MF(data, maxTris)
+		return m, "3mf", unit, err
 	}
 	if looksASCII(data) {
 		m, err = parseASCII(data, maxTris)
-		return m, "ascii", err
+		return m, "ascii", "", err
 	}
 	if len(data) >= 84 {
 		n := int(binary.LittleEndian.Uint32(data[80:84]))
 		if len(data) < 84+n*50 {
-			return nil, "", reject("binary STL is truncated: header declares %d triangles (%d bytes) but the file has %d bytes", n, 84+n*50, len(data))
+			return nil, "", "", reject("binary STL is truncated: header declares %d triangles (%d bytes) but the file has %d bytes", n, 84+n*50, len(data))
 		}
-		return nil, "", reject("binary STL has %d trailing bytes after its %d triangles", len(data)-84-n*50, n)
+		return nil, "", "", reject("binary STL has %d trailing bytes after its %d triangles", len(data)-84-n*50, n)
 	}
-	return nil, "", reject("not an STL file (neither a binary STL nor an ASCII one)")
+	return nil, "", "", reject("not an STL file (neither a binary STL nor an ASCII one)")
 }
 
 func looksASCII(data []byte) bool {

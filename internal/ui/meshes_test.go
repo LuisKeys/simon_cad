@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -108,5 +111,46 @@ func TestStepUploadEndpointChecksBeforeImporting(t *testing.T) {
 	srv.Svc.mu.Unlock()
 	if node == nil || node.Type != "import_step" || node.Parameters["placement"] != "center" || node.Parameters["source"] != "block.stp" {
 		t.Fatalf("node: %+v", node)
+	}
+}
+
+func cube3MFBytes(t *testing.T, unit string, s int) []byte {
+	t.Helper()
+	var sb strings.Builder
+	sb.WriteString(`<model unit="` + unit + `" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model"><mesh><vertices>`)
+	for _, c := range [][3]int{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}} {
+		sb.WriteString(fmt.Sprintf(`<vertex x="%d" y="%d" z="%d"/>`, c[0]*s, c[1]*s, c[2]*s))
+	}
+	sb.WriteString(`</vertices><triangles>`)
+	for _, f := range [][4]int{{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}} {
+		sb.WriteString(fmt.Sprintf(`<triangle v1="%d" v2="%d" v3="%d"/><triangle v1="%d" v2="%d" v3="%d"/>`, f[0], f[1], f[2], f[0], f[2], f[3]))
+	}
+	sb.WriteString(`</triangles></mesh></object></resources><build><item objectid="1"/></build></model>`)
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("3D/3dmodel.model")
+	w.Write([]byte(sb.String()))
+	zw.Close()
+	return buf.Bytes()
+}
+
+func Test3MFUploadImportsInMillimetres(t *testing.T) {
+	srv, ts := testServer(t)
+	// units in the query are ignored: the 3MF says centimeter itself.
+	code, out := post(t, ts.URL, srv.Token, "/api/mesh?name=box.3mf&units=in", cube3MFBytes(t, "centimeter", 2))
+	if code != 200 || out["ok"] != true {
+		t.Fatalf("import: %d %v", code, out)
+	}
+	srv.Svc.mu.Lock()
+	node := srv.Svc.app.Graph.Get("box")
+	srv.Svc.mu.Unlock()
+	if node == nil || node.Type != "import_mesh" || node.Parameters["source"] != "box.3mf" {
+		t.Fatalf("node: %+v", node)
+	}
+	if u, _ := node.Parameters["units"].(string); u != "" && u != "mm" {
+		t.Fatalf("units %v, want mm", u)
+	}
+	if code, out := post(t, ts.URL, srv.Token, "/api/mesh?name=bad.3mf", []byte("PK\x03\x04junk")); code != 400 || !strings.Contains(out["error"].(string), "3MF") {
+		t.Fatalf("damaged 3MF: %d %v", code, out)
 	}
 }

@@ -116,3 +116,9 @@ test('a refused STEP file says why and closes the dialog', async () => {
   assert.ok(h.log.includes('toast:bad:x.step was not imported: the file has no solid'));
   assert.equal(h.log.at(-1), 'close');
 });
+
+test('threeMFFiles keeps .3mf files, any case', async () => {
+  const { threeMFFiles } = await import('./import-stl.js');
+  const files = [{ name: 'a.3mf' }, { name: 'b.3MF' }, { name: 'c.stl' }];
+  assert.deepEqual(threeMFFiles(files).map((f) => f.name), ['a.3mf', 'b.3MF']);
+});

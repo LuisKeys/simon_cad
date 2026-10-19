@@ -227,6 +227,15 @@ content key and of the graph hash, and means a stored mesh that no longer matche
 (the node fails to rebuild) instead of silently changing the model. A save writes the meshes the graph
 still references and removes the rest. A reusable component carries its own meshes.
 
+A 3MF goes through the same path (`import_3mf`, or the Import button): `internal/meshimport` reads the
+ZIP, finds the root model part through `_rels/.rels`, applies component trees and build transforms
+(a mirroring transform reverses the winding), and converts the declared unit (micron to meter) to
+millimetres on reading, so the stored mesh is in mm and the node keeps `units: mm`. An STL and a 3MF of
+the same solid therefore share one content id. Colours and materials are ignored; external model
+parts (production extension), support/surface objects, unknown required extensions, a bomb-sized
+model part and more than the triangle limit are refused. Several build items are merged and then
+validated as one mesh, so separate bodies are refused as several shells.
+
 What an STL must satisfy to be imported (`internal/meshimport`): one closed shell where every edge is
 shared by exactly two triangles walked in opposite directions (no holes, no flipped or duplicated
 triangles, no non-manifold edges or vertices), no degenerate triangles or sub-micron edges, no two

@@ -7,7 +7,8 @@ import (
 
 // Report summarises a mesh that was accepted.
 type Report struct {
-	Format    string      `json:"format"` // "binary" | "ascii"
+	Format    string      `json:"format"`              // "binary" | "ascii" | "3mf"
+	FileUnit  string      `json:"file_unit,omitempty"` // 3MF: the unit it declared (coordinates are already mm)
 	Triangles int         `json:"triangles"`
 	Vertices  int         `json:"vertices"`
 	Min       [3]float64  `json:"min"`

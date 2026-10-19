@@ -44,7 +44,7 @@ func ValidID(id string) bool {
 // Prepare parses and validates an STL file. A mesh that is not an acceptable solid returns an
 // *Error that says what is wrong and where; nothing of it is kept.
 func Prepare(data []byte, opt Options) (*Prepared, error) {
-	m, format, err := Parse(data, opt.MaxTriangles)
+	m, format, unit, err := parseAny(data, opt.MaxTriangles)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func Prepare(data []byte, opt Options) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	rep.Format = format
+	rep.Format, rep.FileUnit = format, unit
 	if fill.Holes > 0 {
 		rep.Filled = &fill
 		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d holes were closed with %d triangles (the biggest has %d border edges)", fill.Holes, fill.Triangles, fill.Largest))

@@ -24,7 +24,7 @@ func orEmpty(e map[string]any) map[string]any {
 }
 
 func importTools() []*Tool {
-	return []*Tool{importSTL(), importSTEP(), decimateMesh()}
+	return []*Tool{importSTL(), import3MF(), importSTEP(), decimateMesh()}
 }
 
 func importSTL() *Tool {
@@ -44,75 +44,105 @@ func importSTL() *Tool {
 			"decimate_to": integer("Reduce the mesh to about this many triangles while importing it (a 70 000-triangle scan takes about 30 s to turn into a solid, 10 000 take 3 s). Needs `path`; for a mesh already imported use decimate_mesh. 0 or omitted: do not reduce.", 0, meshimport.DefaultMaxTriangles),
 			"fill_holes":  boolean("Close the holes of a mesh that is otherwise sound (a scan with gaps, a model without its base) by adding flat patches. Off by default because it invents surface: use it only when the user agrees after a refusal for holes. Refused anyway when the patches would add more than half the model's surface."),
 		})),
-		Plan: func(env Env, a Args) (*Plan, error) {
-			// Empty strings count as absent: models fill every field they know about.
-			if (a.Str("path") != "") == (a.Str("mesh") != "") {
-				return nil, errors.New("give exactly one of path (an .stl file) or mesh (the id of an uploaded one)")
-			}
-			var id, source string
-			var rep meshimport.Report
-			if a.Str("mesh") != "" {
-				id = a.Str("mesh")
-				r, ok := env.MeshInfo(id)
-				if !ok {
-					return nil, fmt.Errorf("mesh %q is not in this project: ask the user to upload the file again", id)
-				}
-				rep, source = r, cmp.Or(a.Str("filename"), id)
-			} else {
-				p := a.Str("path")
-				if !strings.EqualFold(filepath.Ext(p), ".stl") {
-					return nil, fmt.Errorf("path must be an .stl file (got %q)", filepath.Ext(p))
-				}
-				rp, err := env.ResolveIOPath(p, false)
-				if err != nil {
-					return nil, err
-				}
-				st, err := os.Stat(rp)
-				if err != nil {
-					return nil, fmt.Errorf("cannot read %s: %v", rp, err)
-				}
-				if st.Size() > meshimport.MaxBytes {
-					return nil, fmt.Errorf("%s is larger than %d MB", rp, meshimport.MaxBytes>>20)
-				}
-				data, err := os.ReadFile(rp)
-				if err != nil {
-					return nil, fmt.Errorf("cannot read %s: %v", rp, err)
-				}
-				pr, err := env.StoreMesh(data, meshimport.Options{FillHoles: a.Bool("fill_holes"), DecimateTo: int(a.Num("decimate_to"))})
-				if err != nil {
-					return nil, fmt.Errorf("%s was not imported: %w", filepath.Base(rp), err)
-				}
-				id, rep, source = pr.ID, pr.Report, filepath.Base(rp)
-			}
-			if a.Str("name") == "" {
-				a["name"] = strings.TrimSuffix(source, filepath.Ext(source))
-			}
-			nid, err := uniqueID(env.Graph(), a, "import")
-			if err != nil {
-				return nil, err
-			}
-			params := map[string]any{features.ParamMesh: id, "source": source}
-			copyOpt(params, a, "units", "placement")
-			units := a.Str("units")
-			if units == "" {
-				units = "mm"
-			}
-			f := features.MeshUnits[units]
-			size := rep.Size()
-			explanation := fmt.Sprintf("Imports %s as %q: %d triangles, %s x %s x %s mm, volume %s mm³ (file units: %s).", source, nid, rep.Triangles,
-				fmtMM(size[0]*f), fmtMM(size[1]*f), fmtMM(size[2]*f), fmtMM(rep.Volume*f*f*f), units)
-			if r := rep.Reduced; r != nil {
-				explanation += fmt.Sprintf(" Reduced from %d to %d triangles (volume %+.2f%%).", r.From, r.To, 100*r.VolumeChange)
-			}
-			// What was repaired is said, not raised as a warning: a warning would stop the import
-			// from committing, and the user asked for the repair.
-			if len(rep.Warnings) > 0 {
-				explanation += " Repaired: " + strings.Join(rep.Warnings, "; ") + "."
-			}
-			return addPlan(intentOr(a, fmt.Sprintf("Import %s", source)), explanation,
-				newNode(env, a, nid, features.TypeImportMesh, params)), nil
-		},
+		Plan: func(env Env, a Args) (*Plan, error) { return planMeshImport(env, a, ".stl") },
 	}
+}
+
+// import3MF reads a 3MF package through the same validation and the same import_mesh node as an
+// STL. 3MF states its unit, so the mesh is converted to mm on reading and there is no units field.
+func import3MF() *Tool {
+	return &Tool{
+		Name: "import_3mf",
+		Description: "Import a 3MF file (the standard 3D-printing format) as a solid body. 3MF declares its own length unit, which is converted to millimetres: do not ask the user for units. " +
+			"The file goes through the same strict validation as an STL: it must be one closed (watertight), consistently oriented, manifold, non-self-intersecting solid within the triangle limit; build transforms and component trees are applied; " +
+			"a file that is not valid is refused with what is wrong and where, and the model is not changed. Colours and materials are ignored; external model parts and unknown required extensions are refused. " +
+			"Give `path` (a file under the project, ./projects_output or ./out) or `mesh` (the id of a file the user already uploaded). A refusal that is only about holes can be retried with fill_holes=true if the user wants the holes closed. " +
+			"The imported body is a mesh-derived solid, like an STL import. `placement`: file (as authored), center (bounding box centred on the origin) or base (centred on X/Y, resting on Z=0).",
+		Capability: capGeometry,
+		Schema: object(withMeta(props{
+			"path":        text("Path of a .3mf file."),
+			"mesh":        text("Id (mesh_...) of a 3MF file the user uploaded in the UI."),
+			"filename":    text("Original file name of an uploaded mesh, for display."),
+			"placement":   orEmpty(enum("Where to put the body (default file).", features.MeshPlacements...)),
+			"decimate_to": integer("Reduce the mesh to about this many triangles while importing it. Needs `path`. 0 or omitted: do not reduce.", 0, meshimport.DefaultMaxTriangles),
+			"fill_holes":  boolean("Close the holes of a mesh that is otherwise sound by adding flat patches. Off by default because it invents surface: use it only when the user agrees after a refusal for holes."),
+		})),
+		Plan: func(env Env, a Args) (*Plan, error) { return planMeshImport(env, a, ".3mf") },
+	}
+}
+
+// planMeshImport is the shared body of import_stl and import_3mf: ext is the file kind the tool takes.
+func planMeshImport(env Env, a Args, ext string) (*Plan, error) {
+	// Empty strings count as absent: models fill every field they know about.
+	if (a.Str("path") != "") == (a.Str("mesh") != "") {
+		return nil, fmt.Errorf("give exactly one of path (a %s file) or mesh (the id of an uploaded one)", ext)
+	}
+	var id, source string
+	var rep meshimport.Report
+	if a.Str("mesh") != "" {
+		id = a.Str("mesh")
+		r, ok := env.MeshInfo(id)
+		if !ok {
+			return nil, fmt.Errorf("mesh %q is not in this project: ask the user to upload the file again", id)
+		}
+		rep, source = r, cmp.Or(a.Str("filename"), id)
+	} else {
+		p := a.Str("path")
+		if !strings.EqualFold(filepath.Ext(p), ext) {
+			return nil, fmt.Errorf("path must be a %s file (got %q)", ext, filepath.Ext(p))
+		}
+		rp, err := env.ResolveIOPath(p, false)
+		if err != nil {
+			return nil, err
+		}
+		st, err := os.Stat(rp)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read %s: %v", rp, err)
+		}
+		if st.Size() > meshimport.MaxBytes {
+			return nil, fmt.Errorf("%s is larger than %d MB", rp, meshimport.MaxBytes>>20)
+		}
+		data, err := os.ReadFile(rp)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read %s: %v", rp, err)
+		}
+		pr, err := env.StoreMesh(data, meshimport.Options{FillHoles: a.Bool("fill_holes"), DecimateTo: int(a.Num("decimate_to"))})
+		if err != nil {
+			return nil, fmt.Errorf("%s was not imported: %w", filepath.Base(rp), err)
+		}
+		id, rep, source = pr.ID, pr.Report, filepath.Base(rp)
+	}
+	if a.Str("name") == "" {
+		a["name"] = strings.TrimSuffix(source, filepath.Ext(source))
+	}
+	nid, err := uniqueID(env.Graph(), a, "import")
+	if err != nil {
+		return nil, err
+	}
+	params := map[string]any{features.ParamMesh: id, "source": source}
+	copyOpt(params, a, "units", "placement")
+	units := a.Str("units")
+	if units == "" || ext == ".3mf" { // a 3MF reaches the store already converted to mm
+		units = "mm"
+	}
+	f := features.MeshUnits[units]
+	size := rep.Size()
+	unitNote := "file units: " + units
+	if rep.FileUnit != "" {
+		unitNote = "the file declares " + rep.FileUnit + ", converted to mm"
+	}
+	explanation := fmt.Sprintf("Imports %s as %q: %d triangles, %s x %s x %s mm, volume %s mm³ (%s).", source, nid, rep.Triangles,
+		fmtMM(size[0]*f), fmtMM(size[1]*f), fmtMM(size[2]*f), fmtMM(rep.Volume*f*f*f), unitNote)
+	if r := rep.Reduced; r != nil {
+		explanation += fmt.Sprintf(" Reduced from %d to %d triangles (volume %+.2f%%).", r.From, r.To, 100*r.VolumeChange)
+	}
+	// What was repaired is said, not raised as a warning: a warning would stop the import
+	// from committing, and the user asked for the repair.
+	if len(rep.Warnings) > 0 {
+		explanation += " Repaired: " + strings.Join(rep.Warnings, "; ") + "."
+	}
+	return addPlan(intentOr(a, fmt.Sprintf("Import %s", source)), explanation,
+		newNode(env, a, nid, features.TypeImportMesh, params)), nil
 }
 
 // decimateMesh really removes triangles from an imported mesh, unlike set_mesh_detail, which only

@@ -1,7 +1,7 @@
 // Importing a model: the toolbar button and dropping a file on the viewport. An STL is validated by
 // the server before it is kept (one closed, watertight, consistently oriented solid) and needs the
-// user to say its units; a STEP file carries exact geometry and its own units, so it is imported
-// as it is. A refused file is explained in a toast and the model is not touched.
+// user to say its units; a 3MF gets the same validation but declares its units; a STEP file carries
+// exact geometry and its own units, so it is imported as it is. A refused file is explained in a toast and the model is not touched.
 
 export const UNIT_CHOICES = [
   { label: 'mm', detail: 'millimetres (most CAD and slicers)', value: 'mm' },
@@ -19,6 +19,11 @@ export function stlFiles(files) {
 /** The .step and .stp files of a FileList / array, in order. */
 export function stepFiles(files) {
   return [...(files ?? [])].filter((f) => /\.(step|stp)$/i.test(f.name ?? ''));
+}
+
+/** The .3mf files of a FileList / array, in order. */
+export function threeMFFiles(files) {
+  return [...(files ?? [])].filter((f) => /\.3mf$/i.test(f.name ?? ''));
 }
 
 /** True when a drag carries files (not a material or text). */
@@ -50,7 +55,7 @@ export function initImport({ button, input, viewport, ask, confirm, toast, uploa
   let importing = false;
   async function importFiles(files) {
     // Files of any other kind are ignored; the dialog about units is only for meshes.
-    const list = [...(files ?? [])].filter((f) => stlFiles([f]).length || stepFiles([f]).length);
+    const list = [...(files ?? [])].filter((f) => stlFiles([f]).length || stepFiles([f]).length || threeMFFiles([f]).length);
     if (!list.length || importing) return;
     let units = 'mm';
     if (stlFiles(list).length) {

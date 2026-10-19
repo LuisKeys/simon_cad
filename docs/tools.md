@@ -1448,6 +1448,19 @@ _edit tool._ REALLY reduce the number of triangles (faces) of an imported STL bo
 | `ratio` | number ≥ 0 |  | Fraction of the triangles to keep, e.g. 0.2 keeps a fifth. Give this or target_triangles; leave the other out (0 counts as left out). |
 | `target_triangles` | integer ≥ 0 ≤ 100000 |  | Triangles to keep, about. Give this or ratio; leave the other out (0 counts as left out). |
 
+### `import_3mf`
+
+_edit tool._ Import a 3MF file (the standard 3D-printing format) as a solid body. 3MF declares its own length unit, which is converted to millimetres: do not ask the user for units. The file goes through the same strict validation as an STL: it must be one closed (watertight), consistently oriented, manifold, non-self-intersecting solid within the triangle limit; build transforms and component trees are applied; a file that is not valid is refused with what is wrong and where, and the model is not changed. Colours and materials are ignored; external model parts and unknown required extensions are refused. Give `path` (a file under the project, ./projects_output or ./out) or `mesh` (the id of a file the user already uploaded). A refusal that is only about holes can be retried with fill_holes=true if the user wants the holes closed. The imported body is a mesh-derived solid, like an STL import. `placement`: file (as authored), center (bounding box centred on the origin) or base (centred on X/Y, resting on Z=0).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `decimate_to` | integer ≥ 0 ≤ 100000 |  | Reduce the mesh to about this many triangles while importing it. Needs `path`. 0 or omitted: do not reduce. |
+| `filename` | string |  | Original file name of an uploaded mesh, for display. |
+| `fill_holes` | boolean |  | Close the holes of a mesh that is otherwise sound by adding flat patches. Off by default because it invents surface: use it only when the user agrees after a refusal for holes. |
+| `mesh` | string |  | Id (mesh_...) of a 3MF file the user uploaded in the UI. |
+| `path` | string |  | Path of a .3mf file. |
+| `placement` | file \| center \| base \|  |  | Where to put the body (default file). (file \| center \| base) |
+
 ### `import_step`
 
 _edit tool._ Import a STEP file (.step or .stp) as a solid body with its exact geometry: cylinders stay cylinders and planes stay planes, so fillet, chamfer, add_hole and face selectors work on it much better than on an imported STL. STEP declares its own units, which are converted to millimetres: do not ask the user for units. The file is checked first: it must be readable, geometrically valid and hold at least one solid (surface-only or empty files are refused with the reason, and the model is not changed). Give `path` (a file under the project, ./projects_output or ./out) or `step` (the id of a file the user already uploaded). A file with several solids (an assembly) becomes one body holding all of them. `placement`: file (as authored, default), center (bounding box centred on the origin) or base (centred on X/Y, resting on Z=0). Move, rotate, scale and combine the result with the usual tools.
