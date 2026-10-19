@@ -64,6 +64,7 @@ func (a *App) PublishComponent(name, description string, tags []string, nodes []
 		History: persistence.AgentHistory{Prompts: []persistence.Prompt{}, ToolCalls: []persistence.ToolCall{},
 			ChangeSets: []*commands.ChangeSet{}, Checkpoints: []*history.Checkpoint{}},
 		Components: components.Manifest(g),
+		Meshes:     a.meshesFor(nodes),
 		Workspace:  &a.Workspace, // a component opens with the units it was made in
 	}
 	if err := persistence.Save(dir, p); err != nil {

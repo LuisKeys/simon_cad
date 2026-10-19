@@ -21,6 +21,7 @@ import (
 
 	"github.com/accelone/simoncad/internal/agent/runtime"
 	"github.com/accelone/simoncad/internal/config"
+	"github.com/accelone/simoncad/internal/meshimport"
 	"github.com/accelone/simoncad/internal/vision"
 )
 
@@ -110,6 +111,12 @@ func fail(w http.ResponseWriter, err error) {
 	if errors.As(err, &ce) && !ce.Declined {
 		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": err.Error(), "code": "fallback_consent",
 			"selected": ce.Selected, "fallback": ce.Fallback})
+		return
+	}
+	var me *meshimport.Error
+	if errors.As(err, &me) && me.HolesOnly {
+		// Only holes are wrong: the front end offers to close them and sends the file again.
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error(), "code": "mesh_has_holes"})
 		return
 	}
 	code := http.StatusBadRequest
@@ -205,6 +212,20 @@ func (s *Server) routes() {
 		}
 		info, err := s.Svc.UploadImage(b)
 		reply(w, info, err)
+	})
+	m.HandleFunc("/api/mesh", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST the raw STL bytes with ?name=file.stl[&units=mm][&placement=file]", http.StatusMethodNotAllowed)
+			return
+		}
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxMeshBytes+1))
+		if err != nil {
+			fail(w, fmt.Errorf("STL is larger than %d MB or unreadable", maxMeshBytes>>20))
+			return
+		}
+		q := r.URL.Query()
+		o, err := s.Svc.ImportSTL(q.Get("name"), b, q.Get("units"), q.Get("placement"), q.Get("fill_holes") == "1", decimateParam(q.Get("decimate_to")))
+		reply(w, o, err)
 	})
 	m.HandleFunc("/api/interpretation/close", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

@@ -386,6 +386,27 @@ int main() {
     CHECK(occ_live_handle_count() == 0);
   }
 
+  // Mesh import: a welded cube becomes a valid solid with six merged faces; bad input is refused.
+  {
+    const double P[] = {0, 0, 0, 10, 0, 0, 10, 10, 0, 0, 10, 0, 0, 0, 10, 10, 0, 10, 10, 10, 10, 0, 10, 10};
+    const uint32_t I[] = {0, 3, 2, 0, 2, 1, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7};
+    occ_handle m = 0;
+    CHECK(occ_import_mesh(P, 8, I, 12, 1000, &m) == OCC_OK);
+    occ_props mp;
+    CHECK(occ_mass_props(m, &mp) == OCC_OK);
+    CHECK(std::fabs(mp.volume - 1000) < 1e-6 && mp.solid_count == 1 && mp.face_count == 6);
+    int32_t ok = 0;
+    CHECK(occ_is_valid(m, &ok) == OCC_OK && ok == 1);
+    occ_release(m);
+    occ_handle none = 0;
+    CHECK(occ_import_mesh(P, 8, I, 12, 500, &none) == OCC_ERR_KERNEL);  // volume mismatch
+    CHECK(occ_import_mesh(P, 8, I, 12, 0, &none) == OCC_ERR_INVALID_ARG);
+    CHECK(occ_import_mesh(nullptr, 8, I, 12, 1000, &none) == OCC_ERR_INVALID_ARG);
+    const uint32_t J[] = {0, 3, 2, 0, 2, 9, 4, 5, 6, 4, 6, 7};
+    CHECK(occ_import_mesh(P, 8, J, 4, 1000, &none) == OCC_ERR_INVALID_ARG);  // index out of range
+    CHECK(occ_live_handle_count() == 0);
+  }
+
   // Churn: handles must return to zero.
   for (int i = 0; i < 2000; ++i) {
     occ_handle a = 0, b = 0, c = 0;

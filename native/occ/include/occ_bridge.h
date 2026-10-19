@@ -152,6 +152,12 @@ occ_status occ_export_step(occ_handle s, const char* path);
 /* Binary STL if binary != 0, otherwise ASCII. Meshes with the given linear deflection. */
 occ_status occ_export_stl(occ_handle s, const char* path, double deflection, int32_t binary);
 occ_status occ_import_step(const char* path, occ_handle* out);
+/* A solid from a welded triangle mesh: positions are xyz triples, indices triangle triples wound
+ * counter-clockwise seen from outside. The caller guarantees one closed, consistently oriented
+ * manifold; coplanar triangles are merged into faces. Fails unless the result is a valid solid
+ * whose volume matches expected_volume. */
+occ_status occ_import_mesh(const double* positions, int32_t nverts, const uint32_t* indices, int32_t ntris,
+                           double expected_volume, occ_handle* out);
 
 
 /* Tessellation for rendering and picking. A mesh carries the topology identity of what it

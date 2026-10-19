@@ -1434,3 +1434,30 @@ _query tool._ Unlock a region. Only do this when the user explicitly asks.
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Region name |
+
+
+## import
+
+### `decimate_mesh`
+
+_edit tool._ REALLY reduce the number of triangles (faces) of an imported STL body, keeping its shape: edges are collapsed where they change the surface least, flat areas and sharp corners are kept, and the result is validated like an import (still one closed solid). Use it when an imported model is too heavy or slow. This changes the model, unlike set_mesh_detail, which only changes how finely the viewport draws it. Give `target_triangles` or `ratio` (the fraction to keep). The original mesh is kept, so undo restores it. If the surface cannot be reduced that far without damaging it, more triangles are kept and the result says so.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `feature` | string | yes | Id of the imported body (an import_mesh feature). |
+| `ratio` | number ≥ 0 |  | Fraction of the triangles to keep, e.g. 0.2 keeps a fifth. Give this or target_triangles; leave the other out (0 counts as left out). |
+| `target_triangles` | integer ≥ 0 ≤ 100000 |  | Triangles to keep, about. Give this or ratio; leave the other out (0 counts as left out). |
+
+### `import_stl`
+
+_edit tool._ Import an STL file as a solid body. The file is validated before it is accepted: it must be one closed (watertight), consistently oriented, manifold, non-self-intersecting solid within the triangle limit; a file that is not is refused with what is wrong and where (holes, flipped triangles, several shells, self-intersections...), and the model is not changed. STL carries no units: ask the user if they are not obviously millimetres, and pass `units`. Give `path` (a file under the project, ./projects_output or ./out) or `mesh` (the id of a file the user already uploaded). A refusal that is only about holes can be retried with fill_holes=true if the user wants the holes closed. The imported body is a mesh-derived solid: move, rotate, scale and combine it with the usual tools (transform, boolean, add_hole...). `placement`: file (as authored), center (bounding box centred on the origin) or base (centred on X/Y, resting on Z=0).
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `decimate_to` | integer ≥ 0 ≤ 100000 |  | Reduce the mesh to about this many triangles while importing it (a 70 000-triangle scan takes about 30 s to turn into a solid, 10 000 take 3 s). Needs `path`; for a mesh already imported use decimate_mesh. 0 or omitted: do not reduce. |
+| `filename` | string |  | Original file name of an uploaded mesh, for display. |
+| `fill_holes` | boolean |  | Close the holes of a mesh that is otherwise sound (a scan with gaps, a model without its base) by adding flat patches. Off by default because it invents surface: use it only when the user agrees after a refusal for holes. Refused anyway when the patches would add more than half the model's surface. |
+| `mesh` | string |  | Id (mesh_...) of an STL file the user uploaded in the UI. |
+| `path` | string |  | Path of an .stl file (binary or ASCII). |
+| `placement` | file \| center \| base \|  |  | Where to put the body (default file). (file \| center \| base) |
+| `units` | mm \| cm \| m \| in \| ft \|  |  | Length unit of the file (default mm). (mm \| cm \| m \| in \| ft) |

@@ -185,6 +185,17 @@ func ImportSTEP(path string) (Handle, error) {
 	return Handle(out), err
 }
 
+// ImportMesh builds a solid from a welded, validated triangle mesh (see occ_import_mesh).
+func ImportMesh(positions []float64, indices []uint32, expectedVolume float64) (Handle, error) {
+	if len(positions) < 12 || len(positions)%3 != 0 || len(indices) < 12 || len(indices)%3 != 0 {
+		return 0, fmt.Errorf("%w: mesh needs at least 4 vertices and 4 triangles", ErrKernel)
+	}
+	var out C.occ_handle
+	err := check("import_mesh", C.occ_import_mesh((*C.double)(unsafe.Pointer(&positions[0])), C.int32_t(len(positions)/3),
+		(*C.uint32_t)(unsafe.Pointer(&indices[0])), C.int32_t(len(indices)/3), C.double(expectedVolume), &out))
+	return Handle(out), err
+}
+
 func Cone(r1, r2, h float64) (Handle, error) {
 	var out C.occ_handle
 	err := check("cone", C.occ_cone(C.double(r1), C.double(r2), C.double(h), &out))

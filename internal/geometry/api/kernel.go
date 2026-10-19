@@ -223,6 +223,12 @@ func (k *Kernel) ImportSTEP(path string) (*Shape, error) {
 	return k.wrap(func() (bridge.Handle, error) { return bridge.ImportSTEP(path) })
 }
 
+// ImportMesh builds a solid from a welded triangle mesh that has already been validated
+// (internal/meshimport). expectedVolume is the mesh's own volume, which the result must match.
+func (k *Kernel) ImportMesh(positions []float64, indices []uint32, expectedVolume float64) (*Shape, error) {
+	return k.wrap(func() (bridge.Handle, error) { return bridge.ImportMesh(positions, indices, expectedVolume) })
+}
+
 func (s *Shape) handle() bridge.Handle { return bridge.Handle(s.hv.Load()) }
 
 // Release frees the underlying kernel shape. Safe to call twice, and from several goroutines:

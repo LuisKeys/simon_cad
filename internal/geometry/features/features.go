@@ -151,6 +151,8 @@ type Ctx struct {
 	NodeOf   func(id string) *cadir.Node
 	// Components resolves component_instance nodes. Nil when no library is configured.
 	Components ComponentResolver
+	// Meshes resolves import_mesh nodes. Nil when no mesh store is configured.
+	Meshes MeshResolver
 }
 
 func (c *Ctx) body(id string) (*Body, error) {

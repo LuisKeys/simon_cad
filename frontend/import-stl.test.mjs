@@ -1,0 +1,87 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { stlFiles, dragHasFiles, UNIT_CHOICES, importWithRepair } from './import-stl.js';
+
+test('stlFiles keeps only .stl files, any case', () => {
+  const files = [{ name: 'a.stl' }, { name: 'b.STL' }, { name: 'c.step' }, { name: 'd.stl.txt' }, {}];
+  assert.deepEqual(stlFiles(files).map((f) => f.name), ['a.stl', 'b.STL']);
+  assert.deepEqual(stlFiles(null), []);
+});
+
+test('only drags that carry files are taken', () => {
+  assert.equal(dragHasFiles({ dataTransfer: { types: ['Files'] } }), true);
+  assert.equal(dragHasFiles({ dataTransfer: { types: ['text/plain'] } }), false);
+  assert.equal(dragHasFiles({}), false);
+});
+
+test('the unit choices match what the server accepts', () => {
+  assert.deepEqual(UNIT_CHOICES.map((c) => c.value), ['mm', 'cm', 'm', 'in', 'ft']);
+});
+
+const holes = () => Object.assign(new Error('not watertight: 3 open edges'), { code: 'mesh_has_holes' });
+
+test('a file refused only for holes is retried with the holes closed, if the user agrees', async () => {
+  const calls = [];
+  const uploadMesh = async (f, o) => { calls.push(o); if (!o.fillHoles) throw holes(); return { ok: true }; };
+  const asked = [];
+  const confirm = async (q) => { asked.push(q); return true; };
+  const o = await importWithRepair({ file: { name: 'a.stl' }, units: 'm', uploadMesh, confirm });
+  assert.deepEqual(o, { ok: true });
+  assert.deepEqual(calls, [{ units: 'm' }, { units: 'm', fillHoles: true }]);
+  assert.equal(asked.length, 1);
+  assert.match(asked[0].body, /not watertight/);
+});
+
+test('declining to close the holes keeps the original refusal', async () => {
+  const uploadMesh = async () => { throw holes(); };
+  await assert.rejects(importWithRepair({ file: {}, units: 'mm', uploadMesh, confirm: async () => false }), /not watertight/);
+});
+
+test('any other refusal is not offered a repair', async () => {
+  let asked = false;
+  const uploadMesh = async () => { throw Object.assign(new Error('intersects itself'), { code: undefined }); };
+  await assert.rejects(importWithRepair({ file: {}, units: 'mm', uploadMesh, confirm: async () => { asked = true; return true; } }), /intersects itself/);
+  assert.equal(asked, false);
+});
+
+// A stand-in DOM-free harness for initImport: records what the busy dialog and toasts were told.
+function harness({ upload, confirmAnswer = true }) {
+  const log = [];
+  const listeners = {};
+  const el = () => ({ addEventListener: (t, f) => { listeners[t] = f; }, click() {}, disabled: false });
+  const button = el(), input = { ...el(), files: [], value: '' }, viewport = el();
+  const busy = {
+    show: (t, s) => log.push(`show:${t ?? ''}|${s ?? ''}`), hide: () => log.push('hide'), close: () => log.push('close'),
+  };
+  return { log, listeners, button, input, viewport, busy,
+    ask: async () => ({ value: 'mm' }), confirm: async () => { log.push('confirm'); return confirmAnswer; },
+    toast: (m, k) => log.push(`toast:${k}:${m}`), uploadMesh: upload, refresh: () => log.push('refresh') };
+}
+
+test('the busy dialog covers the upload and closes before the result is shown', async () => {
+  const { initImport } = await import('./import-stl.js');
+  const h = harness({ upload: async () => ({ ok: true }) });
+  const { importFiles } = initImport(h);
+  await importFiles([{ name: 'a.stl' }]);
+  assert.deepEqual(h.log.filter((l) => !l.startsWith('refresh')), ['show:Importing a.stl|Uploading the file', 'close', 'toast:ok:Imported a.stl', 'close']);
+  assert.equal(h.button.disabled, false, 'the button is usable again');
+});
+
+test('the busy dialog steps aside while the user is asked about holes, then returns', async () => {
+  const { initImport } = await import('./import-stl.js');
+  let n = 0;
+  const h = harness({ upload: async (f, o) => { if (!o.fillHoles) throw Object.assign(new Error('holes'), { code: 'mesh_has_holes' }); n++; return { ok: true }; } });
+  await initImport(h).importFiles([{ name: 'b.stl' }]);
+  const order = h.log.filter((l) => /^(show|hide|confirm|close)/.test(l));
+  assert.deepEqual(order.slice(0, 4), ['show:Importing b.stl|Uploading the file', 'hide', 'confirm', 'show:|']);
+  assert.equal(n, 1);
+});
+
+test('a refused file closes the dialog and says why', async () => {
+  const { initImport } = await import('./import-stl.js');
+  const h = harness({ upload: async () => { throw new Error('b.stl was not imported: not watertight'); } });
+  await initImport(h).importFiles([{ name: 'b.stl' }]);
+  assert.ok(h.log.includes('toast:bad:b.stl was not imported: not watertight'));
+  assert.equal(h.log.at(-1), 'close', 'and it is closed again at the very end');
+  assert.ok(h.log.indexOf('close') < h.log.indexOf('toast:bad:b.stl was not imported: not watertight'));
+});

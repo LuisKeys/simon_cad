@@ -14,6 +14,7 @@ import (
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
+	"github.com/accelone/simoncad/internal/meshimport"
 	"github.com/accelone/simoncad/internal/vision"
 	"github.com/accelone/simoncad/internal/visual"
 	"github.com/accelone/simoncad/internal/workspace"
@@ -60,6 +61,14 @@ func (e toolEnv) Provenance() cadir.Provenance {
 func (e toolEnv) Export(format, path string, deflection float64) (map[string]any, error) {
 	return e.a.export(format, path, deflection)
 }
+
+func (e toolEnv) StoreMesh(data []byte, opt meshimport.Options) (*meshimport.Prepared, error) {
+	return e.a.StoreMesh(data, opt)
+}
+func (e toolEnv) ReduceMesh(id string, target int) (*meshimport.Prepared, error) {
+	return e.a.ReduceMesh(id, target)
+}
+func (e toolEnv) MeshInfo(id string) (meshimport.Report, bool) { return e.a.MeshInfo(id) }
 
 func (e toolEnv) ResolveIOPath(path string, write bool) (string, error) {
 	return e.a.resolveIOPath(path, write)

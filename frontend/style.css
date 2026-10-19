@@ -694,3 +694,15 @@ body.path-editing #ctx-actions { visibility: hidden; }
   display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 18px rgba(0,0,0,.4); }
 .trace-plate.round { border-radius: 50%; }
 .trace-plate-design { object-fit: contain; mix-blend-mode: multiply; }
+
+/* ---- busy dialog: modal wait with a stage line and a progress bar --------------------------- */
+.overlay.busy-overlay { z-index: 40; align-items: center; padding-top: 0; cursor: progress; background: rgba(0,0,0,.6); }
+.busy { gap: 12px; }
+.busy-head { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.busy-spin { width: 18px; height: 18px; margin-top: 0; border-width: 3px; }
+.busy-bar { height: 8px; border-radius: 4px; background: var(--panel-3); overflow: hidden; }
+.busy-bar > div { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .25s linear; }
+.busy-bar.indeterminate > div { width: 35%; animation: busy-slide 1.2s ease-in-out infinite; transition: none; }
+@keyframes busy-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.busy .small { font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .busy-bar.indeterminate > div { animation: none; width: 100%; opacity: .5; } .ps-spinner { animation-duration: 2.4s; } }

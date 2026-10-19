@@ -17,6 +17,7 @@ import (
 	"github.com/accelone/simoncad/internal/geometry/rebuild"
 	"github.com/accelone/simoncad/internal/history"
 	"github.com/accelone/simoncad/internal/materials"
+	"github.com/accelone/simoncad/internal/meshimport"
 	"github.com/accelone/simoncad/internal/vision"
 	"github.com/accelone/simoncad/internal/visual"
 	"github.com/accelone/simoncad/internal/workspace"
@@ -62,6 +63,12 @@ type Env interface {
 	WorkspaceDefaults() workspace.Settings
 	// Export writes the current model ("step" or "stl") and returns a summary.
 	Export(format, path string, deflection float64) (map[string]any, error)
+	// StoreMesh validates an STL file and keeps the accepted mesh in the project (an
+	// *meshimport.Error says what is wrong with a rejected one); MeshInfo describes a stored mesh.
+	StoreMesh(data []byte, opt meshimport.Options) (*meshimport.Prepared, error)
+	// ReduceMesh decimates a stored mesh and stores the result as a new one.
+	ReduceMesh(id string, target int) (*meshimport.Prepared, error)
+	MeshInfo(id string) (meshimport.Report, bool)
 	// ResolveIOPath validates a file path chosen by the model and returns the path to use.
 	// Tools must never touch a model-supplied path without it: a prompt injection in an
 	// attachment must not be able to read or overwrite files outside the project/output dirs.

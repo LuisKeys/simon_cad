@@ -373,6 +373,7 @@ Launcher (`--project`, `--recording`, `--no-browser`) and the embedded frontend.
 | `internal/geometry/text` | Font outlines → Bézier regions (kerning, spacing, alignment, mirror, counters). |
 | `internal/geometry/project` | Projection onto a tessellated surface (planar / normal / conform). |
 | `internal/vectorize` | Image and SVG tracing: outline, centerline, filled regions; deterministic. |
+| `internal/meshimport` | STL reading and the validation gate for imported meshes (topology, orientation, self-intersection, canonical form and content id). |
 | `internal/meshgeo`, `internal/meshcheck` | BVH (ray, closest point) and mesh integrity checks. |
 | `internal/recipe` | Stamp recipe: parse, defaults/assumptions, merge patch, shrinkage factor. |
 | `internal/tools` (`path`, `sweep`, `vectorize`, `relief`, `stamp`, `text`, `projection`, `sketchsolid`, `printability`, `impression`) | The agent/CLI/UI tools of the family. |

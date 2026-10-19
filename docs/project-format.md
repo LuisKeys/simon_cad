@@ -17,6 +17,7 @@ my_part.scadproj/
   thumbnails/          reserved (.gitkeep)
   assets/images/       images attached to a prompt, or retained by the user (<id>.png|jpg|webp)
   assets/documents/    attached reference documents (<id>.<ext>, plus <id>.extracted.md for a PDF)
+  assets/meshes/       imported STL meshes in canonical binary form (mesh_<hash>.stl)
 ```
 
 An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/servo_bracket.scadproj).
@@ -29,16 +30,17 @@ An example lives in [testdata/robot/servo_bracket.scadproj](../testdata/robot/se
 - **Versioned:** `project.json.schema_version` is checked on load. Newer than the build supports
   → refusal; older → `persistence.migrate`. v2 adds `assets/images/` and
   `agent-history.json.interpretations`; v3 adds the project `id` and the reusable-component
-  metadata; v4 adds `workspace.json`; v5 (current) adds `assets/documents/` with its
+  metadata; v4 adds `workspace.json`; v5 adds `assets/documents/` with its
   `agent-history.json.documents` index and `prompts[].documents`, and stores every image attached to
-  a prompt. Every addition is optional, so v1–v4 projects load as they are.
+  a prompt; v6 (current) adds `assets/meshes/`. Every addition is optional, so v1–v5 projects load
+  as they are.
 - **Self-verifying:** `simoncad-cli replay` re-derives the model from the recorded ChangeSets and
   checks it equals `model.json`.
 
 ## `project.json`
 
 ```json
-{ "schema_version": 5, "id": "prj_9f31c4a0b72e", "name": "servo_bracket", "units": "mm",
+{ "schema_version": 6, "id": "prj_9f31c4a0b72e", "name": "servo_bracket", "units": "mm",
   "occt_version": "7.8.1", "created": "2026-01-02T03:04:05Z",
   "reusable": true, "description": "the bracket a servo bolts to", "tags": ["robotics"],
   "component_version": 4 }
@@ -197,3 +199,49 @@ or override materials in `assets/materials/<id>/material.json`; they are carried
 A reference to a material that no longer exists loads fine and renders with the generic gray fallback; the id
 is preserved. Visual materials are independent of any engineering material (density, strength) — the
 mapping `EngineeringDefaults` only suggests a default look.
+
+## Imported meshes: `assets/meshes/`
+
+An `import_stl` tool call stores the validated mesh as `assets/meshes/mesh_<hash>.stl` and adds an
+`import_mesh` node whose `mesh` parameter is that id (plus `units`, `placement` and the original
+file name in `source`). The file is **canonical**: binary STL with a fixed header, normals recomputed
+from the winding and zero attribute bytes, so the same model imported as ASCII or binary has the same
+id. The id is the first 24 hex digits of the SHA-256 of the file, which makes it part of the node's
+content key and of the graph hash, and means a stored mesh that no longer matches its id is refused
+(the node fails to rebuild) instead of silently changing the model. A save writes the meshes the graph
+still references and removes the rest. A reusable component carries its own meshes.
+
+What an STL must satisfy to be imported (`internal/meshimport`): one closed shell where every edge is
+shared by exactly two triangles walked in opposite directions (no holes, no flipped or duplicated
+triangles, no non-manifold edges or vertices), no degenerate triangles or sub-micron edges, no two
+non-adjacent triangles crossing or touching, a positive volume (a mesh that is wholly inside-out is
+flipped and reported), finite sane coordinates and at most 100 000 triangles. The reasons for a
+refusal are returned to the caller and nothing is stored. A mesh whose only fault is holes can be
+imported with `fill_holes`, which closes every loop of open edges with triangles (ear clipping in the
+hole's mean plane, a fan from the centroid when that fails) before the checks above run on the result:
+it refuses holes of more than 3 000 border edges or patches that would add more than half the mesh's
+surface, and what it closed is reported. The accepted mesh is turned into a B-Rep
+solid by `occ_import_mesh`, which shares vertices and edges between faces (no sewing), merges
+coplanar triangles into faces when that yields a valid solid, and checks the result's validity and
+volume against the mesh's.
+
+### Reducing a mesh
+
+`decimate_mesh` (or `decimate_to` on `import_stl`) really reduces the triangles of an imported mesh,
+unlike `set_mesh_detail`, which only changes how finely the viewport draws the same solid. Edges are
+collapsed in order of the quadric error they add (Garland & Heckbert), never when the collapse would
+change the topology (link condition) or fold a neighbouring triangle, so flat faces and sharp corners
+survive: a cube whose faces were subdivided comes back as the same cube, and a 72 000-triangle sphere
+goes to 10 000 in about 0.2 s with a volume change under 0.1 %. The result is validated with the same
+checks as an import; if the reduction makes the surface cross itself it is retried with 30 % more
+triangles (up to three times) before it is refused, and a mesh that cannot be reduced as far as asked
+says so. The result is a new content-addressed mesh and the node's `mesh` parameter changes, so undo
+restores the original (which stays in memory, and is not saved once nothing references it).
+
+### Waiting for a long import
+
+Turning triangles into a kernel solid costs about 0.4 ms each (a 72 000-triangle mesh takes about 30 s),
+so the UI shows a modal "please wait" dialog while an import runs: it locks the interface, names the
+stage the server reports (`progress` notices on the event stream: reading and checking, building the
+solid) and draws a bar that follows the stage's estimated duration, never reaching 100 % before the
+server answers. It cannot be cancelled.

@@ -79,6 +79,7 @@ e2e: build
 	node e2e/paths.mjs
 	node e2e/trace.mjs
 	node e2e/resilience.mjs
+	node e2e/import.mjs
 
 # Pure frontend helpers (confidence bands, SVG geometry, ambiguity edits); needs Node >= 18.
 test-js:

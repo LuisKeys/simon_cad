@@ -17,6 +17,7 @@ import (
 	"github.com/accelone/simoncad/internal/commands"
 	"github.com/accelone/simoncad/internal/events"
 	"github.com/accelone/simoncad/internal/history"
+	"github.com/accelone/simoncad/internal/meshimport"
 	"github.com/accelone/simoncad/internal/workspace"
 )
 
@@ -24,8 +25,9 @@ import (
 // images, only when explicitly retained) and interpretations in agent-history.json; v3 adds
 // the stable project id and the reusable-component metadata; v4 adds workspace.json (units,
 // grid and snapping); v5 adds assets/documents/ (attached reference documents) and stores
-// every image attached to a prompt. Every addition is optional, so v1–v4 projects load unchanged.
-const SchemaVersion = 5
+// every image attached to a prompt; v6 adds assets/meshes/ (validated STL meshes that
+// import_mesh nodes reference). Every addition is optional, so v1–v5 projects load unchanged.
+const SchemaVersion = 6
 
 // Meta is project.json. ID is the stable identity a ComponentInstance references: it survives
 // renaming the directory, and the directory name never does. A project with Reusable set is a
@@ -127,6 +129,13 @@ type Document struct {
 	Active      bool
 }
 
+// Mesh is a validated, canonical binary STL stored under assets/meshes/<id>.stl. Its id is the
+// hash of its content (meshimport.Prepare), so a file that no longer matches is detected on use.
+type Mesh struct {
+	ID   string // mesh_<hash>
+	Data []byte
+}
+
 // Image is a retained source image stored under assets/images/.
 type Image struct {
 	ID   string // img_<hash>
@@ -144,6 +153,8 @@ type Project struct {
 	Materials   json.RawMessage
 	Images      []Image
 	Documents   []Document
+	// Meshes are the validated meshes the graph's import_mesh nodes reference (assets/meshes/).
+	Meshes []Mesh
 	// Workspace is the project's units, grid and snapping (workspace.json). Load leaves it
 	// nil for a project saved before it existed; Save writes the factory defaults for nil.
 	Workspace *workspace.Settings
@@ -293,7 +304,11 @@ func Save(dir string, p *Project) error {
 	if err != nil {
 		return err
 	}
-	if err := writeAll(append(append(pending, imgs...), docs...)); err != nil {
+	meshes, err := saveMeshes(dir, p.Meshes)
+	if err != nil {
+		return err
+	}
+	if err := writeAll(append(append(append(pending, imgs...), docs...), meshes...)); err != nil {
 		return err
 	}
 	keep := filepath.Join(dir, "thumbnails", ".gitkeep")
@@ -306,7 +321,62 @@ func Save(dir string, p *Project) error {
 const (
 	imagesDir    = "assets/images"
 	documentsDir = "assets/documents"
+	meshesDir    = "assets/meshes"
 )
+
+// MeshPath is where a project stores an imported mesh.
+func MeshPath(dir, id string) string {
+	return filepath.Join(dir, filepath.FromSlash(meshesDir), id+".stl")
+}
+
+// saveMeshes removes stored meshes nothing references any more and returns the files to write.
+func saveMeshes(dir string, meshes []Mesh) ([]pendingFile, error) {
+	full := filepath.Join(dir, filepath.FromSlash(meshesDir))
+	out := make([]pendingFile, 0, len(meshes))
+	for _, m := range meshes {
+		if !meshimport.ValidID(m.ID) {
+			return nil, fmt.Errorf("mesh id %q is not valid", m.ID)
+		}
+		out = append(out, pendingFile{MeshPath(dir, m.ID), m.Data})
+	}
+	return out, prune(full, out)
+}
+
+func loadMeshes(dir string) ([]Mesh, error) {
+	entries, err := os.ReadDir(filepath.Join(dir, filepath.FromSlash(meshesDir)))
+	if err != nil {
+		return nil, nil // no meshes
+	}
+	var out []Mesh
+	for _, e := range entries {
+		id, ok := strings.CutSuffix(e.Name(), ".stl")
+		if e.IsDir() || !ok || !meshimport.ValidID(id) {
+			continue
+		}
+		b, err := os.ReadFile(MeshPath(dir, id))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Mesh{ID: id, Data: b})
+	}
+	return out, nil
+}
+
+// MeshFiles resolves import_mesh nodes from the assets/meshes/ of one project directory. A
+// reusable component is built from its own directory with it.
+type MeshFiles string
+
+// Mesh reads and verifies the stored mesh.
+func (d MeshFiles) Mesh(id string) (*meshimport.Mesh, error) {
+	if !meshimport.ValidID(id) {
+		return nil, fmt.Errorf("%q is not a mesh id", id)
+	}
+	b, err := os.ReadFile(MeshPath(string(d), id))
+	if err != nil {
+		return nil, fmt.Errorf("mesh %s is missing from the project's assets/meshes/", id)
+	}
+	return meshimport.Decode(id, b)
+}
 
 // ImagePath is where a project stores an image.
 func ImagePath(dir, id, ext string) string {
@@ -499,6 +569,9 @@ func Load(dir string) (*Project, error) {
 	if p.Documents, err = loadDocuments(dir, p.History.Documents); err != nil {
 		return nil, err
 	}
+	if p.Meshes, err = loadMeshes(dir); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -531,11 +604,11 @@ func LoadGraph(dir string) (Meta, *cadir.Graph, error) {
 
 // migrate upgrades files from older schema versions. Every version bump so far only added
 // optional content (v2: assets/images/, interpretations; v3: the project id and component
-// metadata; v4: workspace.json; v5: assets/documents/), so an older project is valid as it is; the next save writes
+// metadata; v4: workspace.json; v5: assets/documents/; v6: assets/meshes/), so an older project is valid as it is; the next save writes
 // the current version.
 func migrate(dir string, p *Project) error {
 	switch p.Meta.SchemaVersion {
-	case SchemaVersion, 4, 3, 2, 1:
+	case SchemaVersion, 5, 4, 3, 2, 1:
 		if p.Meta.ID == "" {
 			p.Meta.ID = DeriveID(p.Meta.Name, p.Meta.Created)
 		}

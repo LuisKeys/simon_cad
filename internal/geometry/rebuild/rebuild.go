@@ -67,10 +67,12 @@ type Engine struct {
 	// Components resolves component_instance nodes. Nil means component instances fail with a
 	// clear error instead of being silently skipped.
 	Components features.ComponentResolver
-	mu         sync.Mutex
-	cache      map[string]*entry
-	gen        int
-	Stats      Stats
+	// Meshes resolves import_mesh nodes. Nil means they fail with a clear error.
+	Meshes features.MeshResolver
+	mu     sync.Mutex
+	cache  map[string]*entry
+	gen    int
+	Stats  Stats
 }
 
 func New(k *api.Kernel) *Engine { return &Engine{K: k, cache: map[string]*entry{}} }
@@ -290,7 +292,7 @@ func (e *Engine) evalNode(g *cadir.Graph, n *cadir.Node, res *NodeResult, m *Mod
 	e.Stats.Misses++
 
 	ctx := &features.Ctx{
-		K: e.K, Node: n, P: params, Bodies: bodies, Components: e.Components,
+		K: e.K, Node: n, P: params, Bodies: bodies, Components: e.Components, Meshes: e.Meshes,
 		ParamsOf: func(id string) (features.Params, bool) { p, ok := resolved[id]; return p, ok },
 		NodeOf:   func(id string) *cadir.Node { return nodeByID[id] },
 	}

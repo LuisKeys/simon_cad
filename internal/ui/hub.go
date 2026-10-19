@@ -12,7 +12,7 @@ import (
 // Notice tells a front end that something changed; it carries no model data, so a client
 // refetches the state or scene it needs.
 type Notice struct {
-	Kind string       `json:"kind"` // state | selection | chat | event | agent_state | agent_done | refine | visual | model | printsim
+	Kind string       `json:"kind"` // state | selection | chat | event | agent_state | agent_done | refine | visual | model | printsim | progress
 	Type string       `json:"type,omitempty"`
 	Seq  int          `json:"seq,omitempty"`
 	Chat *ChatMessage `json:"chat,omitempty"`
@@ -27,6 +27,16 @@ type Notice struct {
 	Model *runtime.RouteEvent `json:"model,omitempty"`
 	// PrintSim is a slicing-job progress event (kind "printsim").
 	PrintSim *job.Event `json:"printsim,omitempty"`
+	// Progress is the current stage of a long operation the user is waiting on (kind "progress").
+	Progress *Progress `json:"progress,omitempty"`
+}
+
+// Progress is one stage of a long operation. ETAMS, when set, is a rough estimate of how long
+// the stage takes, so the client can draw a bar; without it the stage is of unknown length.
+type Progress struct {
+	Op    string `json:"op"` // e.g. "import"
+	Stage string `json:"stage"`
+	ETAMS int    `json:"eta_ms,omitempty"`
 }
 
 // Hub fans notices out to subscribers without ever blocking the publisher.

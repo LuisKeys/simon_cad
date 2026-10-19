@@ -1,7 +1,7 @@
 // Simon CAD UI: panels over the ui.Service API. Every mutation here is a call that ends in
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
-import { api, apiBytes, subscribe, h, materialUrl, imageUrl } from './api.js';
+import { api, apiBytes, subscribe, h, materialUrl, imageUrl, uploadMesh } from './api.js';
 import { toast } from './toast.js';
 import { $ } from './dom.js';
 import { showMenu } from './menu.js';
@@ -29,6 +29,8 @@ import { initShortcuts } from './shortcuts.js';
 import { isToggleKey } from './shortcuts-model.js';
 import { initPrintSim } from './printsim-panel.js';
 import { markdown } from './markdown.js';
+import { initImport } from './import-stl.js';
+import { createBusy } from './busy.js';
 
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
   openNode: null, renaming: null, histSel: null, histOpen: getPref('history', true) };
@@ -365,7 +367,11 @@ const onConnection = (status) => {
   if (connLost) { connLost = false; scheduleRefresh(); }
 };
 
+// The modal "please wait" dialog: the server reports the stages of a long import as progress notices.
+const busy = createBusy();
+
 subscribe((n) => {
+  if (n.kind === 'progress' && n.progress) { busy.stage(n.progress); return; }
   visualPanel.onNotice(n);
   printsim.onNotice(n);
   if (n.kind === 'refine' && n.refine) { S.refineState = n.refine; renderAgentState(); return; }
@@ -1621,6 +1627,7 @@ async function save() {
 $('btn-undo').addEventListener('click', doUndo);
 $('btn-redo').addEventListener('click', doRedo);
 $('btn-save').addEventListener('click', save);
+initImport({ busy, button: $('btn-import'), input: $('import-input'), viewport: $('viewport'), ask, confirm: confirmBox, toast, uploadMesh, refresh: () => scheduleRefresh() });
 $('btn-export').addEventListener('click', async () => {
   const r = await ask({ title: 'Export to (path)', value: `out/${S.state?.name || 'model'}.step`, format: true, ok: 'Export' });
   if (!r?.value) return;

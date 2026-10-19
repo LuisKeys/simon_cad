@@ -130,6 +130,7 @@ func (r *Resolver) Shape(projectID, version, contentHash string, overrides map[s
 	// and so does every engine further up this chain.
 	eng := rebuild.New(r.k)
 	eng.Components = r
+	eng.Meshes = persistence.MeshFiles(dir)
 	m, err := eng.Rebuild(built)
 	if err != nil {
 		eng.Close()
