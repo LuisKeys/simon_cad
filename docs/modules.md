@@ -372,7 +372,7 @@ Launcher (`--project`, `--recording`, `--no-browser`) and the embedded frontend.
 | `internal/geometry/features` | `path`, `profile`, `sweep`, `relief` features and `CodedError`. |
 | `internal/geometry/text` | Font outlines → Bézier regions (kerning, spacing, alignment, mirror, counters). |
 | `internal/geometry/project` | Projection onto a tessellated surface (planar / normal / conform). |
-| `internal/vectorize` | Image and SVG tracing: outline, centerline, filled regions; deterministic. |
+| `internal/vectorize` | Image, SVG and DXF tracing: outline, centerline, filled regions; deterministic. `dxf.go` reads ASCII DXF 2D geometry into the same curve model SVG uses and joins loose lines/arcs into closed profiles. |
 | `internal/stepimport` | The gate for imported STEP files: the kernel must read them as valid geometry with at least one solid; content id and tamper check on load. |
 | `internal/meshimport` | STL reading and the validation gate for imported meshes (topology, orientation, self-intersection, canonical form and content id). |
 | `internal/meshgeo`, `internal/meshcheck` | BVH (ray, closest point) and mesh integrity checks. |

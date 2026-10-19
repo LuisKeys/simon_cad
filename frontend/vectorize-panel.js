@@ -1,11 +1,11 @@
-// The "Trace image" dialog: pick a PNG, JPEG or SVG, tune how it is traced while a live preview is
+// The "Trace image" dialog: pick a PNG, JPEG, SVG or DXF, tune how it is traced while a live preview is
 // drawn over it, give its real size and create sketches / paths from it. All geometry comes from
 // the deterministic tools (vectorize_image for the preview, image_to_paths to create); the dialog
 // only collects settings. See vectorize-model.js for the rules.
 import { api, h, uploadImage, imageUrl } from './api.js';
 import { defaults, problems, createCall, traceArgs, summary, warningTexts, debounce, latestOnly, MODES, PLANES, TARGETS, plateView } from './vectorize-model.js';
 
-const ACCEPT = '.png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml';
+const ACCEPT = '.png,.jpg,.jpeg,.svg,.dxf,image/png,image/jpeg,image/svg+xml,image/vnd.dxf';
 
 export function initTracePanel({ toast, afterCreate }) {
   let state = defaults();
@@ -20,7 +20,7 @@ export function initTracePanel({ toast, afterCreate }) {
   const view = h('div', { class: 'trace-view', 'aria-label': 'Source image and traced preview' });
   const srcImg = h('img', { class: 'trace-src', alt: '', hidden: true });
   const overlay = h('img', { class: 'trace-overlay', alt: 'Traced preview', hidden: true });
-  const hint = h('div', { class: 'trace-hint' }, 'Drop a PNG, JPEG or SVG here, or choose a file');
+  const hint = h('div', { class: 'trace-hint' }, 'Drop a PNG, JPEG, SVG or DXF here, or choose a file');
   // the stamp preview: the plate with the design on it, as printed (physical) or as pressed (impression)
   const plate = h('div', { class: 'trace-plate', hidden: true }, h('img', { alt: 'Design on the stamp', class: 'trace-plate-design' }));
   const plateTabs = h('div', { class: 'trace-plate-tabs', role: 'tablist', hidden: true });
@@ -130,7 +130,7 @@ export function initTracePanel({ toast, afterCreate }) {
     const on = state.target === 'stamp' && !!state.source;
     plateTabs.hidden = !on;
     plate.hidden = true;
-    srcImg.hidden = !state.source || on && !!result;
+    srcImg.hidden = !state.source || state.source.kind === 'dxf' || on && !!result;
     overlay.hidden = on || !result;
     if (!on) return;
     plateTabs.replaceChildren(...[['physical', 'Physical stamp'], ['impression', 'Impression']].map(([id, label]) =>
@@ -180,7 +180,14 @@ export function initTracePanel({ toast, afterCreate }) {
     try {
       const isSvg = /\.svg$/i.test(file.name) || file.type === 'image/svg+xml';
       let source;
-      if (isSvg) {
+      if (/\.dxf$/i.test(file.name)) {
+        // a DXF has no picture to show: the traced overlay is the preview, and the file states its units
+        source = { kind: 'dxf', dxf: await file.text(), name: file.name };
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = null;
+        srcImg.removeAttribute('src');
+        srcImg.hidden = true;
+      } else if (isSvg) {
         const text = await file.text();
         source = { kind: 'svg', svg: text, name: file.name };
         setPreviewImage(URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' })));

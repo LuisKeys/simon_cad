@@ -170,7 +170,7 @@ const pathEditor = new PathEditorController(vp, $('viewport'), {
 });
 window.simonPathEditor = pathEditor;
 
-// Trace image: PNG / JPEG / SVG → sketches and paths with a live preview (vectorize-panel.js).
+// Trace image: PNG / JPEG / SVG / DXF → sketches and paths with a live preview (vectorize-panel.js).
 const tracePanel = initTracePanel({ toast: (m, k) => toast(m, k), afterCreate: () => refresh() });
 window.simonTrace = tracePanel;
 

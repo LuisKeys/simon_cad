@@ -34,6 +34,15 @@ test('svg sources send markup, rasters an image id', () => {
   assert.equal(traceArgs({ ...defaults(), source: img }).image_id, 'img_1');
 });
 
+test('a dxf sends its text and needs no width: the file states its units', () => {
+  const s = { ...defaults(), source: { kind: 'dxf', dxf: '0\nSECTION\n', name: 'p.dxf' } };
+  const a = traceArgs(s);
+  assert.equal(a.dxf, '0\nSECTION\n');
+  assert.equal('image_id' in a || 'svg' in a || 'width_mm' in a, false);
+  assert.deepEqual(problems(s), []);
+  assert.equal(problems({ ...defaults(), source: img }).length, 1);
+});
+
 test('close gaps only applies to centerlines; placement args go on create', () => {
   const s = { ...defaults(), source: img, widthMm: 20, closeGaps: true, plane: 'XZ', center: false };
   assert.equal('close_gaps' in traceArgs(s), false);

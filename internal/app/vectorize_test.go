@@ -301,3 +301,41 @@ func TestTracedGeometrySurvivesUndoAndReload(t *testing.T) {
 	}
 	within(t, "disc volume", v, math.Pi*10*10*2, 0.015)
 }
+
+func TestDXFProfileBecomesASolidAtItsOwnUnits(t *testing.T) {
+	a := New("demo", clock)
+	defer a.Close()
+	line := func(x0, y0, x1, y1 int) string {
+		return fmt.Sprintf("0\nLINE\n10\n%d\n20\n%d\n11\n%d\n21\n%d\n", x0, y0, x1, y1)
+	}
+	dxf := func(units int) string {
+		return fmt.Sprintf("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n%d\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n", units) +
+			line(0, 0, 4, 0) + line(4, 0, 4, 2) + line(4, 2, 0, 2) + line(0, 2, 0, 0) +
+			"0\nCIRCLE\n10\n2\n20\n1\n40\n0.5\n0\nENDSEC\n0\nEOF\n"
+	}
+	// 4 × 2 inch plate with a 1 inch hole: the size comes from the file
+	path := filepath.Join(t.TempDir(), "plate.dxf")
+	if err := os.WriteFile(path, []byte(dxf(1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sw(t, a, "image_to_paths", fmt.Sprintf(`{"id":"plate","path":%q}`, path))
+	sw(t, a, "extrude_sketch", `{"id":"slab","sketch":"plate","depth":3}`)
+	within(t, "slab volume (mm³)", vol(t, a), (101.6*50.8-math.Pi*12.7*12.7)*3, 0.005)
+
+	// without units the size must be given, and then it is a width in mm
+	b := New("demo", clock)
+	defer b.Close()
+	o := b.ApplyTool("image_to_paths", []byte(fmt.Sprintf(`{"id":"p","dxf":%q}`, dxf(0))), PolicyCommit)
+	if o.OK || o.Code() != "SCALE_REQUIRED" {
+		t.Fatalf("unitless DXF without a size: ok=%v code=%q", o.OK, o.Code())
+	}
+	sw(t, b, "image_to_paths", fmt.Sprintf(`{"id":"p","dxf":%q,"width_mm":40}`, dxf(0)))
+	sw(t, b, "extrude_sketch", `{"id":"s","sketch":"p","depth":1}`)
+	within(t, "scaled volume (mm³)", vol(t, b), (40*20-math.Pi*5*5)*1, 0.005)
+
+	// a DXF that states its units refuses a pixel scale
+	o = a.ApplyTool("vectorize_image", []byte(fmt.Sprintf(`{"path":%q,"px_per_mm":2}`, path)), PolicyCommit)
+	if o.OK {
+		t.Fatal("px_per_mm accepted for a DXF with units")
+	}
+}

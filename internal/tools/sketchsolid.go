@@ -63,8 +63,7 @@ func planSketchToSolid(env Env, a Args) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	w, h := src.size()
-	px, err := traceScale(a, w, h)
+	px, err := traceScale(a, src)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,10 @@ import (
 type SVG struct {
 	Width, Height float64 // user units (from viewBox, else width/height)
 	Paths         []SVGPath
+	Warnings      []string
+	// NativePxPerMM is how many user units make a millimetre when the file states its own units
+	// (DXF); 0 when the size has to be given.
+	NativePxPerMM float64
 }
 
 // SVGPath is one subpath with its painting.
@@ -620,7 +624,7 @@ func RunSVG(ctx context.Context, s *SVG, opt Options) (*Result, error) {
 	if opt.PxPerMM > 0 {
 		scale = 1 / opt.PxPerMM
 	}
-	res := &Result{Mode: opt.Mode, WidthPx: int(math.Ceil(w)), HeightPx: int(math.Ceil(h)), Scale: scale}
+	res := &Result{Mode: opt.Mode, WidthPx: int(math.Ceil(w)), HeightPx: int(math.Ceil(h)), Scale: scale, Warnings: append([]string(nil), s.Warnings...)}
 	res.HeightPx = int(math.Ceil(h))
 	flipH := h
 	conv := func(segs []Seg) []Seg {

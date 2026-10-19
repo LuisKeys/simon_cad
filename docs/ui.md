@@ -414,8 +414,8 @@ Nothing in the panel can change the model except through those tool calls.
   open, change the interpolation; width, height and twist handles on the selected point. While dragging, a
   low-resolution tube is built in the browser (`path-model.js`); on release one `update_path` call is sent and
   the backend regenerates the real sweep. Stale responses are dropped by a generation counter.
-- **Trace image…** opens the vectorize panel (`vectorize-panel.js`): threshold, mode (filled regions /
-  centerline / outline), smoothing and the real size, with a live SVG overlay of the trace; *Create* calls
+- **Trace image…** (PNG, JPEG, SVG or DXF) opens the vectorize panel (`vectorize-panel.js`): threshold, mode (filled regions /
+  centerline / outline), smoothing and the real size (a DXF brings its own units, so no width is needed unless the file lacks them), with a live SVG overlay of the trace; *Create* calls
   `image_to_paths`, *Create stamp* calls `create_stamp`. The scale is always asked, never guessed.
 - **Text…**, **Relief…**, **Engrave along path…** and **Project path to surface…** (Create menu) open the
   generic tool dialog of `create_text_geometry`, `create_relief`, `engrave_surface` and

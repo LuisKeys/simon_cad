@@ -1251,6 +1251,7 @@ _edit tool._ Trace an image or SVG and create editable geometry from it: filled_
 | `close_gaps` | boolean |  | Centerline: close one-pixel gaps in strokes before thinning |
 | `corner_angle` | number |  | Turn in degrees that counts as a sharp corner (default 55) |
 | `dpi` | number > 0 |  | Image resolution in dots per inch (alternative to px_per_mm) |
+| `dxf` | string |  | ASCII DXF text given inline (alternative to image_id / path). A DXF file on disk goes in `path`: 2D profiles from LINE, ARC, CIRCLE, ELLIPSE, polylines, splines and blocks; loose lines and arcs that meet are joined into closed shapes; the size comes from the file's units |
 | `group` | string |  | Group name for the created nodes (default: the base id) |
 | `height_mm` | number > 0 |  | Real height of the whole image in mm (alternative to px_per_mm) |
 | `image_id` | string |  | Id of an attached image (PNG or JPEG) |
@@ -1258,7 +1259,7 @@ _edit tool._ Trace an image or SVG and create editable geometry from it: filled_
 | `min_area` | integer ≥ 1 ≤ 100000 |  | Ignore specks smaller than this many pixels (default 12) |
 | `mode` | outline \| centerline \| filled_regions |  | outline: closed boundary curves. centerline: stroke centrelines with a width (for sweeping a profile along). filled_regions: solid regions with their holes (for extrusion / relief). Default filled_regions. (outline \| centerline \| filled_regions) |
 | `offset` | number |  | Offset of the plane along its normal (mm) |
-| `path` | string |  | Path of a PNG, JPEG or SVG file on disk (alternative to image_id) |
+| `path` | string |  | Path of a PNG, JPEG, SVG or DXF file on disk (alternative to image_id) |
 | `plane` | XY \| XZ \| YZ |  | Plane to place the shapes on (default XY) (XY \| XZ \| YZ) |
 | `px_per_mm` | number > 0 |  | Pixels per millimetre of the real object (the scale) |
 | `smooth` | number |  | Blur in pixels before tracing, 0..1.5 (default 0.7): higher = smoother curves, fewer details |
@@ -1294,12 +1295,13 @@ _edit tool._ Turn a drawing or silhouette (PNG/JPEG/SVG) into an extruded solid 
 | `corner_angle` | number |  | Turn in degrees that counts as a sharp corner (default 55) |
 | `depth` | number > 0 | yes | Extrusion height in mm (required) |
 | `dpi` | number > 0 |  | Image resolution in dots per inch (alternative to px_per_mm) |
+| `dxf` | string |  | ASCII DXF text given inline (alternative to image_id / path). A DXF file on disk goes in `path`: 2D profiles from LINE, ARC, CIRCLE, ELLIPSE, polylines, splines and blocks; loose lines and arcs that meet are joined into closed shapes; the size comes from the file's units |
 | `height_mm` | number > 0 |  | Real height of the whole image in mm (alternative to px_per_mm) |
 | `image_id` | string |  | Id of an attached image (PNG or JPEG) |
 | `invert` | boolean |  | The subject is light on a dark background |
 | `min_area` | integer ≥ 1 ≤ 100000 |  | Ignore specks smaller than this many pixels (default 12) |
 | `offset` | number |  | Offset of the plane along its normal (mm) |
-| `path` | string |  | Path of a PNG, JPEG or SVG file on disk (alternative to image_id) |
+| `path` | string |  | Path of a PNG, JPEG, SVG or DXF file on disk (alternative to image_id) |
 | `plane` | XY \| XZ \| YZ |  | Plane to place the drawing on (default XY) (XY \| XZ \| YZ) |
 | `px_per_mm` | number > 0 |  | Pixels per millimetre of the real object (the scale) |
 | `smooth` | number |  | Blur in pixels before tracing, 0..1.5 (default 0.7): higher = smoother curves, fewer details |
@@ -1333,12 +1335,13 @@ _query tool._ Trace a raster image (PNG/JPEG) or SVG into vector geometry WITHOU
 | `close_gaps` | boolean |  | Centerline: close one-pixel gaps in strokes before thinning |
 | `corner_angle` | number |  | Turn in degrees that counts as a sharp corner (default 55) |
 | `dpi` | number > 0 |  | Image resolution in dots per inch (alternative to px_per_mm) |
+| `dxf` | string |  | ASCII DXF text given inline (alternative to image_id / path). A DXF file on disk goes in `path`: 2D profiles from LINE, ARC, CIRCLE, ELLIPSE, polylines, splines and blocks; loose lines and arcs that meet are joined into closed shapes; the size comes from the file's units |
 | `height_mm` | number > 0 |  | Real height of the whole image in mm (alternative to px_per_mm) |
 | `image_id` | string |  | Id of an attached image (PNG or JPEG) |
 | `invert` | boolean |  | The subject is light on a dark background |
 | `min_area` | integer ≥ 1 ≤ 100000 |  | Ignore specks smaller than this many pixels (default 12) |
 | `mode` | outline \| centerline \| filled_regions |  | outline: closed boundary curves. centerline: stroke centrelines with a width (for sweeping a profile along). filled_regions: solid regions with their holes (for extrusion / relief). Default filled_regions. (outline \| centerline \| filled_regions) |
-| `path` | string |  | Path of a PNG, JPEG or SVG file on disk (alternative to image_id) |
+| `path` | string |  | Path of a PNG, JPEG, SVG or DXF file on disk (alternative to image_id) |
 | `preview` | boolean |  | Also return the traced result as SVG markup (preview_svg) |
 | `px_per_mm` | number > 0 |  | Pixels per millimetre of the real object (the scale) |
 | `smooth` | number |  | Blur in pixels before tracing, 0..1.5 (default 0.7): higher = smoother curves, fewer details |

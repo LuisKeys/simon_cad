@@ -26,8 +26,9 @@ const (
 
 func vectorizeProps(p props) props {
 	p["image_id"] = text("Id of an attached image (PNG or JPEG)")
-	p["path"] = text("Path of a PNG, JPEG or SVG file on disk (alternative to image_id)")
+	p["path"] = text("Path of a PNG, JPEG, SVG or DXF file on disk (alternative to image_id)")
 	p["svg"] = text("SVG markup given inline (alternative to image_id / path)")
+	p["dxf"] = text("ASCII DXF text given inline (alternative to image_id / path). A DXF file on disk goes in `path`: 2D profiles from LINE, ARC, CIRCLE, ELLIPSE, polylines, splines and blocks; loose lines and arcs that meet are joined into closed shapes; the size comes from the file's units")
 	p["mode"] = enum("outline: closed boundary curves. centerline: stroke centrelines with a width (for sweeping a profile along). filled_regions: solid regions with their holes (for extrusion / relief). Default filled_regions.",
 		string(vectorize.Outline), string(vectorize.Centerline), string(vectorize.FilledRegions))
 	p["threshold"] = integer("Ink level 1..255 that separates foreground (default: automatic, Otsu)", 1, 255)
@@ -87,13 +88,13 @@ type traceSource struct {
 
 func loadTraceSource(env Env, a Args) (*traceSource, error) {
 	n := 0
-	for _, k := range []string{"image_id", "path", "svg"} {
+	for _, k := range []string{"image_id", "path", "svg", "dxf"} {
 		if a.Has(k) {
 			n++
 		}
 	}
 	if n != 1 {
-		return nil, fmt.Errorf("give exactly one source: `image_id` (an attached image), `path` (a PNG/JPEG/SVG file) or `svg` (inline markup)")
+		return nil, fmt.Errorf("give exactly one source: `image_id` (an attached image), `path` (a PNG/JPEG/SVG/DXF file) `svg` (inline markup) or `dxf` (inline text)")
 	}
 	var data []byte
 	name := ""
@@ -107,9 +108,9 @@ func loadTraceSource(env Env, a Args) (*traceSource, error) {
 	case a.Has("path"):
 		p := a.Str("path")
 		switch strings.ToLower(filepath.Ext(p)) {
-		case ".png", ".jpg", ".jpeg", ".svg":
+		case ".png", ".jpg", ".jpeg", ".svg", ".dxf":
 		default:
-			return nil, fmt.Errorf("path must be a .png, .jpg or .svg file (got %q)", filepath.Ext(p))
+			return nil, fmt.Errorf("path must be a .png, .jpg, .svg or .dxf file (got %q)", filepath.Ext(p))
 		}
 		p, err := env.ResolveIOPath(p, false)
 		if err != nil {
@@ -126,11 +127,26 @@ func loadTraceSource(env Env, a Args) (*traceSource, error) {
 			return nil, fmt.Errorf("cannot read %s: %v", p, err)
 		}
 		name = filepath.Base(p)
+	case a.Has("dxf"):
+		data, name = []byte(a.Str("dxf")), "inline.dxf"
+		if len(data) > maxSourceBytes {
+			return nil, fmt.Errorf("dxf is larger than %d MB", maxSourceBytes>>20)
+		}
+		if !vectorize.IsDXF(data) {
+			return nil, fmt.Errorf("`dxf` is not a DXF file")
+		}
 	default:
 		data, name = []byte(a.Str("svg")), "inline.svg"
 		if len(data) > maxSourceBytes {
 			return nil, fmt.Errorf("svg is larger than %d MB", maxSourceBytes>>20)
 		}
+	}
+	if vectorize.IsDXF(data) {
+		s, err := vectorize.ParseDXF(data)
+		if err != nil {
+			return nil, err
+		}
+		return &traceSource{svg: s, name: name}, nil
 	}
 	if t := bytes.TrimSpace(data); len(t) > 0 && t[0] == '<' {
 		s, err := vectorize.ParseSVG(data)
@@ -161,7 +177,12 @@ func (s *traceSource) size() (w, h int) {
 }
 
 // traceScale turns the scale arguments into pixels per mm (0 = none given).
-func traceScale(a Args, wPx, hPx int) (float64, error) {
+func traceScale(a Args, src *traceSource) (float64, error) {
+	wPx, hPx := src.size()
+	native := 0.0
+	if src.svg != nil {
+		native = src.svg.NativePxPerMM
+	}
 	n := 0
 	var v float64
 	for _, k := range []string{"px_per_mm", "width_mm", "height_mm", "dpi"} {
@@ -171,6 +192,14 @@ func traceScale(a Args, wPx, hPx int) (float64, error) {
 	}
 	if n > 1 {
 		return 0, fmt.Errorf("give only one of px_per_mm, width_mm, height_mm, dpi")
+	}
+	if native > 0 { // a DXF that states its units already knows its size
+		if a.Has("px_per_mm") || a.Has("dpi") {
+			return 0, fmt.Errorf("this DXF states its own units (px_per_mm and dpi do not apply): omit the size, or give width_mm / height_mm to rescale it")
+		}
+		if n == 0 {
+			return native, nil
+		}
 	}
 	switch {
 	case a.Has("px_per_mm"):
@@ -268,8 +297,7 @@ func queryVectorizeImage(env Env, a Args) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	w, h := src.size()
-	px, err := traceScale(a, w, h)
+	px, err := traceScale(a, src)
 	if err != nil {
 		return nil, err
 	}
@@ -364,8 +392,7 @@ func planImageToPaths(env Env, a Args) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	w, h := src.size()
-	px, err := traceScale(a, w, h)
+	px, err := traceScale(a, src)
 	if err != nil {
 		return nil, err
 	}

@@ -337,8 +337,11 @@ Banderas del agente: `--preview`, `--commit`, `--label`, `--autonomous`.
 - **Perfiles y sweeps** (`create_profile`, `create_sweep`, `create_tube`, `create_wire`, `create_ribbon`): sólidos B-Rep
   exactos (OCCT) con marcos de transporte paralelo, tapas planas/redondas/punta, tubos huecos y paths cerrados.
   Errores con código (`PATH_SELF_INTERSECTION`, `EXCESSIVE_CURVATURE`, `SWEEP_FAILED`, …) y pista de corrección.
-- **Vectorización** (`vectorize_image`, `image_to_paths`): PNG/JPEG/SVG a regiones rellenas con agujeros, contornos Bézier
-  o líneas centrales con ancho de trazo. Determinista; la escala real es obligatoria (`SCALE_REQUIRED`).
+- **Vectorización** (`vectorize_image`, `image_to_paths`): PNG/JPEG/SVG/DXF a regiones rellenas con agujeros, contornos Bézier
+  o líneas centrales con ancho de trazo. Determinista; la escala real es obligatoria (`SCALE_REQUIRED`), salvo en un DXF
+  que declara sus unidades (`$INSUNITS`). DXF: perfiles 2D de LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE/POLYLINE (con bulges),
+  SPLINE e INSERT (bloques con escala, giro y matrices); las líneas y arcos sueltos que se tocan se unen en perfiles
+  cerrados (agujeros por anidamiento). Texto, cotas, rayados, 3D, capas ocultas y espacio papel se omiten y se avisan.
 - **Relieves** (`create_relief`, `engrave_surface`): emboss/deboss/engrave de sketches, texto o paths sobre un cuerpo,
   todo editable (`RELIEF_DISCONNECTED`, `RELIEF_NO_EFFECT`).
 - **Sellos** (`create_stamp`, `apply_recipe`, `update_recipe`, `stamp_impression`, `validate_printability`): placa, diseño

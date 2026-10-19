@@ -35,17 +35,18 @@ export function defaults() {
     closeGaps: false,
     widthMm: null,            // the real width of the whole image: required to create
     plane: 'XY', center: true,
-    source: null,             // { kind: 'image'|'svg', imageId?, svg?, name, width, height }
+    source: null,             // { kind: 'image'|'svg'|'dxf', imageId?, svg?, dxf?, name, width, height }
   };
 }
 
 /** Problems that stop Create (the preview runs without a size). Empty when fine. */
 export function problems(s) {
   const out = [];
-  if (!s.source) out.push('Choose an image or an SVG file');
+  if (!s.source) out.push('Choose an image, an SVG or a DXF file');
   if (s.minArea < 1) out.push('Minimum area must be at least 1 px');
   if (s.target === 'stamp') return out.concat(stampProblems(s.stamp));
-  if (!(s.widthMm > 0)) out.push('Enter the real width of the image in mm: sizes are never guessed');
+  // a DXF states its own units: the server asks for a size only when the file does not
+  if (s.source?.kind !== 'dxf' && !(s.widthMm > 0)) out.push('Enter the real width of the image in mm: sizes are never guessed');
   return out;
 }
 
@@ -70,7 +71,9 @@ export function stampProblems(t) {
 export function traceArgs(s, { preview = false } = {}) {
   if (!s.source) throw new Error('no source image');
   const a = { mode: s.mode };
-  if (s.source.kind === 'svg') a.svg = s.source.svg; else a.image_id = s.source.imageId;
+  if (s.source.kind === 'svg') a.svg = s.source.svg;
+  else if (s.source.kind === 'dxf') a.dxf = s.source.dxf;
+  else a.image_id = s.source.imageId;
   if (!s.autoThreshold && !s.adaptive) a.threshold = Math.max(1, Math.min(255, Math.round(s.threshold)));
   if (s.adaptive) a.adaptive = true;
   if (s.invert) a.invert = true;
