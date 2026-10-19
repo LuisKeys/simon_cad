@@ -122,3 +122,15 @@ test('threeMFFiles keeps .3mf files, any case', async () => {
   const files = [{ name: 'a.3mf' }, { name: 'b.3MF' }, { name: 'c.stl' }];
   assert.deepEqual(threeMFFiles(files).map((f) => f.name), ['a.3mf', 'b.3MF']);
 });
+
+test('objFiles keeps .obj files, any case, and OBJ asks for units like an STL', async () => {
+  const { objFiles, initImport } = await import('./import-stl.js');
+  assert.deepEqual(objFiles([{ name: 'a.obj' }, { name: 'b.OBJ' }, { name: 'c.stl' }]).map((f) => f.name), ['a.obj', 'b.OBJ']);
+  const sent = [];
+  const h = harness({ upload: async (f, o) => { sent.push(f.name + ':' + o.units); return { ok: true }; } });
+  let asked = 0;
+  h.ask = async () => { asked++; return { value: 'in' }; };
+  await initImport(h).importFiles([{ name: 'p.obj' }]);
+  assert.equal(asked, 1);
+  assert.deepEqual(sent, ['p.obj:in']);
+});

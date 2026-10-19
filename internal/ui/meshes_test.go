@@ -154,3 +154,22 @@ func Test3MFUploadImportsInMillimetres(t *testing.T) {
 		t.Fatalf("damaged 3MF: %d %v", code, out)
 	}
 }
+
+func TestOBJUploadImportsWithUnits(t *testing.T) {
+	srv, ts := testServer(t)
+	obj := "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nv 0 0 1\nv 1 0 1\nv 1 1 1\nv 0 1 1\n" +
+		"f 1 4 3 2\nf 5 6 7 8\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n"
+	code, out := post(t, ts.URL, srv.Token, "/api/mesh?name=box.obj&units=cm", []byte(obj))
+	if code != 200 || out["ok"] != true {
+		t.Fatalf("import: %d %v", code, out)
+	}
+	srv.Svc.mu.Lock()
+	node := srv.Svc.app.Graph.Get("box")
+	srv.Svc.mu.Unlock()
+	if node == nil || node.Type != "import_mesh" || node.Parameters["source"] != "box.obj" || node.Parameters["units"] != "cm" {
+		t.Fatalf("node: %+v", node)
+	}
+	if code, out := post(t, ts.URL, srv.Token, "/api/mesh?name=bad.obj", []byte("v 0 0 0\nf 1 2 3\n")); code != 400 {
+		t.Fatalf("bad OBJ: %d %v", code, out)
+	}
+}

@@ -216,12 +216,12 @@ func (s *Server) routes() {
 	})
 	m.HandleFunc("/api/mesh", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "POST the raw STL bytes with ?name=file.stl[&units=mm][&placement=file]", http.StatusMethodNotAllowed)
+			http.Error(w, "POST the raw STL, OBJ or 3MF bytes with ?name=file.stl[&units=mm][&placement=file]", http.StatusMethodNotAllowed)
 			return
 		}
 		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxMeshBytes+1))
 		if err != nil {
-			fail(w, fmt.Errorf("STL is larger than %d MB or unreadable", maxMeshBytes>>20))
+			fail(w, fmt.Errorf("mesh file is larger than %d MB or unreadable", maxMeshBytes>>20))
 			return
 		}
 		q := r.URL.Query()

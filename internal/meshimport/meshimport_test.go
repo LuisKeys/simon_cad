@@ -148,7 +148,7 @@ func TestRejects(t *testing.T) {
 		want string
 	}{
 		{"empty", nil, "empty"},
-		{"garbage", []byte("this is not a mesh at all, really not"), "not an STL"},
+		{"garbage", []byte("this is not a mesh at all, really not"), "not a mesh file"},
 		{"truncated binary", binarySTL(cube(vec{}, 2))[:200], "truncated"},
 		{"trailing bytes", append(binarySTL(cube(vec{}, 2)), 1, 2, 3), "trailing"},
 		{"nan", nan, "non-finite"},

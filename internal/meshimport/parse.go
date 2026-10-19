@@ -1,4 +1,4 @@
-// Package meshimport reads and validates triangle meshes (STL and 3MF) before they are allowed into a
+// Package meshimport reads and validates triangle meshes (STL, 3MF and OBJ) before they are allowed into a
 // project. A mesh is only accepted when it describes one closed, consistently oriented,
 // non-self-intersecting solid: anything weaker would make the B-Rep conversion in the kernel
 // fail late, or worse, succeed with a wrong shape. Accepted meshes are stored in a canonical
@@ -91,6 +91,10 @@ func parseAny(data []byte, maxTris int) (m *Mesh, format, unit string, err error
 		m, err = parseASCII(data, maxTris)
 		return m, "ascii", "", err
 	}
+	if looksOBJ(data) {
+		m, err = parseOBJ(data, maxTris)
+		return m, "obj", "", err
+	}
 	if len(data) >= 84 {
 		n := int(binary.LittleEndian.Uint32(data[80:84]))
 		if len(data) < 84+n*50 {
@@ -98,7 +102,7 @@ func parseAny(data []byte, maxTris int) (m *Mesh, format, unit string, err error
 		}
 		return nil, "", "", reject("binary STL has %d trailing bytes after its %d triangles", len(data)-84-n*50, n)
 	}
-	return nil, "", "", reject("not an STL file (neither a binary STL nor an ASCII one)")
+	return nil, "", "", reject("not a mesh file (it is neither an STL, a 3MF nor an OBJ)")
 }
 
 func looksASCII(data []byte) bool {

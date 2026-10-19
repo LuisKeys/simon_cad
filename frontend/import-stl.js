@@ -1,6 +1,6 @@
 // Importing a model: the toolbar button and dropping a file on the viewport. An STL is validated by
 // the server before it is kept (one closed, watertight, consistently oriented solid) and needs the
-// user to say its units; a 3MF gets the same validation but declares its units; a STEP file carries
+// user to say its units; an OBJ is checked the same way (polygons are triangulated) and also needs units; a 3MF gets the same validation but declares its units; a STEP file carries
 // exact geometry and its own units, so it is imported as it is. A refused file is explained in a toast and the model is not touched.
 
 export const UNIT_CHOICES = [
@@ -14,6 +14,11 @@ export const UNIT_CHOICES = [
 /** The .stl files of a FileList / array, in order. */
 export function stlFiles(files) {
   return [...(files ?? [])].filter((f) => /\.stl$/i.test(f.name ?? ''));
+}
+
+/** The .obj files of a FileList / array, in order. */
+export function objFiles(files) {
+  return [...(files ?? [])].filter((f) => /\.obj$/i.test(f.name ?? ''));
 }
 
 /** The .step and .stp files of a FileList / array, in order. */
@@ -55,11 +60,11 @@ export function initImport({ button, input, viewport, ask, confirm, toast, uploa
   let importing = false;
   async function importFiles(files) {
     // Files of any other kind are ignored; the dialog about units is only for meshes.
-    const list = [...(files ?? [])].filter((f) => stlFiles([f]).length || stepFiles([f]).length || threeMFFiles([f]).length);
+    const list = [...(files ?? [])].filter((f) => stlFiles([f]).length || objFiles([f]).length || stepFiles([f]).length || threeMFFiles([f]).length);
     if (!list.length || importing) return;
     let units = 'mm';
-    if (stlFiles(list).length) {
-      const r = await ask({ title: 'STL units (the file does not say)', value: 'mm', choices: UNIT_CHOICES, ok: 'Import' });
+    if (stlFiles(list).length || objFiles(list).length) {
+      const r = await ask({ title: 'Mesh units (the file does not say)', value: 'mm', choices: UNIT_CHOICES, ok: 'Import' });
       if (!r?.value) return;
       units = r.value;
     }

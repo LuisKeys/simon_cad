@@ -92,7 +92,7 @@ export async function uploadMesh(file, { units = '', placement = '', fillHoles =
   const res = await fetch(`/api/mesh?${q}`, { method: 'POST', headers: { 'X-Simon-Token': token }, body: file });
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
-  if (!res.ok) throw failure(data, res.status, `STL import failed (HTTP ${res.status})`);
+  if (!res.ok) throw failure(data, res.status, `Mesh import failed (HTTP ${res.status})`);
   return data;
 }
 

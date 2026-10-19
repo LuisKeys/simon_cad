@@ -227,6 +227,12 @@ content key and of the graph hash, and means a stored mesh that no longer matche
 (the node fails to rebuild) instead of silently changing the model. A save writes the meshes the graph
 still references and removes the rest. A reusable component carries its own meshes.
 
+An OBJ goes through the same path (`import_obj`, or the Import button) and, like an STL, has no units. Only
+`v` and `f` statements are read (positive or negative indices, `v/vt/vn` forms; quads and larger faces are
+triangulated by ear clipping in their own plane); normals, texture coordinates, groups and materials are
+ignored, and free-form curves or surfaces, unknown statements, bad indices and faces with no area are
+refused. The same solid as OBJ and STL shares one content id when their triangles are the same.
+
 A 3MF goes through the same path (`import_3mf`, or the Import button): `internal/meshimport` reads the
 ZIP, finds the root model part through `_rels/.rels`, applies component trees and build transforms
 (a mirroring transform reverses the winding), and converts the declared unit (micron to meter) to

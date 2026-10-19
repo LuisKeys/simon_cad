@@ -24,7 +24,7 @@ func orEmpty(e map[string]any) map[string]any {
 }
 
 func importTools() []*Tool {
-	return []*Tool{importSTL(), import3MF(), importSTEP(), decimateMesh()}
+	return []*Tool{importSTL(), importOBJ(), import3MF(), importSTEP(), decimateMesh()}
 }
 
 func importSTL() *Tool {
@@ -45,6 +45,29 @@ func importSTL() *Tool {
 			"fill_holes":  boolean("Close the holes of a mesh that is otherwise sound (a scan with gaps, a model without its base) by adding flat patches. Off by default because it invents surface: use it only when the user agrees after a refusal for holes. Refused anyway when the patches would add more than half the model's surface."),
 		})),
 		Plan: func(env Env, a Args) (*Plan, error) { return planMeshImport(env, a, ".stl") },
+	}
+}
+
+// importOBJ reads a Wavefront OBJ through the same validation and the same import_mesh node as an
+// STL. OBJ has no units, so they are asked like an STL's.
+func importOBJ() *Tool {
+	return &Tool{
+		Name: "import_obj",
+		Description: "Import a Wavefront OBJ file as a solid body. Only the polygon geometry is read (quads and larger faces are triangulated; normals, texture coordinates, groups and materials are ignored; curves and free-form surfaces are refused). " +
+			"The mesh goes through the same strict validation as an STL: it must be one closed (watertight), consistently oriented, manifold, non-self-intersecting solid within the triangle limit; a file that is not is refused with what is wrong and where, and the model is not changed. " +
+			"OBJ carries no units: ask the user if they are not obviously millimetres, and pass `units`. Give `path` (a file under the project, ./projects_output or ./out) or `mesh` (the id of a file the user already uploaded). " +
+			"A refusal that is only about holes can be retried with fill_holes=true if the user wants the holes closed. The imported body is a mesh-derived solid, like an STL import. `placement`: file (as authored), center (bounding box centred on the origin) or base (centred on X/Y, resting on Z=0).",
+		Capability: capGeometry,
+		Schema: object(withMeta(props{
+			"path":        text("Path of an .obj file."),
+			"mesh":        text("Id (mesh_...) of an OBJ file the user uploaded in the UI."),
+			"filename":    text("Original file name of an uploaded mesh, for display."),
+			"units":       orEmpty(enum("Length unit of the file (default mm).", "mm", "cm", "m", "in", "ft")),
+			"placement":   orEmpty(enum("Where to put the body (default file).", features.MeshPlacements...)),
+			"decimate_to": integer("Reduce the mesh to about this many triangles while importing it. Needs `path`. 0 or omitted: do not reduce.", 0, meshimport.DefaultMaxTriangles),
+			"fill_holes":  boolean("Close the holes of a mesh that is otherwise sound by adding flat patches. Off by default because it invents surface: use it only when the user agrees after a refusal for holes."),
+		})),
+		Plan: func(env Env, a Args) (*Plan, error) { return planMeshImport(env, a, ".obj") },
 	}
 }
 
@@ -71,7 +94,7 @@ func import3MF() *Tool {
 	}
 }
 
-// planMeshImport is the shared body of import_stl and import_3mf: ext is the file kind the tool takes.
+// planMeshImport is the shared body of import_stl, import_obj and import_3mf: ext is the file kind the tool takes.
 func planMeshImport(env Env, a Args, ext string) (*Plan, error) {
 	// Empty strings count as absent: models fill every field they know about.
 	if (a.Str("path") != "") == (a.Str("mesh") != "") {

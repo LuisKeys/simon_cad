@@ -18,7 +18,7 @@ const maxMeshBytes = meshimport.MaxBytes
 // (28 s for 72 000 triangles): it only sizes the progress bar.
 const meshBuildMicros = 450
 
-// ImportSTL validates an uploaded STL or 3MF file and adds it as a body. The file is checked before
+// ImportSTL validates an uploaded STL, OBJ or 3MF file and adds it as a body. The file is checked before
 // anything is kept: a mesh that is not one closed, consistently oriented, non-self-intersecting
 // solid is refused with what is wrong and where, and the model is not touched. An accepted
 // mesh goes in through the import_stl tool, like any other edit. With fillHoles the holes of the
@@ -27,10 +27,13 @@ const meshBuildMicros = 450
 func (s *Service) ImportSTL(name string, data []byte, units, placement string, fillHoles bool, decimateTo int) (Outcome, error) {
 	name = filepath.Base(strings.TrimSpace(name))
 	ext := strings.ToLower(filepath.Ext(name))
-	if ext != ".stl" && ext != ".3mf" {
-		return Outcome{}, fmt.Errorf("%q is not an .stl or .3mf file", name)
+	if ext != ".stl" && ext != ".obj" && ext != ".3mf" {
+		return Outcome{}, fmt.Errorf("%q is not an .stl, .obj or .3mf file", name)
 	}
 	tool := "import_stl"
+	if ext == ".obj" {
+		tool = "import_obj" // no units either: asked like an STL's
+	}
 	if ext == ".3mf" {
 		tool = "import_3mf" // states its own unit: converted to mm on reading
 		units = ""
