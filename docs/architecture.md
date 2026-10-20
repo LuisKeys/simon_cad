@@ -22,28 +22,71 @@ undoable · validatable · explainable. This is the PR checklist
 
 ## 2. The pipeline
 
-```
- intent (text + selection)
-        │
-        ▼
- ┌───────────────┐   system prompt + tool subset + context
- │ agent runtime │◄──────────────── capability (geometry)
- └──────┬────────┘
-        │ tool_use {name, JSON args}      (only registered tools are callable)
-        ▼
- ┌───────────────┐  1. JSON-schema validation
- │ tool registry │  2. semantic validation (ids exist, ranges, selectors resolve, fits the face…)
- └──────┬────────┘  3. Plan = ordered list of Commands + intent + explanation
-        ▼
- ┌───────────────┐  Propose: apply to a CLONE of the graph, collect inverses,
- │ ChangeSet mgr │  rebuild the clone, compute effects (volume Δ, added/removed/modified),
- └──────┬────────┘  run schema/semantic/rebuild/geometry checks
-        │ policy: auto | commit | preview
-        ▼
-   Commit → live CAD-IR graph → event bus → rebuild → checkpoint → save
-                                   │
-                                   ▼
-                      rebuild engine → OCCT (via cgo bridge) → STEP / STL
+```mermaid
+flowchart TD
+    A["Intent<br/>(text + selection)"]
+
+    B["Agent Runtime"]
+    C["Capability: Geometry<br/>System prompt + tool subset + context"]
+
+    D["Tool Registry"]
+    E["1. JSON-schema validation<br/>2. Semantic validation<br/>3. Plan: ordered Commands + intent + explanation"]
+
+    F["ChangeSet Manager"]
+    G["Propose:<br/>Apply to CLONE of graph<br/>Collect inverses<br/>Rebuild clone<br/>Compute effects: volume Δ, added/removed/modified<br/>Run schema, semantic, rebuild and geometry checks"]
+
+    H{"Policy"}
+    I["Auto"]
+    J["Commit"]
+    K["Preview"]
+
+    L["Live CAD-IR Graph"]
+    M["Event Bus"]
+    N["Rebuild"]
+    O["Checkpoint"]
+    P["Save"]
+
+    Q["Rebuild Engine"]
+    R["OCCT via cgo bridge"]
+    S["STEP / STL"]
+
+    A --> B
+    C -->|Capabilities| B
+    B -->|"tool_use: name + JSON args"| D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+
+    H --> I
+    H --> J
+    H --> K
+    K -->|Approved| J
+    I --> L
+    J --> L
+
+    L --> M
+    M --> N
+    N --> O
+    O --> P
+
+    M --> Q
+    Q --> R
+    R --> S
+
+    classDef input fill:#e3f2fd,stroke:#1976d2,color:#0d47a1
+    classDef agent fill:#e8eaf6,stroke:#3949ab,color:#1a237e
+    classDef validation fill:#fff3e0,stroke:#ef6c00,color:#e65100
+    classDef changes fill:#f3e5f5,stroke:#8e24aa,color:#4a148c
+    classDef pipeline fill:#e8f5e9,stroke:#388e3c,color:#1b5e20
+    classDef export fill:#e0f7fa,stroke:#00838f,color:#006064
+
+    class A input
+    class B,C agent
+    class D,E validation
+    class F,G,H,I,J,K changes
+    class L,M,N,O,P pipeline
+    class Q,R,S export
 ```
 
 `app.ApplyTool` is the single entry point that runs steps 1–3, proposes the ChangeSet, applies the
