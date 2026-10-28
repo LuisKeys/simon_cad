@@ -43,6 +43,8 @@ type Service struct {
 	// requests (default on; SIMONCAD_AUTONOMOUS=off disables it).
 	Autonomous bool
 	Clock      func() time.Time
+	// DownloadsDir is where viewport screenshots go (default ~/Downloads).
+	DownloadsDir string
 
 	mu    sync.Mutex
 	app   *app.App

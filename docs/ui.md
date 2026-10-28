@@ -191,8 +191,12 @@ backlog item "round only the outer edges after pocketing".
   tool takes one target (move, rotate, scale); duplicate and align send the whole selection as one
   ChangeSet. Face actions take one face per body (a second face of the same body is picked again on
   the result).
-- **Top bar:** project-name menu (New / Open), Undo, Redo, Save, Export, Help, Shortcuts and an overflow
+- **Top bar:** project-name menu (New / Open), Undo, Redo, Save, Export, Screenshot, Help, Shortcuts and an overflow
   menu (command palette, keyboard shortcuts, agent level). Panels can be hidden from the bar's outer buttons.
+- **Screenshot:** saves the whole viewport as shown as one PNG in `~/Downloads`, named
+  `<project>_<YYYYMMDD-HHMMSS>.png` (`_2`, `_3`… rather than overwrite). In Quad the four views go
+  into the one image with their names, gizmos and split lines (`frontend/screenshot.js` composes
+  the shared canvas with the DOM overlays; `POST /api/screenshot` writes the file).
 - **Panels:** the design tree (left) and Simon Agent (right) are resizable (drag the splitter,
   arrow keys when focused, double-click to reset) and collapsible; sizes persist in `localStorage`.
   The tree collapses first on narrow screens; below 760 px the panels become overlays.

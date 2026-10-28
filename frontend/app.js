@@ -1,7 +1,7 @@
 // Simon CAD UI: panels over the ui.Service API. Every mutation here is a call that ends in
 // the tool registry (prompt, tool, parameter edit) or the ChangeSet lifecycle (commit,
 // reject, undo, redo, restore); the UI has no other way to change the model.
-import { api, apiBytes, subscribe, h, materialUrl, imageUrl, uploadMesh, uploadStep } from './api.js';
+import { api, apiBytes, subscribe, h, materialUrl, imageUrl, uploadMesh, uploadStep, uploadScreenshot } from './api.js';
 import { toast } from './toast.js';
 import { $ } from './dom.js';
 import { showMenu } from './menu.js';
@@ -31,6 +31,7 @@ import { initPrintSim } from './printsim-panel.js';
 import { markdown } from './markdown.js';
 import { initImport } from './import-stl.js';
 import { createBusy } from './busy.js';
+import { captureViewport } from './screenshot.js';
 
 const S = { state: null, previewing: null, playing: false, paletteAll: [], busyScene: false, level: 'review', filter: 'auto',
   openNode: null, renaming: null, histSel: null, histOpen: getPref('history', true) };
@@ -1652,6 +1653,16 @@ $('btn-export').addEventListener('click', async () => {
     toast(o.ok ? `Exported ${path} (${o.data?.bytes ?? '?'} bytes, valid solid)` : o.error, o.ok ? 'ok' : 'bad');
   } catch (e) { toast(e.message, 'bad'); }
 });
+$('btn-screenshot').addEventListener('click', async () => {
+  const btn = $('btn-screenshot');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const o = await uploadScreenshot(await captureViewport(vp));
+    toast(`Screenshot saved: ${o.path}`, 'ok');
+  } catch (e) { toast(e.message, 'bad'); }
+  finally { btn.disabled = false; }
+});
 
 // ---- command palette -------------------------------------------------------------------
 
@@ -1662,6 +1673,7 @@ function paletteCommand(id) {
     case 'redo': return doRedo();
     case 'save': return save();
     case 'export_step': case 'export_stl': return $('btn-export').click();
+    case 'screenshot': return $('btn-screenshot').click();
     case 'playback': return playDesign();
     case 'print_simulation': return printsim.toggle();
     case 'new': return newProject();

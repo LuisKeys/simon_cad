@@ -216,8 +216,11 @@ Primitivas:
 - **Previsualización de ChangeSet:** fantasma translúcido, cuerpos reemplazados atenuados, lista de
   comandos, advertencias, validaciones y delta de volumen.
 - **Edición inline** de dimensiones desde etiquetas del viewport y del panel de Selección.
-- **Barra superior:** proyecto (Nuevo / Abrir), Undo, Redo, Guardar, Exportar, Ayuda, atajos, menú
+- **Barra superior:** proyecto (Nuevo / Abrir), Undo, Redo, Guardar, Exportar, Captura, Ayuda, atajos, menú
   de desbordamiento.
+- **Captura (Screenshot):** guarda el viewport completo como un PNG en `~/Downloads` con el nombre
+  del proyecto y la hora (`<proyecto>_<AAAAMMDD-HHMMSS>.png`); en Quad, las cuatro vistas en una
+  sola imagen.
 - **Paneles** redimensionables y colapsables (tamaños persistentes); overlays en pantallas estrechas.
 - **Soporte táctil:** controles de 40–44 px, pulsación larga = menú contextual.
 - **Ajustes** con navegación por secciones: Modelo primario, Modelo de fallback, Routing, Configuración de

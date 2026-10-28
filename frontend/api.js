@@ -81,6 +81,15 @@ export async function uploadStep(file, { placement = '' } = {}) {
   return data;
 }
 
+// Saves a PNG capture of the viewport to the Downloads folder; resolves to {path, width, height, bytes}.
+export async function uploadScreenshot(blob) {
+  const res = await fetch('/api/screenshot', { method: 'POST', headers: { 'X-Simon-Token': token }, body: blob });
+  let data = null;
+  try { data = await res.json(); } catch { /* empty body */ }
+  if (!res.ok) throw failure(data, res.status, `screenshot failed (HTTP ${res.status})`);
+  return data;
+}
+
 // Uploads an STL file. The server validates it first (it must be one closed, watertight solid) and
 // only then adds it as a body; a refused file rejects with the reasons (code "mesh_has_holes" when
 // holes are the only fault: retry with fillHoles). Resolves to the tool outcome.

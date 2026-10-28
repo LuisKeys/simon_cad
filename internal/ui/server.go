@@ -242,6 +242,19 @@ func (s *Server) routes() {
 		o, err := s.Svc.ImportSTEP(q.Get("name"), b, q.Get("placement"))
 		reply(w, o, err)
 	})
+	m.HandleFunc("/api/screenshot", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST the raw PNG bytes of the viewport", http.StatusMethodNotAllowed)
+			return
+		}
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxScreenshotBytes+1))
+		if err != nil {
+			fail(w, fmt.Errorf("screenshot is larger than %d MB or unreadable", MaxScreenshotBytes>>20))
+			return
+		}
+		o, err := s.Svc.SaveScreenshot(b)
+		reply(w, o, err)
+	})
 	m.HandleFunc("/api/interpretation/close", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			ID string `json:"id"`

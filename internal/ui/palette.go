@@ -52,6 +52,7 @@ func (s *Service) Palette() []PaletteEntry {
 		{ID: "save", Title: "Save project", Description: "Write the .scadproj directory"},
 		{ID: "export_step", Title: "Export STEP", Description: "Write a validated STEP file"},
 		{ID: "export_stl", Title: "Export STL", Description: "Write a watertight STL for printing"},
+		{ID: "screenshot", Title: "Screenshot", Description: "Save the whole viewport (all views in Quad) as a PNG in Downloads"},
 		{ID: "playback", Title: "Play back the design", Description: "Replay the build feature by feature"},
 		{ID: "print_simulation", Title: "Print simulation", Description: "Slice the model and watch it being 3D printed, layer by layer"},
 		{ID: "new", Title: "New project", Description: "Start an empty project"},
