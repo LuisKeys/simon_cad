@@ -265,3 +265,9 @@ third_party/           (git-ignored) local Go toolchain and OCCT build
 - The desktop shell is a loopback web server for now; the Wails build is not done (see docs/ui.md).
 - Agent evals in `testdata/agent` use hand-scripted recordings; live pass rates are unmeasured.
 - API keys come from the environment/`.env`, not an OS keychain.
+
+## License
+
+Simon CAD is distributed under the [MIT License](LICENSE).
+
+Third-party components keep their own licenses: three.js (MIT, `frontend/vendor/THREE-LICENSE`), the PBR material textures in `materials/` (CC0-1.0, several from ambientCG), and OpenCascade (OCCT, LGPL 2.1 with exception), which is built locally by `make occt` and linked dynamically, not redistributed in this repository.
